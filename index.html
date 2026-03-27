@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NVDP</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+  <style>
+    #gate {
+      position: fixed; inset: 0; z-index: 99999;
+      background: linear-gradient(135deg, #0b0e17 0%, #111628 50%, #0b0e17 100%);
+      display: flex; align-items: center; justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    #gate .gate-box {
+      background: rgba(20, 24, 42, 0.85);
+      border: 1px solid rgba(46, 134, 193, 0.15);
+      border-radius: 16px; padding: 3rem 2.5rem;
+      backdrop-filter: blur(24px);
+      box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+      text-align: center; max-width: 420px; width: 90%;
+    }
+    #gate .badge {
+      display: inline-block; padding: 4px 14px; border-radius: 20px;
+      font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+      background: rgba(46, 134, 193, 0.15); color: #2E86C1;
+      margin-bottom: 1.2rem;
+    }
+    #gate h1 {
+      color: #e8e8ec; font-size: 1.6rem; font-weight: 700; letter-spacing: -0.5px;
+      margin-bottom: 0.3rem;
+    }
+    #gate h1 span { color: #2E86C1; }
+    #gate .subtitle {
+      color: #6a6a82; font-size: 0.9rem; margin-bottom: 0.5rem; line-height: 1.5;
+    }
+    #gate .divider {
+      width: 40px; height: 2px; background: rgba(46, 134, 193, 0.3);
+      margin: 1.2rem auto; border-radius: 1px;
+    }
+    #gate .access-label {
+      color: #8a8a9a; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; margin-bottom: 0.6rem;
+    }
+    #gate input {
+      width: 100%; padding: 0.85rem 1rem;
+      background: rgba(11, 14, 23, 0.7);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px; color: #e8e8ec; font-size: 1rem;
+      outline: none; transition: border-color 0.25s;
+      text-align: center; letter-spacing: 2px;
+    }
+    #gate input:focus {
+      border-color: #2E86C1;
+      box-shadow: 0 0 16px rgba(46, 134, 193, 0.12);
+    }
+    #gate button {
+      margin-top: 1rem; width: 100%; padding: 0.85rem;
+      background: #2E86C1; border: none; border-radius: 10px;
+      color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
+      transition: transform 0.15s, background 0.2s;
+    }
+    #gate button:hover { background: #2474a8; transform: translateY(-1px); }
+    #gate .error { color: #E74C3C; font-size: 0.85rem; margin-top: 0.75rem; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+
+<!-- ═══ BETA GATE ═══ -->
+<div id="gate">
+  <div class="gate-box">
+    <div class="badge">Closed Beta</div>
+    <h1>NVDP</h1>
+    <p class="subtitle">Sidan är under uppbyggnad och tillgänglig<br>enbart för beta-testare.</p>
+    <div class="divider"></div>
+    <p class="access-label">Ange åtkomstkod</p>
+    <input type="password" id="gate-pw" placeholder="&#8226;&#8226;&#8226;&#8226;" autofocus
+           onkeydown="if(event.key==='Enter')checkGate()">
+    <button onclick="checkGate()">Öppna</button>
+    <div class="error" id="gate-error"></div>
+  </div>
+</div>
+
+<!-- ═══ AUTH VIEW ═══ -->
+<div id="auth-view" class="auth-container" style="display:none;">
+  <div class="auth-box">
+    <h1 id="auth-title">Logga in</h1>
+    <p class="subtitle">NVDP</p>
+    <div id="auth-error" class="error-msg hidden"></div>
+    <form id="auth-form">
+      <div id="auth-name-group" class="form-group hidden">
+        <label>Namn</label>
+        <input type="text" id="auth-name" placeholder="Niklas eller Love">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="auth-email" required placeholder="din@email.com">
+      </div>
+      <div class="form-group">
+        <label>Lösenord</label>
+        <input type="password" id="auth-password" required placeholder="Minst 6 tecken" minlength="6">
+      </div>
+      <button type="submit" class="btn btn-primary" id="auth-submit">Logga in</button>
+    </form>
+    <p class="toggle-link">
+      <span id="auth-toggle-text">Inget konto?</span>
+      <a id="auth-toggle" onclick="toggleAuthMode()">Skapa konto</a>
+    </p>
+  </div>
+</div>
+
+<!-- ═══ APP SHELL ═══ -->
+<div id="app" class="app">
+
+  <!-- Top Bar -->
+  <header class="topbar">
+    <div class="logo">NVDP</div>
+    <div class="user-info">
+      <span id="user-name"></span>
+      <div class="avatar" id="user-avatar"></div>
+      <button onclick="logout()">Logga ut</button>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <main class="content">
+
+    <!-- ── DASHBOARD ── -->
+    <section id="view-dashboard" class="view">
+      <div class="page-header">
+        <h2 id="dash-greeting">Hej!</h2>
+        <p id="dash-date"></p>
+      </div>
+
+      <div class="card today-card">
+        <div class="card-header"><span class="card-title">Dagens pass</span></div>
+        <div id="today-content"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">Veckans schema</span></div>
+        <div id="dash-week-schedule"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Denna vecka</span>
+          <span id="compliance-pct" class="text-sm" style="font-weight:700;"></span>
+        </div>
+        <div id="week-dots-container" class="week-dots"></div>
+        <div class="compliance-bar">
+          <div class="compliance-track"><div id="compliance-fill" class="compliance-fill" style="width:0%;background:var(--green);"></div></div>
+          <div class="compliance-label"><span id="compliance-text"></span><span id="compliance-target"></span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">Senaste pass</span></div>
+        <div id="recent-workouts"></div>
+      </div>
+    </section>
+
+    <!-- ── LOG WORKOUT ── -->
+    <section id="view-log" class="view">
+      <div class="page-header">
+        <h2>Logga pass</h2>
+        <p>Registrera din träning</p>
+      </div>
+
+      <div id="log-form-container">
+        <div class="card">
+          <form id="log-form">
+            <div class="form-group">
+              <label>Datum</label>
+              <input type="date" id="log-date" required>
+            </div>
+            <div class="form-group">
+              <label>Aktivitet</label>
+              <select id="log-type" required>
+                <option value="">Välj typ...</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Tid (minuter)</label>
+              <input type="number" id="log-minutes" required min="1" max="600" placeholder="45">
+            </div>
+            <div class="form-group">
+              <label>Distans (km, valfritt)</label>
+              <input type="number" id="log-distance" min="0" max="999" step="0.1" placeholder="5.0">
+            </div>
+            <div class="form-group">
+              <label>Intensitet (valfritt)</label>
+              <div class="intensity-pills" id="intensity-pills">
+                <button type="button" class="intensity-pill" data-value="Z2">Z2</button>
+                <button type="button" class="intensity-pill" data-value="Kvalitet">Kvalitet</button>
+                <button type="button" class="intensity-pill" data-value="Annat">Annat</button>
+              </div>
+              <input type="hidden" id="log-intensity" value="">
+            </div>
+            <div class="form-group">
+              <label>Anteckning (valfritt)</label>
+              <textarea id="log-notes" placeholder="Hur kändes det?"></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Spara pass</button>
+          </form>
+        </div>
+      </div>
+
+      <div id="log-success" class="log-success hidden">
+        <div class="check">&#10003;</div>
+        <h3>Pass sparat!</h3>
+        <p id="log-success-text"></p>
+        <button class="btn btn-ghost mt-16" onclick="resetLogForm()">Logga ett till</button>
+      </div>
+    </section>
+
+    <!-- ── SCHEMA ── -->
+    <section id="view-schema" class="view">
+      <div class="page-header">
+        <h2>Veckoschema</h2>
+        <p>Planerat vs faktiskt</p>
+      </div>
+
+      <div class="schema-tabs" id="schema-person-tabs"></div>
+
+      <div class="schema-week-nav">
+        <button onclick="schemaWeekPrev()">&#9664; Förra</button>
+        <span class="schema-week-label" id="schema-week-label"></span>
+        <button onclick="schemaWeekNext()">Nästa &#9654;</button>
+      </div>
+
+      <div id="schema-content"></div>
+    </section>
+
+    <!-- ── TRENDS ── -->
+    <section id="view-trends" class="view">
+      <div class="page-header">
+        <h2>Trender</h2>
+        <p>Träningsvolym över tid</p>
+      </div>
+
+      <div class="toggle-row">
+        <button class="toggle-btn active" id="toggle-cardio" onclick="setTrendMode('cardio')">Bara Cardio</button>
+        <button class="toggle-btn" id="toggle-total" onclick="setTrendMode('total')">Cardio + Gym</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title mb-8">Timmar per vecka</div>
+        <div class="chart-container"><canvas id="chart-weekly"></canvas></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title mb-8">Niklas — Aktivitetsmix</div>
+        <div class="chart-container"><canvas id="chart-mix-niklas"></canvas></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title mb-8">Love — Aktivitetsmix</div>
+        <div class="chart-container"><canvas id="chart-mix-love"></canvas></div>
+      </div>
+    </section>
+
+    <!-- ── COMPARE ── -->
+    <section id="view-compare" class="view">
+      <div class="page-header">
+        <h2>Jämför</h2>
+        <p>Head-to-head</p>
+      </div>
+
+      <div class="compare-grid mb-16">
+        <div class="card compare-card niklas">
+          <div class="person-name" style="color:var(--accent);">Niklas</div>
+          <div class="big-number" id="cmp-niklas-hours" style="color:var(--accent);">—</div>
+          <div class="unit">timmar denna vecka</div>
+        </div>
+        <div class="card compare-card love">
+          <div class="person-name" style="color:var(--accent-love);">Love</div>
+          <div class="big-number" id="cmp-love-hours" style="color:var(--accent-love);">—</div>
+          <div class="unit">timmar denna vecka</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Timmar per vecka</span>
+          <div class="toggle-row" style="margin:0;">
+            <button class="toggle-btn active" id="cmp-toggle-cardio" onclick="setCmpChartMode('cardio')">Cardio</button>
+            <button class="toggle-btn" id="cmp-toggle-total" onclick="setCmpChartMode('total')">Cardio + Gym</button>
+          </div>
+        </div>
+        <div class="chart-container"><canvas id="chart-compare-weekly"></canvas></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title mb-8">Säsongstotaler (timmar)</div>
+        <div id="compare-bars"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title mb-8">Denna vecka — aktivitetsmix</div>
+        <div id="compare-mix"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Streak</span>
+        </div>
+        <div id="compare-streaks"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Bottom Nav -->
+  <nav class="bottom-nav">
+    <a class="nav-item" data-view="dashboard" onclick="navigate('dashboard')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      Hem
+    </a>
+    <a class="nav-item" data-view="schema" onclick="navigate('schema')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      Schema
+    </a>
+    <a class="nav-item log-btn" data-view="log" onclick="navigate('log')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Logga
+    </a>
+    <a class="nav-item" data-view="trends" onclick="navigate('trends')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Trender
+    </a>
+    <a class="nav-item" data-view="compare" onclick="navigate('compare')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Jämför
+    </a>
+  </nav>
+
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+<script>
+const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
+async function sha256(m) {
+  const d = new TextEncoder().encode(m);
+  const h = await crypto.subtle.digest("SHA-256", d);
+  return Array.from(new Uint8Array(h)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+async function checkGate() {
+  const v = document.getElementById("gate-pw").value;
+  const h = await sha256(v);
+  if (h === GATE_HASH) {
+    document.getElementById("gate").style.display = "none";
+    sessionStorage.setItem("gate_passed", "1");
+    bootApp();
+  } else {
+    document.getElementById("gate-error").textContent = "Fel kod. Försök igen.";
+    document.getElementById("gate-pw").value = "";
+    document.getElementById("gate-pw").focus();
+  }
+}
+function bootApp() {
+  document.getElementById("auth-view").style.display = "flex";
+}
+if (sessionStorage.getItem("gate_passed") === "1") {
+  document.getElementById("gate").style.display = "none";
+  bootApp();
+}
+</script>
+</body>
+</html>
