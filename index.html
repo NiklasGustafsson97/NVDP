@@ -173,9 +173,15 @@
       <div id="log-form-container">
         <div class="card">
           <form id="log-form">
-            <div class="form-group">
-              <label>Datum</label>
-              <input type="date" id="log-date" required>
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label>Datum</label>
+                <input type="date" id="log-date" required>
+              </div>
+              <div class="form-group flex-1">
+                <label>Tid</label>
+                <input type="time" id="log-time">
+              </div>
             </div>
             <div class="form-group">
               <label>Aktivitet</label>
@@ -369,8 +375,23 @@
 
 </div>
 
-<script src="js/config.js?v=6"></script>
-<script src="js/app.js?v=6"></script>
+<!-- ═══ WORKOUT DETAIL MODAL ═══ -->
+<div id="workout-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeWorkoutModal()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="wm-title">Pass</h3>
+      <button class="btn-close" onclick="closeWorkoutModal()">&times;</button>
+    </div>
+    <div id="wm-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary btn-sm" onclick="editWorkout()">Redigera</button>
+      <button class="btn btn-sm" style="background:var(--red);color:#fff;" onclick="deleteWorkout()">Ta bort</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/config.js?v=7"></script>
+<script src="js/app.js?v=7"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {

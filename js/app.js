@@ -14,6 +14,8 @@ let schemaPersonIdx = 0;
 let schemaWeekOffset = 0;
 let trendMode = 'cardio';
 let chartWeekly = null;
+let selectedWorkout = null;
+let editingWorkoutId = null;
 
 // ── Day Names ──
 const DAY_NAMES = ['Mån', 'Tis', 'Ons', 'Tors', 'Fre', 'Lör', 'Sön'];
@@ -444,7 +446,7 @@ async function _loadDashboard() {
       const distStr = w.distance_km ? ` | ${w.distance_km} km` : '';
       const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
       return `
-      <div class="workout-item">
+      <div class="workout-item clickable" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
         <div class="workout-icon" style="background:${ACTIVITY_COLORS[w.activity_type] || '#555'}22;">
           ${activityEmoji(w.activity_type)}
         </div>
@@ -470,6 +472,56 @@ function activityEmoji(type) {
 }
 
 // ═══════════════════════
+//  WORKOUT MODAL (Edit / Delete)
+// ═══════════════════════
+function openWorkoutModal(w) {
+  selectedWorkout = w;
+  document.getElementById('wm-title').textContent = w.activity_type + ' — ' + formatDate(w.workout_date);
+  const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
+  let body = '';
+  body += `<div class="modal-detail-row"><span class="mdr-label">Aktivitet</span><span class="mdr-value">${w.activity_type} ${intBadge}</span></div>`;
+  body += `<div class="modal-detail-row"><span class="mdr-label">Datum</span><span class="mdr-value">${w.workout_date}</span></div>`;
+  body += `<div class="modal-detail-row"><span class="mdr-label">Tid</span><span class="mdr-value">${w.duration_minutes} min</span></div>`;
+  if (w.distance_km) body += `<div class="modal-detail-row"><span class="mdr-label">Distans</span><span class="mdr-value">${w.distance_km} km</span></div>`;
+  if (w.workout_time) body += `<div class="modal-detail-row"><span class="mdr-label">Klockslag</span><span class="mdr-value">${w.workout_time}</span></div>`;
+  if (w.notes && w.notes !== 'Importerad') body += `<div class="modal-detail-row"><span class="mdr-label">Anteckning</span><span class="mdr-value">${w.notes}</span></div>`;
+  document.getElementById('wm-body').innerHTML = body;
+  document.getElementById('workout-modal').classList.remove('hidden');
+}
+
+function closeWorkoutModal() {
+  document.getElementById('workout-modal').classList.add('hidden');
+  selectedWorkout = null;
+}
+
+function editWorkout() {
+  if (!selectedWorkout) return;
+  closeWorkoutModal();
+  editingWorkoutId = selectedWorkout.id;
+  navigate('log');
+  document.getElementById('log-date').value = selectedWorkout.workout_date;
+  document.getElementById('log-time').value = selectedWorkout.workout_time || '';
+  document.getElementById('log-type').value = selectedWorkout.activity_type;
+  document.getElementById('log-minutes').value = selectedWorkout.duration_minutes;
+  document.getElementById('log-distance').value = selectedWorkout.distance_km || '';
+  document.getElementById('log-notes').value = selectedWorkout.notes === 'Importerad' ? '' : (selectedWorkout.notes || '');
+  document.querySelectorAll('.intensity-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.value === selectedWorkout.intensity);
+  });
+  document.getElementById('log-intensity').value = selectedWorkout.intensity || '';
+  document.getElementById('log-form').querySelector('[type="submit"]').textContent = 'Uppdatera pass';
+}
+
+async function deleteWorkout() {
+  if (!selectedWorkout) return;
+  if (!confirm('Ta bort detta pass?')) return;
+  const { error } = await sb.from('workouts').delete().eq('id', selectedWorkout.id);
+  if (error) { alert('Kunde inte ta bort: ' + error.message); return; }
+  closeWorkoutModal();
+  navigate(currentView);
+}
+
+// ═══════════════════════
 //  LOG WORKOUT
 // ═══════════════════════
 document.querySelectorAll('.intensity-pill').forEach(pill => {
@@ -489,6 +541,7 @@ document.querySelectorAll('.intensity-pill').forEach(pill => {
 document.getElementById('log-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const date = document.getElementById('log-date').value;
+  const time = document.getElementById('log-time').value || null;
   const type = document.getElementById('log-type').value;
   const mins = parseInt(document.getElementById('log-minutes').value);
   const distRaw = document.getElementById('log-distance').value;
@@ -503,16 +556,25 @@ document.getElementById('log-form').addEventListener('submit', async (e) => {
     duration_minutes: mins,
     notes: notes || null
   };
+  if (time) row.workout_time = time;
   if (distance !== null) row.distance_km = distance;
   if (intensity) row.intensity = intensity;
 
-  const { error } = await sb.from('workouts').insert(row);
+  let error;
+  if (editingWorkoutId) {
+    const res = await sb.from('workouts').update(row).eq('id', editingWorkoutId);
+    error = res.error;
+  } else {
+    const res = await sb.from('workouts').insert(row);
+    error = res.error;
+  }
 
   if (error) {
     alert('Kunde inte spara: ' + error.message);
     return;
   }
 
+  editingWorkoutId = null;
   document.getElementById('log-form-container').classList.add('hidden');
   document.getElementById('log-success').classList.remove('hidden');
   const intLabel = intensity ? ` (${intensity})` : '';
@@ -520,12 +582,15 @@ document.getElementById('log-form').addEventListener('submit', async (e) => {
 });
 
 function resetLogForm() {
+  editingWorkoutId = null;
   document.getElementById('log-form-container').classList.remove('hidden');
   document.getElementById('log-success').classList.add('hidden');
   document.getElementById('log-form').reset();
   document.getElementById('log-date').value = isoDate(new Date());
+  document.getElementById('log-time').value = '';
   document.getElementById('log-intensity').value = '';
   document.querySelectorAll('.intensity-pill').forEach(p => p.classList.remove('active'));
+  document.getElementById('log-form').querySelector('[type="submit"]').textContent = 'Spara pass';
 }
 
 // ═══════════════════════
@@ -566,12 +631,7 @@ async function loadSchema() {
   let plans = [];
   if (period) plans = await fetchPlans(period.id);
 
-  // Previous week for delta
-  const prevMonday = addDays(targetMonday, -7);
-  const prevSunday = addDays(prevMonday, 6);
-  const prevWorkouts = await fetchWorkouts(profile?.id, isoDate(prevMonday), isoDate(prevSunday));
-
-  renderSchema(workouts, plans, prevWorkouts, targetMonday, deload);
+  renderSchema(workouts, plans, targetMonday, deload);
 }
 
 function schemaWeekPrev() {
@@ -585,9 +645,56 @@ function schemaWeekPrev() {
 }
 function schemaWeekNext() { schemaWeekOffset++; loadSchema(); }
 
-function renderSchema(workouts, plans, prevWorkouts, monday, isDeload) {
+function getWeekIndexInPeriod(monday) {
+  const p1Start = new Date(P1_START);
+  const p2Start = new Date(P2_START);
+  const md = new Date(monday);
+  let periodStart;
+  if (md >= p2Start) periodStart = p2Start;
+  else periodStart = p1Start;
+  return Math.floor((md - periodStart) / (7 * 86400000));
+}
+
+function getBuildWeekIndex(weekIdx) {
+  let build = 0;
+  for (let i = 0; i < weekIdx; i++) {
+    if ((i + 1) % 4 !== 0) build++;
+  }
+  return build;
+}
+
+function scaleDuration(desc, factor) {
+  if (!desc) return desc;
+  return desc.replace(/(\d+)([–\-])(\d+)(\s*min)/g, (_, lo, dash, hi, suffix) => {
+    return Math.round(parseInt(lo) * factor) + dash + Math.round(parseInt(hi) * factor) + suffix;
+  }).replace(/(?<!\d[–\-])(\d+)(\s*min)(?![^(]*\))/g, (_, num, suffix) => {
+    return Math.round(parseInt(num) * factor) + suffix;
+  });
+}
+
+function projectPlan(plan, weekIdx, isDeload) {
+  if (!plan || plan.is_rest) return plan;
+  const buildIdx = getBuildWeekIndex(weekIdx);
+  const factor = isDeload ? 0.7 : Math.pow(1.08, buildIdx);
+  const projected = { ...plan };
+  projected.label = stripDayPrefix(plan.label);
+  projected.description = scaleDuration(plan.description, factor);
+
+  if (!isDeload && buildIdx >= 4 && plan.day_of_week === 4) {
+    projected.label = 'Kvalitet';
+    const baseDesc = plan.description || '';
+    projected.description = scaleDuration(
+      baseDesc.replace(/lugn[a]?\s*/i, '').replace(/Z1[–\-]?Z2|Z2/i, 'inkl intervaller'),
+      factor
+    );
+  }
+  return projected;
+}
+
+function renderSchema(workouts, plans, monday, isDeload) {
   const container = document.getElementById('schema-content');
   const todayStr = isoDate(new Date());
+  const weekIdx = getWeekIndexInPeriod(monday);
 
   let html = '<div class="schema-table">';
   html += `<div class="schema-row header">
@@ -600,7 +707,8 @@ function renderSchema(workouts, plans, prevWorkouts, monday, isDeload) {
   for (let i = 0; i < 7; i++) {
     const dayDate = addDays(monday, i);
     const dayStr = isoDate(dayDate);
-    const plan = plans.find(p => p.day_of_week === i);
+    const basePlan = plans.find(p => p.day_of_week === i);
+    const plan = projectPlan(basePlan, weekIdx, isDeload);
     const dayWorkouts = workouts.filter(w => w.workout_date === dayStr);
     const isToday = dayStr === todayStr;
     const isFuture = dayDate > new Date();
@@ -612,60 +720,25 @@ function renderSchema(workouts, plans, prevWorkouts, monday, isDeload) {
     else if (!isFuture) statusClass = 'missed';
 
     const actualText = dayWorkouts.length > 0
-      ? dayWorkouts.map(w => w.activity_type + (w.intensity ? ` <span class="intensity-badge">${w.intensity}</span>` : '')).join(', ')
+      ? dayWorkouts.map(w => {
+          const intB = w.intensity ? ` <span class="intensity-badge">${w.intensity}</span>` : '';
+          return `<span class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>${w.activity_type}${intB}</span>`;
+        }).join(', ')
       : (plan?.is_rest ? '<span class="vila">Vila</span>' : (isFuture ? '—' : '<span style="color:var(--red);">Missat</span>'));
+
+    const planLabel = plan ? (plan.is_rest ? 'Vila' : plan.label) : '—';
+    const planDesc = plan?.description ? `<span class="plan-desc">${plan.description}</span>` : '';
 
     html += `<div class="schema-row" style="${isToday ? 'background:rgba(46,134,193,0.06);' : ''}">
       <div class="schema-cell day">${DAY_NAMES[i]}</div>
-      <div class="schema-cell plan">${plan ? (plan.is_rest ? 'Vila' : plan.label) : '—'}</div>
+      <div class="schema-cell plan">${planLabel}${planDesc ? '<br>' + planDesc : ''}</div>
       <div class="schema-cell actual"><span class="status-dot ${statusClass}"></span>${actualText}</div>
       <div class="schema-cell mins">${totalMins > 0 ? totalMins : ''}</div>
     </div>`;
   }
   html += '</div>';
 
-  // Summaries
-  const sumByType = {};
-  workouts.forEach(w => { sumByType[w.activity_type] = (sumByType[w.activity_type] || 0) + w.duration_minutes; });
-  const prevSumByType = {};
-  prevWorkouts.forEach(w => { prevSumByType[w.activity_type] = (prevSumByType[w.activity_type] || 0) + w.duration_minutes; });
-
-  const totalCardio = workouts.filter(w => CARDIO_TYPES.includes(w.activity_type)).reduce((s, w) => s + w.duration_minutes, 0);
-  const prevCardio = prevWorkouts.filter(w => CARDIO_TYPES.includes(w.activity_type)).reduce((s, w) => s + w.duration_minutes, 0);
-  const totalAll = workouts.reduce((s, w) => s + w.duration_minutes, 0);
-  const prevAll = prevWorkouts.reduce((s, w) => s + w.duration_minutes, 0);
-
-  html += '<div class="schema-summary">';
-  const types = [...new Set([...Object.keys(sumByType), ...Object.keys(prevSumByType)])].sort();
-  types.forEach(t => {
-    const val = sumByType[t] || 0;
-    const prev = prevSumByType[t] || 0;
-    html += summaryRowHTML(t, val, prev, isDeload);
-  });
-  html += summaryRowHTML('Cardio totalt', totalCardio, prevCardio, isDeload, true);
-  html += summaryRowHTML('Totalt', totalAll, prevAll, isDeload, true);
-  html += '</div>';
-
   container.innerHTML = html;
-}
-
-function summaryRowHTML(label, value, prev, isDeload, isTotal) {
-  const delta = prev > 0 ? (value - prev) / prev : 0;
-  const deltaStr = prev > 0 ? ((delta >= 0 ? '+' : '') + Math.round(delta * 100) + '%') : '';
-  let deltaClass = '';
-  if (prev > 0 && deltaStr) {
-    if (isDeload) {
-      deltaClass = delta <= -0.2 ? 'delta-good' : 'delta-warn';
-    } else {
-      if (delta > 0.1) deltaClass = 'delta-warn';
-      else if (delta > 0) deltaClass = 'delta-up';
-      else deltaClass = 'delta-down';
-    }
-  }
-  return `<div class="summary-row${isTotal ? ' total' : ''}">
-    <span class="label">${label}</span>
-    <span class="value">${value > 0 ? value + ' min' : '—'} <span class="delta ${deltaClass}">${deltaStr}</span></span>
-  </div>`;
 }
 
 // ═══════════════════════

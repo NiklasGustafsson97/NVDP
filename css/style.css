@@ -248,6 +248,9 @@ select option { background: #1a1a2e; color: var(--text); }
 .schema-cell .status-dot.rest { background: var(--text-dim); }
 .schema-cell .status-dot.future { background: var(--border); }
 .schema-cell .vila { color: var(--text-dim); }
+.schema-cell .plan-desc { font-size: 0.7rem; color: var(--text-dim); font-style: italic; display: block; margin-top: 2px; }
+.clickable-workout { cursor: pointer; text-decoration: underline; text-decoration-color: rgba(255,255,255,0.15); text-underline-offset: 2px; }
+.clickable-workout:hover { color: var(--accent); text-decoration-color: var(--accent); }
 
 .schema-summary { margin-top: 16px; }
 .summary-row {
@@ -399,6 +402,34 @@ select option { background: #1a1a2e; color: var(--text); }
 .lb-rank.bronze { color: #E67E22; }
 .lb-name { flex: 1; font-weight: 600; }
 .lb-value { font-weight: 700; color: var(--accent); }
+
+/* ── Workout Modal ── */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 999;
+  background: rgba(0,0,0,0.65); backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.modal-box {
+  background: #1a1a2e; border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 28px; width: 100%; max-width: 420px; box-shadow: var(--shadow);
+}
+.modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.modal-header h3 { font-size: 1.1rem; font-weight: 700; }
+.btn-close { background: none; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer; line-height: 1; }
+.btn-close:hover { color: var(--text); }
+.modal-detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 0.9rem; }
+.modal-detail-row .mdr-label { color: var(--text-muted); }
+.modal-detail-row .mdr-value { font-weight: 600; }
+.modal-actions { display: flex; gap: 10px; margin-top: 24px; }
+.modal-actions .btn { flex: 1; }
+
+/* ── Form Row (side-by-side) ── */
+.form-row { display: flex; gap: 12px; }
+.form-row .form-group.flex-1 { flex: 1; }
+
+/* ── Clickable Workout Items ── */
+.workout-item.clickable { cursor: pointer; transition: background 0.15s; border-radius: var(--radius-sm); padding: 12px 8px; margin: 0 -8px; }
+.workout-item.clickable:hover { background: var(--bg-card-hover); }
 
 /* ── Utility ── */
 .mt-8 { margin-top: 8px; }
