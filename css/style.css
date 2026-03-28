@@ -147,11 +147,17 @@ select option { background: #1a1a2e; color: var(--text); }
 .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .card-title { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
 
-/* ── Today Card ── */
-.today-card { border-left: 3px solid var(--accent); }
+/* ── Today / Tomorrow Cards ── */
+.dash-today-row { display: flex; gap: 12px; margin-bottom: 16px; }
+.dash-today-main { flex: 3; border-left: 3px solid var(--accent); margin-bottom: 0; }
+.dash-tomorrow-card { flex: 1; margin-bottom: 0; text-align: center; display: flex; flex-direction: column; }
+.dash-tomorrow-card .card-header { margin-bottom: 8px; }
 .today-workout { font-size: 1.2rem; font-weight: 600; margin-bottom: 4px; }
-.today-desc { color: var(--text-muted); font-size: 0.9rem; }
+.today-desc { color: var(--text-muted); font-size: 0.85rem; }
 .today-rest { color: var(--text-dim); font-style: italic; }
+.tomorrow-workout { font-size: 1rem; font-weight: 600; }
+.tomorrow-desc { color: var(--text-muted); font-size: 0.75rem; margin-top: 4px; }
+.tomorrow-rest { color: var(--text-dim); font-style: italic; }
 
 /* ── Compliance ── */
 .compliance-bar { margin-top: 12px; }
@@ -235,31 +241,29 @@ select option { background: #1a1a2e; color: var(--text); }
 
 /* ── Schema Cards ── */
 .sr-card {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 12px; border-radius: var(--radius-sm);
-  border: 1px solid var(--border); margin-bottom: 6px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); margin-bottom: 5px;
   background: var(--bg-card); transition: background 0.15s;
 }
 .sr-card.sr-today { border-color: var(--accent); background: rgba(46,134,193,0.06); }
-.sr-card.sr-done { border-left: 3px solid var(--green); }
-.sr-card.sr-missed { border-left: 3px solid var(--red); opacity: 0.7; }
-.sr-card.sr-rest { opacity: 0.5; }
-.sr-card.sr-future { opacity: 0.45; }
+.sr-card.sr-rest { opacity: 0.45; }
+.sr-card.sr-future { opacity: 0.4; }
+.sr-card.sr-done { border-right: 3px solid var(--green); }
+.sr-card.sr-missed { border-right: 3px solid var(--red); }
 
-.sr-left { width: 42px; flex-shrink: 0; text-align: center; }
-.sr-day { font-weight: 700; font-size: 0.8rem; color: var(--text); }
+.sr-left { width: 40px; flex-shrink: 0; text-align: center; }
+.sr-day { font-weight: 700; font-size: 0.85rem; color: var(--text); }
 .sr-today .sr-day { color: var(--accent); }
-.sr-date { font-size: 0.65rem; color: var(--text-dim); margin-top: 1px; }
+.sr-date { font-size: 0.6rem; color: var(--text-dim); margin-top: 1px; }
 
 .sr-main { flex: 1; min-width: 0; }
-.sr-plan { font-size: 0.8rem; color: var(--text-dim); }
-.sr-plan .sr-label { font-weight: 700; color: var(--text-muted); text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.3px; margin-right: 4px; }
-.sr-plan .sr-rest { font-style: italic; }
-.sr-actual { font-size: 0.85rem; color: var(--text); font-weight: 500; margin-top: 3px; }
+.sr-plan-text { font-size: 0.85rem; color: var(--text); }
+.sr-rest-label { font-style: italic; color: var(--text-dim); }
 
-.sr-right { width: 48px; flex-shrink: 0; text-align: right; }
-.sr-mins { font-size: 1rem; font-weight: 700; color: var(--green); }
-.sr-status-icon { font-size: 0.9rem; color: var(--text-dim); }
+.sr-right-status { flex-shrink: 0; text-align: right; min-width: 50px; }
+.sr-done-info { font-size: 0.8rem; color: var(--text-dim); font-weight: 500; }
+.sr-missed-mark { font-size: 0.7rem; color: var(--red); font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
 
 .clickable-workout { cursor: pointer; }
 .clickable-workout:hover { color: var(--accent); }
@@ -345,18 +349,7 @@ select option { background: #1a1a2e; color: var(--text); }
   .content { padding: 40px 64px calc(var(--nav-h) + 40px); }
 }
 
-/* ── Today + Tomorrow Row ── */
-.today-row { display: flex; gap: 12px; align-items: stretch; }
-.today-main { flex: 1; }
-.tomorrow-box {
-  width: 80px; flex-shrink: 0; text-align: center;
-  background: rgba(255,255,255,0.03); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); padding: 10px 8px;
-  display: flex; flex-direction: column; justify-content: center; gap: 4px;
-}
-.tomorrow-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); font-weight: 600; }
-.tomorrow-value { font-size: 0.8rem; font-weight: 600; color: var(--text-muted); }
-.tomorrow-value.rest { font-style: italic; color: var(--text-dim); }
+/* (old today-row / tomorrow-box removed — now uses dash-today-row) */
 
 /* ── Dashboard Week Schedule ── */
 .dash-schedule { display: flex; flex-direction: column; gap: 2px; }
@@ -446,6 +439,31 @@ input.code-input {
 /* ── Clickable Workout Items ── */
 .workout-item.clickable { cursor: pointer; transition: background 0.15s; border-radius: var(--radius-sm); padding: 12px 8px; margin: 0 -8px; }
 .workout-item.clickable:hover { background: var(--bg-card-hover); }
+
+/* ── View Loading Overlay ── */
+.view-loading {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 200px;
+}
+
+/* ── Confirm / Alert Modal ── */
+.confirm-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.65); backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  animation: fadeIn 0.15s ease;
+}
+.confirm-box {
+  background: #1a1a2e; border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 28px; width: 100%; max-width: 380px; box-shadow: var(--shadow);
+  text-align: center;
+}
+.confirm-box h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 10px; }
+.confirm-box p { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 24px; line-height: 1.5; }
+.confirm-actions { display: flex; gap: 10px; }
+.confirm-actions .btn { flex: 1; }
+.btn-danger { background: var(--red); color: #fff; }
+.btn-danger:hover { background: #c0392b; transform: translateY(-1px); }
 
 /* ── Utility ── */
 .mt-8 { margin-top: 8px; }

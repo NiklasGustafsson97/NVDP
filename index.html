@@ -135,9 +135,15 @@
         <p id="dash-date"></p>
       </div>
 
-      <div class="card today-card">
-        <div class="card-header"><span class="card-title">Dagens pass</span></div>
-        <div id="today-content"></div>
+      <div class="dash-today-row">
+        <div class="card today-card dash-today-main">
+          <div class="card-header"><span class="card-title">Dagens pass</span></div>
+          <div id="today-content"></div>
+        </div>
+        <div class="card dash-tomorrow-card">
+          <div class="card-header"><span class="card-title">Imorgon</span></div>
+          <div id="tomorrow-content"></div>
+        </div>
       </div>
 
       <div class="card">
@@ -396,8 +402,17 @@
   </div>
 </div>
 
-<script src="js/config.js?v=11"></script>
-<script src="js/app.js?v=11"></script>
+<!-- ═══ CONFIRM / ALERT MODAL ═══ -->
+<div id="confirm-modal" class="confirm-overlay hidden" onclick="if(event.target===this)closeConfirmModal(false)">
+  <div class="confirm-box">
+    <h3 id="confirm-title">Bekräfta</h3>
+    <p id="confirm-message"></p>
+    <div class="confirm-actions" id="confirm-actions"></div>
+  </div>
+</div>
+
+<script src="js/config.js?v=13"></script>
+<script src="js/app.js?v=13"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {

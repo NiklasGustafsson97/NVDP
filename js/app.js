@@ -344,37 +344,33 @@ async function _loadDashboard() {
   let allPlans = [];
   if (period) allPlans = await fetchPlans(period.id);
 
-  // Today + Tomorrow recommendation
   const todayEl = document.getElementById('today-content');
+  const tomorrowEl = document.getElementById('tomorrow-content');
   const todayPlan = allPlans.find(p => p.day_of_week === dayOfWeek);
   const tomorrowDow = (dayOfWeek + 1) % 7;
   const tomorrowPlan = allPlans.find(p => p.day_of_week === tomorrowDow);
 
   if (period) {
-    let todayHTML = '<div class="today-row">';
-    todayHTML += '<div class="today-main">';
     if (todayPlan && todayPlan.is_rest) {
-      todayHTML += `<div class="today-rest">Vilodag</div>`;
+      todayEl.innerHTML = `<div class="today-rest">Vilodag</div>`;
     } else if (todayPlan) {
-      todayHTML += `<div class="today-workout">${stripDayPrefix(todayPlan.label)}</div>
+      todayEl.innerHTML = `<div class="today-workout">${stripDayPrefix(todayPlan.label)}</div>
         <div class="today-desc">${todayPlan.description || ''}</div>`;
     } else {
-      todayHTML += `<div class="today-rest">Ingen planerad träning</div>`;
+      todayEl.innerHTML = `<div class="today-rest">Ingen planerad träning</div>`;
     }
-    todayHTML += '</div>';
-    todayHTML += '<div class="tomorrow-box">';
-    todayHTML += '<div class="tomorrow-label">Imorgon</div>';
+
     if (tomorrowPlan && tomorrowPlan.is_rest) {
-      todayHTML += '<div class="tomorrow-value rest">Vila</div>';
+      tomorrowEl.innerHTML = `<div class="tomorrow-rest">Vila</div>`;
     } else if (tomorrowPlan) {
-      todayHTML += `<div class="tomorrow-value">${stripDayPrefix(tomorrowPlan.label)}</div>`;
+      tomorrowEl.innerHTML = `<div class="tomorrow-workout">${stripDayPrefix(tomorrowPlan.label)}</div>
+        <div class="tomorrow-desc">${tomorrowPlan.description || ''}</div>`;
     } else {
-      todayHTML += '<div class="tomorrow-value">—</div>';
+      tomorrowEl.innerHTML = `<div class="tomorrow-rest">—</div>`;
     }
-    todayHTML += '</div></div>';
-    todayEl.innerHTML = todayHTML;
   } else {
     todayEl.innerHTML = `<div class="today-rest">Utanför aktiv period</div>`;
+    tomorrowEl.innerHTML = '';
   }
 
   // Weekly schedule card
@@ -417,7 +413,7 @@ async function _loadDashboard() {
 
     let dotClass = 'future';
     if (dayWorkouts.length > 0) { dotClass = 'done'; doneCount++; }
-    else if (isRestDay(i, period, periods) && !isFuture) { dotClass = 'rest'; }
+    else if (isRestDay(i, allPlans) && !isFuture) { dotClass = 'rest'; }
     else if (!isFuture) { dotClass = 'missed'; }
 
     const todayClass = isToday ? ' today' : '';
@@ -430,7 +426,7 @@ async function _loadDashboard() {
   }
   dotsContainer.innerHTML = dotsHTML;
 
-  const targetDays = 5;
+  const targetDays = allPlans.length > 0 ? allPlans.filter(p => !p.is_rest).length : 5;
   const pct = Math.round((doneCount / targetDays) * 100);
   document.getElementById('compliance-fill').style.width = Math.min(pct, 100) + '%';
   document.getElementById('compliance-fill').style.background = pct >= 80 ? 'var(--green)' : pct >= 50 ? 'var(--amber)' : 'var(--red)';
@@ -465,10 +461,11 @@ async function _loadDashboard() {
   }
 }
 
-function isRestDay(dayIdx, currentPeriod, periods) {
-  if (!currentPeriod) return dayIdx === 0 || dayIdx === 6;
-  // For now, rest = Mon (0) and Sun (6) per the plan
-  return dayIdx === 0 || dayIdx === 6;
+function isRestDay(dayIdx, plans) {
+  if (!plans || plans.length === 0) return dayIdx === 0 || dayIdx === 6;
+  const plan = plans.find(p => p.day_of_week === dayIdx);
+  if (!plan) return false;
+  return plan.is_rest;
 }
 
 function activityEmoji(type) {
@@ -501,19 +498,21 @@ function closeWorkoutModal() {
 
 function editWorkout() {
   if (!selectedWorkout) return;
+  const workout = { ...selectedWorkout };
   closeWorkoutModal();
-  editingWorkoutId = selectedWorkout.id;
   navigate('log');
-  document.getElementById('log-date').value = selectedWorkout.workout_date;
-  document.getElementById('log-time').value = selectedWorkout.workout_time || '';
-  document.getElementById('log-type').value = selectedWorkout.activity_type;
-  document.getElementById('log-minutes').value = selectedWorkout.duration_minutes;
-  document.getElementById('log-distance').value = selectedWorkout.distance_km || '';
-  document.getElementById('log-notes').value = selectedWorkout.notes === 'Importerad' ? '' : (selectedWorkout.notes || '');
+  editingWorkoutId = workout.id;
+  document.getElementById('log-date').value = workout.workout_date;
+  document.getElementById('log-time').value = workout.workout_time || '';
+  document.getElementById('log-type').value = workout.activity_type;
+  document.getElementById('log-minutes').value = workout.duration_minutes;
+  document.getElementById('log-distance').value = workout.distance_km || '';
+  const rawNotes = workout.notes || '';
+  document.getElementById('log-notes').value = rawNotes === 'Importerad' ? '' : rawNotes;
   document.querySelectorAll('.intensity-pill').forEach(p => {
-    p.classList.toggle('active', p.dataset.value === selectedWorkout.intensity);
+    p.classList.toggle('active', p.dataset.value === workout.intensity);
   });
-  document.getElementById('log-intensity').value = selectedWorkout.intensity || '';
+  document.getElementById('log-intensity').value = workout.intensity || '';
   document.getElementById('log-form').querySelector('[type="submit"]').textContent = 'Uppdatera pass';
 }
 
@@ -559,8 +558,9 @@ document.getElementById('log-form').addEventListener('submit', async (e) => {
     workout_date: date,
     activity_type: type,
     duration_minutes: mins,
-    notes: time ? `[${time}] ${notes || ''}`.trim() : (notes || null)
+    notes: notes || null
   };
+  if (time) row.workout_time = time;
   if (distance !== null) row.distance_km = distance;
   if (intensity) row.intensity = intensity;
 
@@ -602,7 +602,9 @@ function resetLogForm() {
 // ═══════════════════════
 async function loadSchema() {
   const tabsEl = document.getElementById('schema-person-tabs');
-  if (allProfiles.length > 0 && tabsEl.children.length === 0) {
+  tabsEl.innerHTML = '';
+  if (allProfiles.length > 0) {
+    if (schemaPersonIdx >= allProfiles.length) schemaPersonIdx = 0;
     allProfiles.forEach((p, i) => {
       const btn = document.createElement('button');
       btn.className = 'schema-tab' + (i === schemaPersonIdx ? ' active' : '');
@@ -611,9 +613,6 @@ async function loadSchema() {
       tabsEl.appendChild(btn);
     });
   }
-  tabsEl.querySelectorAll('.schema-tab').forEach((t, i) => {
-    t.classList.toggle('active', i === schemaPersonIdx);
-  });
 
   const profile = allProfiles[schemaPersonIdx] || currentProfile;
   const now = new Date();
@@ -729,28 +728,28 @@ function renderSchema(workouts, plans, monday, isDeload) {
     else if (plan?.is_rest) statusClass = 'rest';
     else if (!isFuture) statusClass = 'missed';
 
-    const actualText = dayWorkouts.length > 0
-      ? dayWorkouts.map(w => {
-          const intB = w.intensity ? ` <span class="intensity-badge">${w.intensity}</span>` : '';
-          return `<span class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>${w.activity_type} ${w.duration_minutes}'${intB}</span>`;
-        }).join(', ')
-      : '';
-
     let planText = '';
     if (plan?.is_rest) {
-      planText = '<span class="sr-rest">Vila</span>';
+      planText = '<span class="sr-rest-label">Vila</span>';
     } else if (plan) {
       const dd = dedupPlanText(plan.label, plan.description);
-      if (dd.label && dd.desc) {
-        planText = `<span class="sr-label">${dd.label}</span> ${dd.desc}`;
-      } else if (dd.desc) {
+      if (dd.desc) {
         planText = dd.desc;
       } else if (dd.label) {
         planText = dd.label;
       }
     }
 
-    const statusIcon = statusClass === 'done' ? '✓' : statusClass === 'missed' ? '✗' : statusClass === 'rest' ? '—' : '';
+    let rightContent = '';
+    if (dayWorkouts.length > 0) {
+      const wList = dayWorkouts.map(w => {
+        const intB = w.intensity ? ` <span class="intensity-badge">${w.intensity}</span>` : '';
+        return `<span class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>${w.duration_minutes}'${intB}</span>`;
+      }).join(' ');
+      rightContent = `<div class="sr-done-info">${wList}</div>`;
+    } else if (statusClass === 'missed') {
+      rightContent = '<div class="sr-missed-mark">Missat</div>';
+    }
 
     html += `<div class="sr-card${isToday ? ' sr-today' : ''} sr-${statusClass}">
       <div class="sr-left">
@@ -758,12 +757,9 @@ function renderSchema(workouts, plans, monday, isDeload) {
         <div class="sr-date">${dayDate.getDate()}/${dayDate.getMonth() + 1}</div>
       </div>
       <div class="sr-main">
-        <div class="sr-plan">${planText}</div>
-        ${actualText ? `<div class="sr-actual">${actualText}</div>` : ''}
+        <div class="sr-plan-text">${planText}</div>
       </div>
-      <div class="sr-right">
-        ${totalMins > 0 ? `<div class="sr-mins">${totalMins}'</div>` : `<div class="sr-status-icon">${statusIcon}</div>`}
-      </div>
+      <div class="sr-right-status">${rightContent}</div>
     </div>`;
   }
 
@@ -804,6 +800,12 @@ async function loadTrends() {
     const d = weekData[w];
     const types = trendMode === 'cardio' ? CARDIO_TYPES : [...CARDIO_TYPES, 'Gym'];
     return types.reduce((s, t) => s + (d[t] || 0), 0) / 60;
+  });
+
+  const wowDeltas = myData.map((val, i) => {
+    if (i === 0) return null;
+    const prev = myData[i - 1];
+    return prev > 0 ? ((val - prev) / prev) * 100 : null;
   });
 
   if (chartWeekly) chartWeekly.destroy();
@@ -913,13 +915,6 @@ async function loadTrends() {
     deltaEl.innerHTML = '';
   }
 
-  // Compute WoW deltas for chart annotations
-  const wowDeltas = myData.map((val, i) => {
-    if (i === 0) return null;
-    const prev = myData[i - 1];
-    return prev > 0 ? ((val - prev) / prev) * 100 : null;
-  });
-
   // Activity mix stacked bar
   const mixCanvas = document.getElementById('chart-mix-personal');
   if (mixCanvas) {
@@ -975,8 +970,21 @@ function calcStreak(workouts, profileId) {
   if (!profileId) return 0;
   const pw = workouts.filter(w => w.profile_id === profileId);
   const now = new Date();
-  let streak = 0;
+  const todayDow = (now.getDay() + 6) % 7;
   let checkMonday = mondayOfWeek(now);
+
+  // If current week is incomplete (not Sunday yet), check if it qualifies so far;
+  // if not, skip it and start counting from last week
+  if (todayDow < 6) {
+    const sun = addDays(checkMonday, 6);
+    const weekW = pw.filter(w => w.workout_date >= isoDate(checkMonday) && w.workout_date <= isoDate(sun));
+    const totalMins = weekW.reduce((s, w) => s + w.duration_minutes, 0);
+    if (totalMins < 60) {
+      checkMonday = addDays(checkMonday, -7);
+    }
+  }
+
+  let streak = 0;
   while (true) {
     const sun = addDays(checkMonday, 6);
     const weekW = pw.filter(w => w.workout_date >= isoDate(checkMonday) && w.workout_date <= isoDate(sun));
@@ -1040,8 +1048,6 @@ async function loadGroup() {
     });
     members = await resp.json();
   } catch (e) { console.error('Members fetch error:', e); }
-
-  allProfiles = members.length > 0 ? members : allProfiles;
 
   // Render members
   const membersEl = document.getElementById('group-members');
