@@ -30,12 +30,23 @@ function gateOpen() {
   return sessionStorage.getItem('gate_passed') === '1';
 }
 
+async function fetchProfilesDirect(accessToken) {
+  const resp = await fetch(SUPABASE_URL + '/rest/v1/profiles?select=*', {
+    headers: {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': 'Bearer ' + accessToken
+    }
+  });
+  if (!resp.ok) throw new Error('Profiles fetch failed: ' + resp.status);
+  return resp.json();
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     sb.auth.onAuthStateChange(async (event, session) => {
       try {
         if (event === 'SIGNED_IN' && session && !_initDone) {
-          await initApp(session.user);
+          await initApp(session.user, session.access_token);
         } else if (event === 'SIGNED_OUT') {
           _initDone = false;
           showAuth();
@@ -48,7 +59,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const { data: { session } } = await sb.auth.getSession();
     if (session && !_initDone) {
-      if (gateOpen()) await initApp(session.user);
+      if (gateOpen()) await initApp(session.user, session.access_token);
     } else if (!session && gateOpen()) {
       showAuth();
     }
@@ -144,7 +155,7 @@ function showAuth() {
 // ═══════════════════════
 //  APP INIT
 // ═══════════════════════
-async function initApp(user) {
+async function initApp(user, accessToken) {
   if (_initDone) return;
   _initDone = true;
   try {
@@ -152,33 +163,37 @@ async function initApp(user) {
     document.getElementById('auth-view').style.display = 'none';
     document.getElementById('app').classList.add('active');
 
-    const profilesPromise = sb.from('profiles').select('*');
-    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Profiles query timed out')), 8000));
-    let profiles = null, profErr = null;
+    let profiles = [];
     try {
-      const result = await Promise.race([profilesPromise, timeoutPromise]);
-      profiles = result.data;
-      profErr = result.error;
+      profiles = await fetchProfilesDirect(accessToken);
     } catch (e) {
-      profErr = e;
+      console.error('Profiles fetch error:', e);
     }
-    if (profErr) console.error('Profiles fetch error:', profErr);
     allProfiles = profiles || [];
     currentProfile = allProfiles.find(p => p.user_id === user.id) || allProfiles[0];
 
     if (!currentProfile && allProfiles.length === 0) {
-      console.warn('[NVDP] No profiles found. Creating profile for current user...');
       const fallbackName = user.user_metadata?.name || user.email?.split('@')[0] || 'User';
-      const { data: newProfile, error: insertErr } = await sb.from('profiles')
-        .insert({ user_id: user.id, name: fallbackName })
-        .select()
-        .single();
-      if (insertErr) {
-        console.error('[NVDP] Profile insert failed (RLS may block this):', insertErr);
-      } else if (newProfile) {
-        allProfiles = [newProfile];
-        currentProfile = newProfile;
-        console.log('[NVDP] Created profile:', newProfile);
+      try {
+        const resp = await fetch(SUPABASE_URL + '/rest/v1/profiles', {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': 'Bearer ' + accessToken,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+          },
+          body: JSON.stringify({ user_id: user.id, name: fallbackName })
+        });
+        if (resp.ok) {
+          const created = await resp.json();
+          if (created.length > 0) {
+            allProfiles = created;
+            currentProfile = created[0];
+          }
+        }
+      } catch (e) {
+        console.error('Profile create failed:', e);
       }
     }
 
