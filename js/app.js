@@ -237,18 +237,23 @@ function navigate(view) {
 // ═══════════════════════
 //  HELPERS
 // ═══════════════════════
-function isoDate(d) { return d.toISOString().slice(0, 10); }
+function isoDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 function mondayOfWeek(d) {
   const dt = new Date(d);
+  dt.setHours(12, 0, 0, 0);
   const day = dt.getDay();
   const diff = (day === 0 ? -6 : 1) - day;
   dt.setDate(dt.getDate() + diff);
-  dt.setHours(0, 0, 0, 0);
   return dt;
 }
 
-function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
+function addDays(d, n) { const r = new Date(d); r.setHours(12, 0, 0, 0); r.setDate(r.getDate() + n); return r; }
 
 function weekNumber(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -727,11 +732,11 @@ function renderSchema(workouts, plans, monday, isDeload) {
       : (plan?.is_rest ? '<span class="vila">Vila</span>' : (isFuture ? '—' : '<span style="color:var(--red);">Missat</span>'));
 
     const planLabel = plan ? (plan.is_rest ? 'Vila' : plan.label) : '—';
-    const planDesc = plan?.description ? `<span class="plan-desc">${plan.description}</span>` : '';
+    const planDesc = plan?.description ? `<div class="plan-desc">${plan.description}</div>` : '';
 
     html += `<div class="schema-row" style="${isToday ? 'background:rgba(46,134,193,0.06);' : ''}">
       <div class="schema-cell day">${DAY_NAMES[i]}</div>
-      <div class="schema-cell plan">${planLabel}${planDesc ? '<br>' + planDesc : ''}</div>
+      <div class="schema-cell plan"><div>${planLabel}${planDesc}</div></div>
       <div class="schema-cell actual"><span class="status-dot ${statusClass}"></span>${actualText}</div>
       <div class="schema-cell mins">${totalMins > 0 ? totalMins : ''}</div>
     </div>`;
@@ -802,6 +807,51 @@ async function loadTrends() {
       }
     }
   });
+
+  // Week-over-week volume delta
+  const deltaEl = document.getElementById('volume-delta');
+  if (deltaEl && myData.length >= 2) {
+    const lastIdx = myData.length - 1;
+    const curr = myData[lastIdx];
+    const prev = myData[lastIdx - 1];
+    const pctChange = prev > 0 ? ((curr - prev) / prev) * 100 : 0;
+    const sign = pctChange >= 0 ? '+' : '';
+    const deload = isDeloadWeek(mondayOfWeek(new Date()));
+
+    let colorClass = 'delta-neutral';
+    let icon = '→';
+    let message = '';
+    if (deload) {
+      colorClass = pctChange <= -20 ? 'delta-good' : 'delta-warn';
+      icon = pctChange <= -20 ? '↓' : '⚠';
+      message = pctChange <= -20 ? 'Bra deload' : 'Sänk mer under deload';
+    } else if (pctChange > 10) {
+      colorClass = 'delta-high';
+      icon = '⚠';
+      message = 'Hög ökning, se upp med skaderisk';
+    } else if (pctChange >= 0) {
+      colorClass = 'delta-good';
+      icon = '↑';
+      message = 'Bra progression';
+    } else {
+      colorClass = 'delta-warn';
+      icon = '↓';
+      message = 'Minskad volym';
+    }
+
+    deltaEl.innerHTML = `
+      <div class="volume-delta-card ${colorClass}">
+        <div class="vd-icon">${icon}</div>
+        <div class="vd-body">
+          <div class="vd-pct">${sign}${Math.round(pctChange)}%</div>
+          <div class="vd-label">vs förra veckan (${labels[lastIdx - 1]})</div>
+          <div class="vd-msg">${message}</div>
+        </div>
+        <div class="vd-hours">${curr.toFixed(1)}h <span class="vd-prev">← ${prev.toFixed(1)}h</span></div>
+      </div>`;
+  } else if (deltaEl) {
+    deltaEl.innerHTML = '';
+  }
 
   // Activity mix stacked bar
   const mixCanvas = document.getElementById('chart-mix-personal');
