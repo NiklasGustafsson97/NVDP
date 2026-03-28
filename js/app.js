@@ -624,7 +624,9 @@ async function loadSchema() {
   const deload = isDeloadWeek(targetMonday);
 
   document.getElementById('schema-week-label').textContent =
-    `Vecka ${wk}${deload ? ' (Deload)' : ''} — ${formatDate(targetMonday)} till ${formatDate(targetSunday)}`;
+    `V${wk}${deload ? ' (Deload)' : ''} — ${formatDate(targetMonday)} till ${formatDate(targetSunday)}`;
+  const todayBtn = document.getElementById('schema-today-btn');
+  if (todayBtn) todayBtn.classList.toggle('hidden', schemaWeekOffset === 0);
 
   const workouts = await fetchWorkouts(profile?.id, isoDate(targetMonday), isoDate(targetSunday));
 
@@ -648,6 +650,7 @@ function schemaWeekPrev() {
   loadSchema();
 }
 function schemaWeekNext() { schemaWeekOffset++; loadSchema(); }
+function schemaWeekToday() { schemaWeekOffset = 0; loadSchema(); }
 
 function getWeekIndexInPeriod(monday) {
   const p1Start = new Date(P1_START);
@@ -695,19 +698,22 @@ function projectPlan(plan, weekIdx, isDeload) {
   return projected;
 }
 
+function dedupPlanText(label, desc) {
+  if (!desc || !label) return { label, desc };
+  const lbl = label.toLowerCase().trim();
+  const descLower = desc.toLowerCase();
+  if (descLower.includes(lbl) || lbl === 'z2' || lbl === 'kvalitet') {
+    return { label: null, desc };
+  }
+  return { label, desc };
+}
+
 function renderSchema(workouts, plans, monday, isDeload) {
   const container = document.getElementById('schema-content');
   const todayStr = isoDate(new Date());
   const weekIdx = getWeekIndexInPeriod(monday);
 
-  let html = '<div class="schema-table">';
-  html += `<div class="schema-row header">
-    <div class="schema-cell day">Dag</div>
-    <div class="schema-cell plan">Planerat</div>
-    <div class="schema-cell actual">Faktiskt</div>
-    <div class="schema-cell mins">Min</div>
-  </div>`;
-
+  let html = '';
   for (let i = 0; i < 7; i++) {
     const dayDate = addDays(monday, i);
     const dayStr = isoDate(dayDate);
@@ -726,21 +732,40 @@ function renderSchema(workouts, plans, monday, isDeload) {
     const actualText = dayWorkouts.length > 0
       ? dayWorkouts.map(w => {
           const intB = w.intensity ? ` <span class="intensity-badge">${w.intensity}</span>` : '';
-          return `<span class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>${w.activity_type}${intB}</span>`;
+          return `<span class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>${w.activity_type} ${w.duration_minutes}'${intB}</span>`;
         }).join(', ')
-      : (plan?.is_rest ? '<span class="vila">Vila</span>' : (isFuture ? '—' : '<span style="color:var(--red);">Missat</span>'));
+      : '';
 
-    const planLabel = plan ? (plan.is_rest ? 'Vila' : plan.label) : '—';
-    const planDesc = plan?.description ? `<div class="plan-desc">${plan.description}</div>` : '';
+    let planText = '';
+    if (plan?.is_rest) {
+      planText = '<span class="sr-rest">Vila</span>';
+    } else if (plan) {
+      const dd = dedupPlanText(plan.label, plan.description);
+      if (dd.label && dd.desc) {
+        planText = `<span class="sr-label">${dd.label}</span> ${dd.desc}`;
+      } else if (dd.desc) {
+        planText = dd.desc;
+      } else if (dd.label) {
+        planText = dd.label;
+      }
+    }
 
-    html += `<div class="schema-row" style="${isToday ? 'background:rgba(46,134,193,0.06);' : ''}">
-      <div class="schema-cell day">${DAY_NAMES[i]}</div>
-      <div class="schema-cell plan"><div>${planLabel}${planDesc}</div></div>
-      <div class="schema-cell actual"><span class="status-dot ${statusClass}"></span>${actualText}</div>
-      <div class="schema-cell mins">${totalMins > 0 ? totalMins : ''}</div>
+    const statusIcon = statusClass === 'done' ? '✓' : statusClass === 'missed' ? '✗' : statusClass === 'rest' ? '—' : '';
+
+    html += `<div class="sr-card${isToday ? ' sr-today' : ''} sr-${statusClass}">
+      <div class="sr-left">
+        <div class="sr-day">${DAY_NAMES[i]}</div>
+        <div class="sr-date">${dayDate.getDate()}/${dayDate.getMonth() + 1}</div>
+      </div>
+      <div class="sr-main">
+        <div class="sr-plan">${planText}</div>
+        ${actualText ? `<div class="sr-actual">${actualText}</div>` : ''}
+      </div>
+      <div class="sr-right">
+        ${totalMins > 0 ? `<div class="sr-mins">${totalMins}'</div>` : `<div class="sr-status-icon">${statusIcon}</div>`}
+      </div>
     </div>`;
   }
-  html += '</div>';
 
   container.innerHTML = html;
 }
@@ -783,74 +808,117 @@ async function loadTrends() {
 
   if (chartWeekly) chartWeekly.destroy();
   const ctx = document.getElementById('chart-weekly').getContext('2d');
+  const color = PERSON_COLORS[currentProfile.name.split(' ')[0]] || '#2E86C1';
   chartWeekly = new Chart(ctx, {
     type: 'line',
     data: {
       labels,
       datasets: [{
         label: currentProfile.name, data: myData,
-        borderColor: PERSON_COLORS[currentProfile.name.split(' ')[0]] || '#2E86C1',
-        backgroundColor: (PERSON_COLORS[currentProfile.name.split(' ')[0]] || '#2E86C1') + '22',
-        tension: 0.3, fill: true, pointRadius: 4, pointHoverRadius: 6
+        borderColor: color,
+        backgroundColor: color + '22',
+        tension: 0.3, fill: true, pointRadius: 5, pointHoverRadius: 7
       }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
+      layout: { padding: { top: 24 } },
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: c => `${c.parsed.y.toFixed(1)} h` } }
+        tooltip: { callbacks: { label: c => {
+          const d = wowDeltas[c.dataIndex];
+          const pct = d !== null ? ` (${d >= 0 ? '+' : ''}${Math.round(d)}%)` : '';
+          return `${c.parsed.y.toFixed(1)} h${pct}`;
+        }}},
       },
       scales: {
         y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + 'h' } },
         x: { grid: { display: false }, ticks: { color: '#888' } }
       }
-    }
+    },
+    plugins: [{
+      id: 'wowLabels',
+      afterDatasetsDraw(chart) {
+        const meta = chart.getDatasetMeta(0);
+        const ctxC = chart.ctx;
+        ctxC.font = '600 11px ' + getComputedStyle(document.body).fontFamily;
+        ctxC.textAlign = 'center';
+        meta.data.forEach((pt, i) => {
+          const d = wowDeltas[i];
+          if (d === null) return;
+          const txt = (d >= 0 ? '+' : '') + Math.round(d) + '%';
+          const weekMon = weeks[i];
+          const dl = isDeloadWeek(new Date(weekMon));
+          if (dl) {
+            ctxC.fillStyle = d <= -20 ? '#2ECC71' : '#F39C12';
+          } else {
+            ctxC.fillStyle = d > 10 ? '#E74C3C' : d >= 0 ? '#2ECC71' : '#F39C12';
+          }
+          ctxC.fillText(txt, pt.x, pt.y - 12);
+        });
+      }
+    }]
   });
 
-  // Week-over-week volume delta
+  // Week-over-week volume delta (same-day comparison)
   const deltaEl = document.getElementById('volume-delta');
-  if (deltaEl && myData.length >= 2) {
-    const lastIdx = myData.length - 1;
-    const curr = myData[lastIdx];
-    const prev = myData[lastIdx - 1];
+  if (deltaEl && weeks.length >= 2) {
+    const now = new Date();
+    const todayDow = (now.getDay() + 6) % 7; // 0=Mon
+    const thisMonday = weeks[weeks.length - 1];
+    const prevMonday = weeks[weeks.length - 2];
+    const types = trendMode === 'cardio' ? CARDIO_TYPES : [...CARDIO_TYPES, 'Gym'];
+
+    const accumTo = (mondayStr, maxDow) => {
+      return myWorkouts.filter(w => {
+        const wMon = isoDate(mondayOfWeek(new Date(w.workout_date)));
+        if (wMon !== mondayStr) return false;
+        if (!types.includes(w.activity_type)) return false;
+        const wDow = (new Date(w.workout_date).getDay() + 6) % 7;
+        return wDow <= maxDow;
+      }).reduce((s, w) => s + w.duration_minutes, 0) / 60;
+    };
+
+    const curr = accumTo(thisMonday, todayDow);
+    const prev = accumTo(prevMonday, todayDow);
     const pctChange = prev > 0 ? ((curr - prev) / prev) * 100 : 0;
     const sign = pctChange >= 0 ? '+' : '';
-    const deload = isDeloadWeek(mondayOfWeek(new Date()));
+    const deload = isDeloadWeek(mondayOfWeek(now));
+    const dayLabel = DAY_NAMES[todayDow].toLowerCase();
 
     let colorClass = 'delta-neutral';
-    let icon = '→';
-    let message = '';
+    let msg = '';
     if (deload) {
       colorClass = pctChange <= -20 ? 'delta-good' : 'delta-warn';
-      icon = pctChange <= -20 ? '↓' : '⚠';
-      message = pctChange <= -20 ? 'Bra deload' : 'Sänk mer under deload';
+      msg = pctChange <= -20 ? 'Bra deload' : 'Sänk mer';
     } else if (pctChange > 10) {
       colorClass = 'delta-high';
-      icon = '⚠';
-      message = 'Hög ökning, se upp med skaderisk';
+      msg = 'Hög ökning';
     } else if (pctChange >= 0) {
       colorClass = 'delta-good';
-      icon = '↑';
-      message = 'Bra progression';
+      msg = 'Bra progression';
     } else {
       colorClass = 'delta-warn';
-      icon = '↓';
-      message = 'Minskad volym';
+      msg = 'Minskad volym';
     }
 
     deltaEl.innerHTML = `
-      <div class="volume-delta-card ${colorClass}">
-        <div class="vd-icon">${icon}</div>
-        <div class="vd-body">
-          <div class="vd-pct">${sign}${Math.round(pctChange)}%</div>
-          <div class="vd-label">vs förra veckan (${labels[lastIdx - 1]})</div>
-          <div class="vd-msg">${message}</div>
-        </div>
-        <div class="vd-hours">${curr.toFixed(1)}h <span class="vd-prev">← ${prev.toFixed(1)}h</span></div>
+      <div class="vd-compact ${colorClass}">
+        <span class="vd-pct">${sign}${Math.round(pctChange)}%</span>
+        <span class="vd-detail">vs ${labels[labels.length - 2]} (mån–${dayLabel})</span>
+        <span class="vd-val">${curr.toFixed(1)}h / ${prev.toFixed(1)}h</span>
+        <span class="vd-msg">${msg}</span>
       </div>`;
   } else if (deltaEl) {
     deltaEl.innerHTML = '';
   }
+
+  // Compute WoW deltas for chart annotations
+  const wowDeltas = myData.map((val, i) => {
+    if (i === 0) return null;
+    const prev = myData[i - 1];
+    return prev > 0 ? ((val - prev) / prev) * 100 : null;
+  });
 
   // Activity mix stacked bar
   const mixCanvas = document.getElementById('chart-mix-personal');

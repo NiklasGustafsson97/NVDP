@@ -233,9 +233,12 @@
       <div class="schema-tabs" id="schema-person-tabs"></div>
 
       <div class="schema-week-nav">
-        <button onclick="schemaWeekPrev()">&#9664; Förra</button>
+        <button onclick="schemaWeekPrev()">&#9664;</button>
         <span class="schema-week-label" id="schema-week-label"></span>
-        <button onclick="schemaWeekNext()">Nästa &#9654;</button>
+        <div class="schema-nav-right">
+          <button id="schema-today-btn" class="btn-today hidden" onclick="schemaWeekToday()">Idag</button>
+          <button onclick="schemaWeekNext()">&#9654;</button>
+        </div>
       </div>
 
       <div id="schema-content"></div>
@@ -393,8 +396,8 @@
   </div>
 </div>
 
-<script src="js/config.js?v=10"></script>
-<script src="js/app.js?v=10"></script>
+<script src="js/config.js?v=11"></script>
+<script src="js/app.js?v=11"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {
