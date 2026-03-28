@@ -14,10 +14,6 @@ let schemaPersonIdx = 0;
 let schemaWeekOffset = 0;
 let trendMode = 'cardio';
 let chartWeekly = null;
-let chartMixNiklas = null;
-let chartMixLove = null;
-let chartCompareWeekly = null;
-let cmpChartMode = 'cardio';
 
 // ── Day Names ──
 const DAY_NAMES = ['Mån', 'Tis', 'Ons', 'Tors', 'Fre', 'Lör', 'Sön'];
@@ -233,7 +229,7 @@ function navigate(view) {
   else if (view === 'log') resetLogForm();
   else if (view === 'schema') loadSchema();
   else if (view === 'trends') loadTrends();
-  else if (view === 'compare') loadCompare();
+  else if (view === 'group') loadGroup();
 }
 
 // ═══════════════════════
@@ -673,8 +669,10 @@ function summaryRowHTML(label, value, prev, isDeload, isTotal) {
 }
 
 // ═══════════════════════
-//  TRENDS
+//  TRENDS (Personal)
 // ═══════════════════════
+let chartMixPersonal = null;
+
 function setTrendMode(mode) {
   trendMode = mode;
   document.getElementById('toggle-cardio').classList.toggle('active', mode === 'cardio');
@@ -683,60 +681,47 @@ function setTrendMode(mode) {
 }
 
 async function loadTrends() {
-  const allWorkouts = await fetchAllWorkouts();
-  if (allWorkouts.length === 0) {
+  if (!currentProfile) return;
+  const myWorkouts = await fetchWorkouts(currentProfile.id);
+  if (myWorkouts.length === 0) {
     document.querySelector('#view-trends .page-header p').textContent = 'Inga pass loggade ännu';
     return;
   }
 
-  const niklasProfile = getProfileByName('Niklas');
-  const loveProfile = getProfileByName('Love');
-
-  // Group by week
   const weekData = {};
-  allWorkouts.forEach(w => {
-    const d = new Date(w.workout_date);
-    const mon = mondayOfWeek(d);
+  myWorkouts.forEach(w => {
+    const mon = mondayOfWeek(new Date(w.workout_date));
     const key = isoDate(mon);
-    if (!weekData[key]) weekData[key] = { niklas: {}, love: {} };
-    const who = w.profile_id === niklasProfile?.id ? 'niklas' : 'love';
-    weekData[key][who][w.activity_type] = (weekData[key][who][w.activity_type] || 0) + w.duration_minutes;
+    if (!weekData[key]) weekData[key] = {};
+    weekData[key][w.activity_type] = (weekData[key][w.activity_type] || 0) + w.duration_minutes;
   });
 
   const weeks = Object.keys(weekData).sort();
-  const labels = weeks.map(w => { const d = new Date(w); return `V${weekNumber(d)}`; });
-
-  const niklasData = weeks.map(w => {
-    const d = weekData[w].niklas;
-    const types = trendMode === 'cardio' ? CARDIO_TYPES : [...CARDIO_TYPES, 'Gym'];
-    return types.reduce((s, t) => s + (d[t] || 0), 0) / 60;
-  });
-  const loveData = weeks.map(w => {
-    const d = weekData[w].love;
+  const labels = weeks.map(w => `V${weekNumber(new Date(w))}`);
+  const myData = weeks.map(w => {
+    const d = weekData[w];
     const types = trendMode === 'cardio' ? CARDIO_TYPES : [...CARDIO_TYPES, 'Gym'];
     return types.reduce((s, t) => s + (d[t] || 0), 0) / 60;
   });
 
-  // Deload markers
-  const deloadWeeks = weeks.map(w => isDeloadWeek(new Date(w)));
-
-  // Weekly line chart
   if (chartWeekly) chartWeekly.destroy();
   const ctx = document.getElementById('chart-weekly').getContext('2d');
   chartWeekly = new Chart(ctx, {
     type: 'line',
     data: {
       labels,
-      datasets: [
-        { label: 'Niklas', data: niklasData, borderColor: PERSON_COLORS.Niklas, backgroundColor: PERSON_COLORS.Niklas + '22', tension: 0.3, fill: true, pointRadius: 4, pointHoverRadius: 6 },
-        { label: 'Love', data: loveData, borderColor: PERSON_COLORS.Love, backgroundColor: PERSON_COLORS.Love + '22', tension: 0.3, fill: true, pointRadius: 4, pointHoverRadius: 6 }
-      ]
+      datasets: [{
+        label: currentProfile.name, data: myData,
+        borderColor: PERSON_COLORS[currentProfile.name.split(' ')[0]] || '#2E86C1',
+        backgroundColor: (PERSON_COLORS[currentProfile.name.split(' ')[0]] || '#2E86C1') + '22',
+        tension: 0.3, fill: true, pointRadius: 4, pointHoverRadius: 6
+      }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'bottom', labels: { color: '#aaa', usePointStyle: true } },
-        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} h` } }
+        legend: { display: false },
+        tooltip: { callbacks: { label: c => `${c.parsed.y.toFixed(1)} h` } }
       },
       scales: {
         y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + 'h' } },
@@ -745,170 +730,214 @@ async function loadTrends() {
     }
   });
 
-  // Mix charts
-  renderMixChart('chart-mix-niklas', weeks, weekData, 'niklas', PERSON_COLORS.Niklas, 'chartMixNiklas');
-  renderMixChart('chart-mix-love', weeks, weekData, 'love', PERSON_COLORS.Love, 'chartMixLove');
-}
-
-function renderMixChart(canvasId, weeks, weekData, person, color, storeKey) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return;
-
-  if (window[storeKey]) window[storeKey].destroy();
-
-  const labels = weeks.map(w => `V${weekNumber(new Date(w))}`);
-  const types = ['Löpning', 'Cykel', 'Gym', 'Annat', 'Hyrox', 'Stakmaskin', 'Längdskidor'];
-  const datasets = types.filter(t => {
-    return weeks.some(w => (weekData[w][person][t] || 0) > 0);
-  }).map(t => ({
-    label: t,
-    data: weeks.map(w => (weekData[w][person][t] || 0) / 60),
-    backgroundColor: ACTIVITY_COLORS[t] || '#555',
-    borderRadius: 4
-  }));
-
-  window[storeKey] = new Chart(canvas.getContext('2d'), {
-    type: 'bar',
-    data: { labels, datasets },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'bottom', labels: { color: '#aaa', usePointStyle: true, boxWidth: 12 } },
-        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} h` } }
-      },
-      scales: {
-        y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + 'h' } },
-        x: { stacked: true, grid: { display: false }, ticks: { color: '#888' } }
+  // Activity mix stacked bar
+  const mixCanvas = document.getElementById('chart-mix-personal');
+  if (mixCanvas) {
+    if (chartMixPersonal) chartMixPersonal.destroy();
+    const types = ['Löpning', 'Cykel', 'Gym', 'Annat', 'Hyrox', 'Stakmaskin', 'Längdskidor'];
+    const datasets = types.filter(t => weeks.some(w => (weekData[w][t] || 0) > 0)).map(t => ({
+      label: t,
+      data: weeks.map(w => (weekData[w][t] || 0) / 60),
+      backgroundColor: ACTIVITY_COLORS[t] || '#555',
+      borderRadius: 4
+    }));
+    chartMixPersonal = new Chart(mixCanvas.getContext('2d'), {
+      type: 'bar',
+      data: { labels, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#aaa', usePointStyle: true, boxWidth: 12 } },
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)} h` } }
+        },
+        scales: {
+          y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + 'h' } },
+          x: { stacked: true, grid: { display: false }, ticks: { color: '#888' } }
+        }
       }
-    }
-  });
+    });
+  }
+
+  // Streak
+  const streak = calcStreak(myWorkouts, currentProfile.id);
+  const streakEl = document.getElementById('personal-streak');
+  if (streakEl) {
+    streakEl.innerHTML = `<div class="text-center mt-8"><span class="streak-badge">${streak} veckor i rad</span></div>`;
+  }
+
+  // Season totals
+  const totalsEl = document.getElementById('personal-totals');
+  if (totalsEl) {
+    const byType = {};
+    myWorkouts.forEach(w => { byType[w.activity_type] = (byType[w.activity_type] || 0) + w.duration_minutes; });
+    const totalAll = myWorkouts.reduce((s, w) => s + w.duration_minutes, 0);
+    let html = '';
+    Object.keys(byType).sort().forEach(t => {
+      const pct = Math.round((byType[t] / totalAll) * 100);
+      html += `<div class="summary-row"><span class="label">${t}</span><span class="value">${(byType[t]/60).toFixed(1)}h (${pct}%)</span></div>`;
+    });
+    html += `<div class="summary-row total"><span class="label">Totalt</span><span class="value">${(totalAll/60).toFixed(1)}h</span></div>`;
+    totalsEl.innerHTML = html;
+  }
+}
+
+function calcStreak(workouts, profileId) {
+  if (!profileId) return 0;
+  const pw = workouts.filter(w => w.profile_id === profileId);
+  const now = new Date();
+  let streak = 0;
+  let checkMonday = mondayOfWeek(now);
+  while (true) {
+    const sun = addDays(checkMonday, 6);
+    const weekW = pw.filter(w => w.workout_date >= isoDate(checkMonday) && w.workout_date <= isoDate(sun));
+    const totalMins = weekW.reduce((s, w) => s + w.duration_minutes, 0);
+    if (totalMins >= 60) { streak++; checkMonday = addDays(checkMonday, -7); }
+    else break;
+  }
+  return streak;
 }
 
 // ═══════════════════════
-//  COMPARE
+//  GROUP
 // ═══════════════════════
-async function loadCompare() {
-  const niklasProfile = getProfileByName('Niklas');
-  const loveProfile = getProfileByName('Love');
+let grpChartMode = 'cardio';
+let chartGroupWeekly = null;
+
+function generateCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+async function loadGroup() {
+  if (!currentProfile) return;
+
+  const myGroup = currentProfile.group_id;
+  const noGroupEl = document.getElementById('group-no-group');
+  const hasGroupEl = document.getElementById('group-has-group');
+
+  if (!myGroup) {
+    noGroupEl.classList.remove('hidden');
+    hasGroupEl.classList.add('hidden');
+    return;
+  }
+
+  noGroupEl.classList.add('hidden');
+  hasGroupEl.classList.remove('hidden');
+
+  // Fetch group info
+  let group = null;
+  try {
+    const resp = await fetch(SUPABASE_URL + '/rest/v1/groups?id=eq.' + myGroup + '&select=*', {
+      headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + (await sb.auth.getSession()).data.session.access_token }
+    });
+    const groups = await resp.json();
+    group = groups[0];
+  } catch (e) { console.error('Group fetch error:', e); }
+
+  if (group) {
+    document.getElementById('group-code-value').textContent = group.code;
+    document.getElementById('group-subtitle').textContent = group.name;
+  }
+
+  // Fetch group members
+  const token = (await sb.auth.getSession()).data.session.access_token;
+  let members = [];
+  try {
+    const resp = await fetch(SUPABASE_URL + '/rest/v1/profiles?group_id=eq.' + myGroup + '&select=*', {
+      headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + token }
+    });
+    members = await resp.json();
+  } catch (e) { console.error('Members fetch error:', e); }
+
+  allProfiles = members.length > 0 ? members : allProfiles;
+
+  // Render members
+  const membersEl = document.getElementById('group-members');
+  const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
+  membersEl.innerHTML = members.map((m, i) => {
+    const isMe = m.id === currentProfile.id;
+    return `<div class="group-member">
+      <div class="member-avatar" style="background:${colors[i % colors.length]};">${m.name[0].toUpperCase()}</div>
+      <div class="member-info">
+        <div class="member-name">${m.name}${isMe ? ' (du)' : ''}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Leaderboard: hours this week
   const now = new Date();
   const monday = mondayOfWeek(now);
   const sunday = addDays(monday, 6);
-
-  const niklasWeek = niklasProfile ? await fetchWorkouts(niklasProfile.id, isoDate(monday), isoDate(sunday)) : [];
-  const loveWeek = loveProfile ? await fetchWorkouts(loveProfile.id, isoDate(monday), isoDate(sunday)) : [];
-
-  const nMins = niklasWeek.reduce((s, w) => s + w.duration_minutes, 0);
-  const lMins = loveWeek.reduce((s, w) => s + w.duration_minutes, 0);
-
-  document.getElementById('cmp-niklas-hours').textContent = (nMins / 60).toFixed(1);
-  document.getElementById('cmp-love-hours').textContent = (lMins / 60).toFixed(1);
-
-  // Season totals
   const allWorkouts = await fetchAllWorkouts();
-  const nTotal = allWorkouts.filter(w => w.profile_id === niklasProfile?.id).reduce((s, w) => s + w.duration_minutes, 0) / 60;
-  const lTotal = allWorkouts.filter(w => w.profile_id === loveProfile?.id).reduce((s, w) => s + w.duration_minutes, 0) / 60;
-  const maxTotal = Math.max(nTotal, lTotal, 1);
 
-  const barsEl = document.getElementById('compare-bars');
-  barsEl.innerHTML = `
-    <div class="compare-bar-row">
-      <div class="compare-bar-label">Niklas</div>
-      <div class="compare-bar-track"><div class="compare-bar-fill" style="width:${(nTotal/maxTotal)*100}%;background:${PERSON_COLORS.Niklas};">${nTotal.toFixed(1)}h</div></div>
-    </div>
-    <div class="compare-bar-row">
-      <div class="compare-bar-label">Love</div>
-      <div class="compare-bar-track"><div class="compare-bar-fill" style="width:${(lTotal/maxTotal)*100}%;background:${PERSON_COLORS.Love};">${lTotal.toFixed(1)}h</div></div>
+  const weekHours = members.map(m => {
+    const mw = allWorkouts.filter(w => w.profile_id === m.id && w.workout_date >= isoDate(monday) && w.workout_date <= isoDate(sunday));
+    return { name: m.name, hours: mw.reduce((s, w) => s + w.duration_minutes, 0) / 60, id: m.id };
+  }).sort((a, b) => b.hours - a.hours);
+
+  const lbEl = document.getElementById('group-leaderboard');
+  const rankClasses = ['gold', 'silver', 'bronze'];
+  lbEl.innerHTML = weekHours.map((m, i) => `
+    <div class="lb-row">
+      <div class="lb-rank ${rankClasses[i] || ''}">${i + 1}</div>
+      <div class="lb-name">${m.name}</div>
+      <div class="lb-value">${m.hours.toFixed(1)}h</div>
+    </div>`).join('');
+
+  // Group weekly chart
+  renderGroupChart(allWorkouts, members);
+
+  // Season totals bars
+  const maxTotal = Math.max(...members.map(m => allWorkouts.filter(w => w.profile_id === m.id).reduce((s, w) => s + w.duration_minutes, 0) / 60), 1);
+  const barsEl = document.getElementById('group-totals-bars');
+  barsEl.innerHTML = members.map((m, i) => {
+    const total = allWorkouts.filter(w => w.profile_id === m.id).reduce((s, w) => s + w.duration_minutes, 0) / 60;
+    return `<div class="compare-bar-row">
+      <div class="compare-bar-label">${m.name.split(' ')[0]}</div>
+      <div class="compare-bar-track"><div class="compare-bar-fill" style="width:${(total/maxTotal)*100}%;background:${colors[i % colors.length]};">${total.toFixed(1)}h</div></div>
     </div>`;
-
-  // Weekly mix comparison
-  const mixEl = document.getElementById('compare-mix');
-  const nMix = {};
-  niklasWeek.forEach(w => { nMix[w.activity_type] = (nMix[w.activity_type] || 0) + w.duration_minutes; });
-  const lMix = {};
-  loveWeek.forEach(w => { lMix[w.activity_type] = (lMix[w.activity_type] || 0) + w.duration_minutes; });
-  const allTypes = [...new Set([...Object.keys(nMix), ...Object.keys(lMix)])];
-  const maxMix = Math.max(...allTypes.map(t => Math.max(nMix[t] || 0, lMix[t] || 0)), 1);
-
-  if (allTypes.length === 0) {
-    mixEl.innerHTML = '<div class="empty-state"><p>Inga pass denna vecka ännu</p></div>';
-  } else {
-    mixEl.innerHTML = allTypes.map(t => `
-      <div class="compare-bar-row">
-        <div class="compare-bar-label">${t}</div>
-        <div class="compare-bar-track">
-          <div class="compare-bar-fill" style="width:${((nMix[t]||0)/maxMix)*100}%;background:${PERSON_COLORS.Niklas};">${nMix[t]||0}</div>
-          <div class="compare-bar-fill" style="width:${((lMix[t]||0)/maxMix)*100}%;background:${PERSON_COLORS.Love};">${lMix[t]||0}</div>
-        </div>
-      </div>`).join('');
-  }
-
-  // Streaks
-  const streaksEl = document.getElementById('compare-streaks');
-  const nStreak = calcStreak(allWorkouts, niklasProfile?.id);
-  const lStreak = calcStreak(allWorkouts, loveProfile?.id);
-  streaksEl.innerHTML = `
-    <div class="flex-between mt-8">
-      <div>
-        <span style="color:${PERSON_COLORS.Niklas};font-weight:700;">Niklas</span>
-        <span class="streak-badge ml-8">${nStreak} veckor</span>
-      </div>
-      <div>
-        <span style="color:${PERSON_COLORS.Love};font-weight:700;">Love</span>
-        <span class="streak-badge ml-8">${lStreak} veckor</span>
-      </div>
-    </div>`;
-
-  // Weekly line chart
-  renderCompareChart(allWorkouts, niklasProfile, loveProfile);
+  }).join('');
 }
 
-function setCmpChartMode(mode) {
-  cmpChartMode = mode;
-  document.getElementById('cmp-toggle-cardio').classList.toggle('active', mode === 'cardio');
-  document.getElementById('cmp-toggle-total').classList.toggle('active', mode === 'total');
-  loadCompare();
+function setGrpChartMode(mode) {
+  grpChartMode = mode;
+  document.getElementById('grp-toggle-cardio').classList.toggle('active', mode === 'cardio');
+  document.getElementById('grp-toggle-total').classList.toggle('active', mode === 'total');
+  loadGroup();
 }
 
-function renderCompareChart(allWorkouts, niklasProfile, loveProfile) {
+function renderGroupChart(allWorkouts, members) {
+  const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
   const weekData = {};
   allWorkouts.forEach(w => {
     const mon = mondayOfWeek(new Date(w.workout_date));
     const key = isoDate(mon);
-    if (!weekData[key]) weekData[key] = { niklas: 0, love: 0 };
-    const types = cmpChartMode === 'cardio' ? CARDIO_TYPES : [...CARDIO_TYPES, 'Gym'];
+    if (!weekData[key]) weekData[key] = {};
+    const types = grpChartMode === 'cardio' ? CARDIO_TYPES : [...CARDIO_TYPES, 'Gym'];
     if (!types.includes(w.activity_type)) return;
-    if (w.profile_id === niklasProfile?.id) weekData[key].niklas += w.duration_minutes;
-    else if (w.profile_id === loveProfile?.id) weekData[key].love += w.duration_minutes;
+    weekData[key][w.profile_id] = (weekData[key][w.profile_id] || 0) + w.duration_minutes;
   });
 
   const weeks = Object.keys(weekData).sort();
   const labels = weeks.map(w => `V${weekNumber(new Date(w))}`);
-  const nData = weeks.map(w => weekData[w].niklas / 60);
-  const lData = weeks.map(w => weekData[w].love / 60);
 
-  if (chartCompareWeekly) chartCompareWeekly.destroy();
-  const canvas = document.getElementById('chart-compare-weekly');
+  if (chartGroupWeekly) chartGroupWeekly.destroy();
+  const canvas = document.getElementById('chart-group-weekly');
   if (!canvas) return;
 
-  chartCompareWeekly = new Chart(canvas.getContext('2d'), {
+  const datasets = members.map((m, i) => ({
+    label: m.name.split(' ')[0],
+    data: weeks.map(w => (weekData[w]?.[m.id] || 0) / 60),
+    borderColor: colors[i % colors.length],
+    backgroundColor: colors[i % colors.length] + '18',
+    tension: 0.35, fill: true, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2.5
+  }));
+
+  chartGroupWeekly = new Chart(canvas.getContext('2d'), {
     type: 'line',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: 'Niklas', data: nData,
-          borderColor: PERSON_COLORS.Niklas, backgroundColor: PERSON_COLORS.Niklas + '18',
-          tension: 0.35, fill: true, pointRadius: 5, pointHoverRadius: 7,
-          borderWidth: 2.5
-        },
-        {
-          label: 'Love', data: lData,
-          borderColor: PERSON_COLORS.Love, backgroundColor: PERSON_COLORS.Love + '18',
-          tension: 0.35, fill: true, pointRadius: 5, pointHoverRadius: 7,
-          borderWidth: 2.5
-        }
-      ]
-    },
+    data: { labels, datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
       interaction: { intersect: false, mode: 'index' },
@@ -924,23 +953,83 @@ function renderCompareChart(allWorkouts, niklasProfile, loveProfile) {
   });
 }
 
-function calcStreak(allWorkouts, profileId) {
-  if (!profileId) return 0;
-  const pw = allWorkouts.filter(w => w.profile_id === profileId);
-  const now = new Date();
-  let streak = 0;
-  let checkMonday = mondayOfWeek(now);
+async function createGroup() {
+  const name = document.getElementById('group-create-name').value.trim();
+  if (!name) return;
+  const code = generateCode();
+  const token = (await sb.auth.getSession()).data.session.access_token;
 
-  while (true) {
-    const sun = addDays(checkMonday, 6);
-    const weekW = pw.filter(w => w.workout_date >= isoDate(checkMonday) && w.workout_date <= isoDate(sun));
-    const totalMins = weekW.reduce((s, w) => s + w.duration_minutes, 0);
-    if (totalMins >= 60) {
-      streak++;
-      checkMonday = addDays(checkMonday, -7);
-    } else {
-      break;
+  try {
+    const resp = await fetch(SUPABASE_URL + '/rest/v1/groups', {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json', 'Prefer': 'return=representation'
+      },
+      body: JSON.stringify({ name, code, created_by: currentProfile.id })
+    });
+    const created = await resp.json();
+    if (created.length > 0) {
+      await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + currentProfile.id, {
+        method: 'PATCH',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ group_id: created[0].id })
+      });
+      currentProfile.group_id = created[0].id;
+      loadGroup();
     }
-  }
-  return streak;
+  } catch (e) { console.error('Create group error:', e); }
+}
+
+async function joinGroup() {
+  const code = document.getElementById('group-join-code').value.trim().toUpperCase();
+  const errEl = document.getElementById('group-join-error');
+  errEl.classList.add('hidden');
+  if (code.length !== 6) { errEl.textContent = 'Koden ska vara 6 tecken'; errEl.classList.remove('hidden'); return; }
+
+  const token = (await sb.auth.getSession()).data.session.access_token;
+  try {
+    const resp = await fetch(SUPABASE_URL + '/rest/v1/groups?code=eq.' + code + '&select=id,name', {
+      headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + token }
+    });
+    const groups = await resp.json();
+    if (groups.length === 0) { errEl.textContent = 'Ingen grupp med den koden'; errEl.classList.remove('hidden'); return; }
+    await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + currentProfile.id, {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ group_id: groups[0].id })
+    });
+    currentProfile.group_id = groups[0].id;
+    loadGroup();
+  } catch (e) { errEl.textContent = 'Något gick fel'; errEl.classList.remove('hidden'); }
+}
+
+async function leaveGroup() {
+  const token = (await sb.auth.getSession()).data.session.access_token;
+  await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + currentProfile.id, {
+    method: 'PATCH',
+    headers: {
+      'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + token,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ group_id: null })
+  });
+  currentProfile.group_id = null;
+  loadGroup();
+}
+
+function copyGroupCode() {
+  const code = document.getElementById('group-code-value').textContent;
+  navigator.clipboard.writeText(code).then(() => {
+    const btn = document.querySelector('.group-code-actions .btn');
+    const orig = btn.textContent;
+    btn.textContent = 'Kopierad!';
+    setTimeout(() => btn.textContent = orig, 1500);
+  });
 }

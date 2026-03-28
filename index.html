@@ -235,11 +235,11 @@
       <div id="schema-content"></div>
     </section>
 
-    <!-- ── TRENDS ── -->
+    <!-- ── TRENDS (Personal) ── -->
     <section id="view-trends" class="view">
       <div class="page-header">
-        <h2>Trender</h2>
-        <p>Träningsvolym över tid</p>
+        <h2>Min träning</h2>
+        <p>Dina personliga trender och statistik</p>
       </div>
 
       <div class="toggle-row">
@@ -253,62 +253,91 @@
       </div>
 
       <div class="card">
-        <div class="card-title mb-8">Niklas — Aktivitetsmix</div>
-        <div class="chart-container"><canvas id="chart-mix-niklas"></canvas></div>
-      </div>
-
-      <div class="card">
-        <div class="card-title mb-8">Love — Aktivitetsmix</div>
-        <div class="chart-container"><canvas id="chart-mix-love"></canvas></div>
-      </div>
-    </section>
-
-    <!-- ── COMPARE ── -->
-    <section id="view-compare" class="view">
-      <div class="page-header">
-        <h2>Jämför</h2>
-        <p>Head-to-head</p>
-      </div>
-
-      <div class="compare-grid mb-16">
-        <div class="card compare-card niklas">
-          <div class="person-name" style="color:var(--accent);">Niklas</div>
-          <div class="big-number" id="cmp-niklas-hours" style="color:var(--accent);">—</div>
-          <div class="unit">timmar denna vecka</div>
-        </div>
-        <div class="card compare-card love">
-          <div class="person-name" style="color:var(--accent-love);">Love</div>
-          <div class="big-number" id="cmp-love-hours" style="color:var(--accent-love);">—</div>
-          <div class="unit">timmar denna vecka</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <span class="card-title">Timmar per vecka</span>
-          <div class="toggle-row" style="margin:0;">
-            <button class="toggle-btn active" id="cmp-toggle-cardio" onclick="setCmpChartMode('cardio')">Cardio</button>
-            <button class="toggle-btn" id="cmp-toggle-total" onclick="setCmpChartMode('total')">Cardio + Gym</button>
-          </div>
-        </div>
-        <div class="chart-container"><canvas id="chart-compare-weekly"></canvas></div>
-      </div>
-
-      <div class="card">
-        <div class="card-title mb-8">Säsongstotaler (timmar)</div>
-        <div id="compare-bars"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-title mb-8">Denna vecka — aktivitetsmix</div>
-        <div id="compare-mix"></div>
+        <div class="card-title mb-8">Aktivitetsmix</div>
+        <div class="chart-container"><canvas id="chart-mix-personal"></canvas></div>
       </div>
 
       <div class="card">
         <div class="card-header">
           <span class="card-title">Streak</span>
         </div>
-        <div id="compare-streaks"></div>
+        <div id="personal-streak"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title mb-8">Säsongstotaler</div>
+        <div id="personal-totals"></div>
+      </div>
+    </section>
+
+    <!-- ── GROUP ── -->
+    <section id="view-group" class="view">
+      <div class="page-header">
+        <h2>Grupp</h2>
+        <p id="group-subtitle">Din träningsgrupp</p>
+      </div>
+
+      <!-- No group state -->
+      <div id="group-no-group">
+        <div class="card">
+          <div class="card-title mb-8">Skapa ny grupp</div>
+          <div class="form-group">
+            <label>Gruppnamn</label>
+            <input type="text" id="group-create-name" placeholder="T.ex. Löparklubben">
+          </div>
+          <button class="btn btn-primary" onclick="createGroup()">Skapa grupp</button>
+        </div>
+
+        <div class="card">
+          <div class="card-title mb-8">Gå med i grupp</div>
+          <div class="group-join-form">
+            <input type="text" id="group-join-code" placeholder="XXXXXX" maxlength="6">
+            <button class="btn btn-primary" onclick="joinGroup()">Gå med</button>
+          </div>
+          <div id="group-join-error" class="error-msg hidden" style="margin-top:8px;"></div>
+        </div>
+      </div>
+
+      <!-- Has group state -->
+      <div id="group-has-group" class="hidden">
+        <div class="card">
+          <div class="group-code-display">
+            <div class="label">Gruppkod</div>
+            <div class="code" id="group-code-value">------</div>
+            <div class="group-code-actions">
+              <button class="btn btn-sm btn-ghost" onclick="copyGroupCode()">Kopiera kod</button>
+              <button class="btn btn-sm btn-ghost" style="color:var(--red);" onclick="leaveGroup()">Lämna grupp</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title mb-8">Medlemmar</div>
+          <div id="group-members"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Veckans leaderboard</span>
+          </div>
+          <div id="group-leaderboard" class="group-leaderboard"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Timmar per vecka</span>
+            <div class="toggle-row" style="margin:0;">
+              <button class="toggle-btn active" id="grp-toggle-cardio" onclick="setGrpChartMode('cardio')">Cardio</button>
+              <button class="toggle-btn" id="grp-toggle-total" onclick="setGrpChartMode('total')">Cardio + Gym</button>
+            </div>
+          </div>
+          <div class="chart-container"><canvas id="chart-group-weekly"></canvas></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title mb-8">Säsongstotaler (timmar)</div>
+          <div id="group-totals-bars"></div>
+        </div>
       </div>
     </section>
 
@@ -332,16 +361,16 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       Trender
     </a>
-    <a class="nav-item" data-view="compare" onclick="navigate('compare')">
+    <a class="nav-item" data-view="group" onclick="navigate('group')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      Jämför
+      Grupp
     </a>
   </nav>
 
 </div>
 
-<script src="js/config.js?v=5"></script>
-<script src="js/app.js?v=5"></script>
+<script src="js/config.js?v=6"></script>
+<script src="js/app.js?v=6"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {
