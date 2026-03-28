@@ -446,6 +446,84 @@ input.code-input {
   min-height: 200px;
 }
 
+/* ── Nudge Bell ── */
+.nudge-bell {
+  position: relative; background: none; border: none; color: var(--text-muted);
+  cursor: pointer; padding: 4px; display: flex; align-items: center; justify-content: center;
+}
+.nudge-bell:hover { color: var(--text); }
+.nudge-badge {
+  position: absolute; top: -2px; right: -4px;
+  min-width: 16px; height: 16px; border-radius: 8px;
+  background: var(--red); color: #fff; font-size: 0.6rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; padding: 0 4px;
+}
+
+/* ── Nudge Panel ── */
+.nudge-panel {
+  position: fixed; top: 56px; right: 0; width: 320px; max-width: 90vw;
+  max-height: 60vh; background: #1a1a2e; border: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5); z-index: 150;
+  display: flex; flex-direction: column; overflow: hidden;
+  animation: fadeIn 0.15s ease;
+}
+.nudge-panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+}
+.nudge-list { flex: 1; overflow-y: auto; padding: 8px; }
+.nudge-item {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px;
+  border-radius: var(--radius-sm); transition: background 0.15s;
+}
+.nudge-item:hover { background: var(--bg-card-hover); }
+.nudge-item.unread { background: rgba(46,134,193,0.06); }
+.nudge-icon { font-size: 1.2rem; flex-shrink: 0; margin-top: 2px; }
+.nudge-content { flex: 1; }
+.nudge-sender { font-weight: 600; font-size: 0.85rem; }
+.nudge-msg { color: var(--text-muted); font-size: 0.8rem; margin-top: 2px; }
+.nudge-time { color: var(--text-dim); font-size: 0.7rem; margin-top: 4px; }
+
+/* ── Group Week Detail ── */
+.grp-member-week {
+  margin-bottom: 16px; padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.grp-member-week:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.grp-mw-header {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+}
+.grp-mw-avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.7rem; font-weight: 700; color: #fff; flex-shrink: 0;
+}
+.grp-mw-name { font-weight: 600; font-size: 0.9rem; flex: 1; }
+.grp-mw-total { font-weight: 700; font-size: 0.85rem; color: var(--accent); }
+
+.grp-mw-days { display: flex; gap: 4px; }
+.grp-day-cell {
+  flex: 1; text-align: center; padding: 6px 2px;
+  border-radius: 6px; font-size: 0.65rem; font-weight: 600;
+  min-width: 0;
+}
+.grp-day-cell .day-lbl { color: var(--text-dim); margin-bottom: 3px; font-size: 0.6rem; }
+.grp-day-cell.done { background: rgba(46,204,113,0.12); color: var(--green); }
+.grp-day-cell.missed { background: rgba(231,76,60,0.08); color: var(--red); }
+.grp-day-cell.rest { color: var(--text-dim); opacity: 0.4; }
+.grp-day-cell.future { color: var(--text-dim); opacity: 0.3; }
+
+.nudge-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 14px; font-size: 0.7rem; font-weight: 600;
+  cursor: pointer; border: 1px solid rgba(243,156,18,0.3);
+  color: var(--amber); background: rgba(243,156,18,0.08);
+  transition: all 0.2s; margin-top: 6px;
+}
+.nudge-btn:hover { background: rgba(243,156,18,0.18); border-color: var(--amber); }
+.nudge-btn.sent { opacity: 0.5; cursor: default; border-color: var(--border); color: var(--text-dim); background: transparent; }
+
 /* ── Confirm / Alert Modal ── */
 .confirm-overlay {
   position: fixed; inset: 0; z-index: 1000;

@@ -119,11 +119,26 @@
   <header class="topbar">
     <div class="logo">NVDP</div>
     <div class="user-info">
+      <button class="nudge-bell" id="nudge-bell" onclick="toggleNudgePanel()" title="Notiser">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span class="nudge-badge hidden" id="nudge-badge">0</span>
+      </button>
       <span id="user-name"></span>
       <div class="avatar" id="user-avatar"></div>
       <button onclick="logout()">Logga ut</button>
     </div>
   </header>
+
+  <!-- Nudge Panel -->
+  <div id="nudge-panel" class="nudge-panel hidden">
+    <div class="nudge-panel-header">
+      <span class="card-title">Notiser</span>
+      <button class="btn-close" onclick="toggleNudgePanel()">&times;</button>
+    </div>
+    <div id="nudge-list" class="nudge-list">
+      <div class="empty-state"><p>Inga notiser</p></div>
+    </div>
+  </div>
 
   <!-- Content -->
   <main class="content">
@@ -339,6 +354,13 @@
             <span class="card-title">Veckans leaderboard</span>
           </div>
           <div id="group-leaderboard" class="group-leaderboard"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Veckans träning</span>
+          </div>
+          <div id="group-week-detail"></div>
         </div>
 
         <div class="card">

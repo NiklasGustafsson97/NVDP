@@ -209,6 +209,9 @@ async function initApp(user, accessToken) {
 
     document.getElementById('log-date').value = isoDate(new Date());
     navigate(currentView);
+
+    updateNudgeBadge();
+    registerPushSubscription();
   } catch (err) {
     console.error('initApp error:', err);
     document.getElementById('app').classList.add('active');
@@ -293,6 +296,62 @@ function getCurrentPeriod(date) {
 }
 
 // ═══════════════════════
+//  CONFIRM / ALERT MODAL
+// ═══════════════════════
+let _confirmResolve = null;
+
+function showConfirmModal(title, message, confirmLabel = 'Bekräfta', danger = false) {
+  return new Promise(resolve => {
+    _confirmResolve = resolve;
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-message').textContent = message;
+    const actionsEl = document.getElementById('confirm-actions');
+    const btnClass = danger ? 'btn btn-danger btn-sm' : 'btn btn-primary btn-sm';
+    actionsEl.innerHTML = `
+      <button class="btn btn-ghost btn-sm" onclick="closeConfirmModal(false)">Avbryt</button>
+      <button class="${btnClass}" onclick="closeConfirmModal(true)">${confirmLabel}</button>`;
+    document.getElementById('confirm-modal').classList.remove('hidden');
+  });
+}
+
+function showAlertModal(title, message) {
+  return new Promise(resolve => {
+    _confirmResolve = resolve;
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-message').textContent = message;
+    const actionsEl = document.getElementById('confirm-actions');
+    actionsEl.innerHTML = `<button class="btn btn-primary btn-sm" onclick="closeConfirmModal(true)">OK</button>`;
+    document.getElementById('confirm-modal').classList.remove('hidden');
+  });
+}
+
+function closeConfirmModal(result) {
+  document.getElementById('confirm-modal').classList.add('hidden');
+  if (_confirmResolve) { _confirmResolve(result); _confirmResolve = null; }
+}
+
+// ═══════════════════════
+//  VIEW LOADING
+// ═══════════════════════
+function showViewLoading(viewId) {
+  const el = document.getElementById(viewId);
+  if (!el) return;
+  const existing = el.querySelector('.view-loading');
+  if (existing) return;
+  const loader = document.createElement('div');
+  loader.className = 'view-loading';
+  loader.innerHTML = '<div class="spinner"></div>';
+  el.prepend(loader);
+}
+
+function hideViewLoading(viewId) {
+  const el = document.getElementById(viewId);
+  if (!el) return;
+  const loader = el.querySelector('.view-loading');
+  if (loader) loader.remove();
+}
+
+// ═══════════════════════
 //  DATA FETCHING
 // ═══════════════════════
 async function fetchWorkouts(profileId, from, to) {
@@ -327,7 +386,9 @@ function getProfileByName(name) {
 //  DASHBOARD
 // ═══════════════════════
 async function loadDashboard() {
+  showViewLoading('view-dashboard');
   try { await _loadDashboard(); } catch (e) { console.error('Dashboard error:', e); }
+  hideViewLoading('view-dashboard');
 }
 async function _loadDashboard() {
   const now = new Date();
@@ -518,9 +579,10 @@ function editWorkout() {
 
 async function deleteWorkout() {
   if (!selectedWorkout) return;
-  if (!confirm('Ta bort detta pass?')) return;
+  const confirmed = await showConfirmModal('Ta bort pass', 'Är du säker på att du vill ta bort detta pass?', 'Ta bort', true);
+  if (!confirmed) return;
   const { error } = await sb.from('workouts').delete().eq('id', selectedWorkout.id);
-  if (error) { alert('Kunde inte ta bort: ' + error.message); return; }
+  if (error) { await showAlertModal('Fel', 'Kunde inte ta bort: ' + error.message); return; }
   closeWorkoutModal();
   navigate(currentView);
 }
@@ -574,7 +636,7 @@ document.getElementById('log-form').addEventListener('submit', async (e) => {
   }
 
   if (error) {
-    alert('Kunde inte spara: ' + error.message);
+    showAlertModal('Fel', 'Kunde inte spara: ' + error.message);
     return;
   }
 
@@ -601,6 +663,11 @@ function resetLogForm() {
 //  SCHEMA
 // ═══════════════════════
 async function loadSchema() {
+  showViewLoading('view-schema');
+  try { await _loadSchema(); } catch (e) { console.error('Schema error:', e); }
+  hideViewLoading('view-schema');
+}
+async function _loadSchema() {
   const tabsEl = document.getElementById('schema-person-tabs');
   tabsEl.innerHTML = '';
   if (allProfiles.length > 0) {
@@ -780,6 +847,11 @@ function setTrendMode(mode) {
 
 async function loadTrends() {
   if (!currentProfile) return;
+  showViewLoading('view-trends');
+  try { await _loadTrends(); } catch (e) { console.error('Trends error:', e); }
+  hideViewLoading('view-trends');
+}
+async function _loadTrends() {
   const myWorkouts = await fetchWorkouts(currentProfile.id);
   if (myWorkouts.length === 0) {
     document.querySelector('#view-trends .page-header p').textContent = 'Inga pass loggade ännu';
@@ -1000,6 +1072,8 @@ function calcStreak(workouts, profileId) {
 // ═══════════════════════
 let grpChartMode = 'cardio';
 let chartGroupWeekly = null;
+let _cachedGroupWorkouts = [];
+let _cachedGroupMembers = [];
 
 function generateCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -1010,7 +1084,11 @@ function generateCode() {
 
 async function loadGroup() {
   if (!currentProfile) return;
-
+  showViewLoading('view-group');
+  try { await _loadGroup(); } catch (e) { console.error('Group error:', e); }
+  hideViewLoading('view-group');
+}
+async function _loadGroup() {
   const myGroup = currentProfile.group_id;
   const noGroupEl = document.getElementById('group-no-group');
   const hasGroupEl = document.getElementById('group-has-group');
@@ -1067,6 +1145,8 @@ async function loadGroup() {
   const monday = mondayOfWeek(now);
   const sunday = addDays(monday, 6);
   const allWorkouts = await fetchAllWorkouts();
+  _cachedGroupWorkouts = allWorkouts;
+  _cachedGroupMembers = members;
 
   const weekHours = members.map(m => {
     const mw = allWorkouts.filter(w => w.profile_id === m.id && w.workout_date >= isoDate(monday) && w.workout_date <= isoDate(sunday));
@@ -1081,6 +1161,14 @@ async function loadGroup() {
       <div class="lb-name">${m.name}</div>
       <div class="lb-value">${m.hours.toFixed(1)}h</div>
     </div>`).join('');
+
+  // Group weekly detail (day-by-day per member)
+  const periods = await fetchPeriods();
+  const todayStr = isoDate(new Date());
+  const period = periods.find(p => todayStr >= p.start_date && todayStr <= p.end_date);
+  let grpPlans = [];
+  if (period) grpPlans = await fetchPlans(period.id);
+  renderGroupWeekDetail(allWorkouts, members, grpPlans);
 
   // Group weekly chart
   renderGroupChart(allWorkouts, members);
@@ -1101,7 +1189,11 @@ function setGrpChartMode(mode) {
   grpChartMode = mode;
   document.getElementById('grp-toggle-cardio').classList.toggle('active', mode === 'cardio');
   document.getElementById('grp-toggle-total').classList.toggle('active', mode === 'total');
-  loadGroup();
+  if (_cachedGroupWorkouts.length > 0 && _cachedGroupMembers.length > 0) {
+    renderGroupChart(_cachedGroupWorkouts, _cachedGroupMembers);
+  } else {
+    loadGroup();
+  }
 }
 
 function renderGroupChart(allWorkouts, members) {
@@ -1207,6 +1299,8 @@ async function joinGroup() {
 }
 
 async function leaveGroup() {
+  const confirmed = await showConfirmModal('Lämna grupp', 'Är du säker på att du vill lämna gruppen?', 'Lämna', true);
+  if (!confirmed) return;
   const token = (await sb.auth.getSession()).data.session.access_token;
   await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + currentProfile.id, {
     method: 'PATCH',
@@ -1228,4 +1322,203 @@ function copyGroupCode() {
     btn.textContent = 'Kopierad!';
     setTimeout(() => btn.textContent = orig, 1500);
   });
+}
+
+// ═══════════════════════
+//  GROUP WEEKLY DETAIL + NUDGE
+// ═══════════════════════
+let _sentNudges = new Set();
+
+function renderGroupWeekDetail(allWorkouts, members, plans) {
+  const el = document.getElementById('group-week-detail');
+  if (!el) return;
+
+  const now = new Date();
+  const monday = mondayOfWeek(now);
+  const todayStr = isoDate(now);
+  const todayDow = (now.getDay() + 6) % 7;
+  const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
+
+  el.innerHTML = members.map((m, mi) => {
+    const isMe = m.id === currentProfile.id;
+    let totalMins = 0;
+    let missedCount = 0;
+
+    const daysHTML = Array.from({ length: 7 }, (_, di) => {
+      const dayDate = addDays(monday, di);
+      const dayStr = isoDate(dayDate);
+      const dayW = allWorkouts.filter(w => w.profile_id === m.id && w.workout_date === dayStr);
+      const mins = dayW.reduce((s, w) => s + w.duration_minutes, 0);
+      totalMins += mins;
+      const isFuture = dayDate > now;
+      const isRest = isRestDay(di, plans);
+
+      let cls = 'future';
+      if (mins > 0) cls = 'done';
+      else if (isRest) cls = 'rest';
+      else if (!isFuture) { cls = 'missed'; missedCount++; }
+
+      const label = mins > 0 ? mins + "'" : (cls === 'rest' ? '—' : (cls === 'missed' ? '✗' : '·'));
+      return `<div class="grp-day-cell ${cls}"><div class="day-lbl">${DAY_NAMES[di]}</div>${label}</div>`;
+    }).join('');
+
+    const nudgeId = `nudge-${m.id}`;
+    const canNudge = !isMe && missedCount > 0;
+    const alreadySent = _sentNudges.has(m.id);
+    const nudgeHTML = canNudge
+      ? `<button class="nudge-btn${alreadySent ? ' sent' : ''}" id="${nudgeId}" onclick="sendNudge('${m.id}', '${m.name}', this)" ${alreadySent ? 'disabled' : ''}>
+           ${alreadySent ? '✓ Puff skickad' : '👊 Ge en puff'}
+         </button>`
+      : '';
+
+    return `<div class="grp-member-week">
+      <div class="grp-mw-header">
+        <div class="grp-mw-avatar" style="background:${colors[mi % colors.length]}">${m.name[0].toUpperCase()}</div>
+        <div class="grp-mw-name">${m.name}${isMe ? ' (du)' : ''}</div>
+        <div class="grp-mw-total">${(totalMins / 60).toFixed(1)}h</div>
+      </div>
+      <div class="grp-mw-days">${daysHTML}</div>
+      ${nudgeHTML}
+    </div>`;
+  }).join('');
+}
+
+async function sendNudge(receiverId, receiverName, btnEl) {
+  if (_sentNudges.has(receiverId)) return;
+
+  try {
+    const { error } = await sb.from('nudges').insert({
+      sender_id: currentProfile.id,
+      receiver_id: receiverId,
+      message: `${currentProfile.name} gav dig en puff! Dags att träna! 💪`
+    });
+    if (error) throw error;
+
+    _sentNudges.add(receiverId);
+    btnEl.classList.add('sent');
+    btnEl.disabled = true;
+    btnEl.innerHTML = '✓ Puff skickad';
+
+    // Trigger push notification if possible
+    sendPushToUser(receiverId);
+  } catch (e) {
+    console.error('Nudge error:', e);
+    showAlertModal('Fel', 'Kunde inte skicka puff. Försök igen.');
+  }
+}
+
+// ═══════════════════════
+//  NUDGE NOTIFICATIONS
+// ═══════════════════════
+let _nudgePanelOpen = false;
+
+function toggleNudgePanel() {
+  _nudgePanelOpen = !_nudgePanelOpen;
+  document.getElementById('nudge-panel').classList.toggle('hidden', !_nudgePanelOpen);
+  if (_nudgePanelOpen) loadNudges();
+}
+
+async function loadNudges() {
+  if (!currentProfile) return;
+  try {
+    const { data: nudges } = await sb.from('nudges')
+      .select('*')
+      .eq('receiver_id', currentProfile.id)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    const listEl = document.getElementById('nudge-list');
+    if (!nudges || nudges.length === 0) {
+      listEl.innerHTML = '<div class="empty-state"><p>Inga notiser</p></div>';
+      return;
+    }
+
+    const senderIds = [...new Set(nudges.map(n => n.sender_id))];
+    const senderProfiles = {};
+    for (const p of allProfiles) { senderProfiles[p.id] = p; }
+
+    listEl.innerHTML = nudges.map(n => {
+      const sender = senderProfiles[n.sender_id];
+      const senderName = sender ? sender.name : 'Någon';
+      const timeAgo = formatTimeAgo(new Date(n.created_at));
+      return `<div class="nudge-item${n.seen ? '' : ' unread'}">
+        <div class="nudge-icon">👊</div>
+        <div class="nudge-content">
+          <div class="nudge-sender">${senderName}</div>
+          <div class="nudge-msg">${n.message}</div>
+          <div class="nudge-time">${timeAgo}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Mark unseen as seen
+    const unseenIds = nudges.filter(n => !n.seen).map(n => n.id);
+    if (unseenIds.length > 0) {
+      await sb.from('nudges').update({ seen: true }).in('id', unseenIds);
+      updateNudgeBadge();
+    }
+  } catch (e) {
+    console.error('Load nudges error:', e);
+  }
+}
+
+async function updateNudgeBadge() {
+  if (!currentProfile) return;
+  try {
+    const { count } = await sb.from('nudges')
+      .select('*', { count: 'exact', head: true })
+      .eq('receiver_id', currentProfile.id)
+      .eq('seen', false);
+
+    const badge = document.getElementById('nudge-badge');
+    if (count > 0) {
+      badge.textContent = count > 9 ? '9+' : count;
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+  } catch (e) {
+    console.error('Badge update error:', e);
+  }
+}
+
+function formatTimeAgo(date) {
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'Just nu';
+  if (diffMins < 60) return `${diffMins} min sedan`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h sedan`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return 'Igår';
+  return `${diffDays} dagar sedan`;
+}
+
+// ═══════════════════════
+//  PUSH NOTIFICATIONS
+// ═══════════════════════
+async function registerPushSubscription() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try {
+    const reg = await navigator.serviceWorker.register('sw.js');
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return;
+
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) return; // already subscribed
+
+    // Note: VAPID public key must be configured for production push
+    // For now, we store subscription intent; actual push requires server-side VAPID setup
+    console.log('Push notification support detected. Configure VAPID keys for full push support.');
+  } catch (e) {
+    console.log('Push registration not available:', e.message);
+  }
+}
+
+async function sendPushToUser(receiverId) {
+  // Placeholder: In production, this would call a Supabase Edge Function
+  // that retrieves the receiver's push subscription and sends a web push.
+  // For now, the nudge is stored in the DB and shown when the user opens the app.
+  console.log('Nudge stored in DB for user', receiverId);
 }
