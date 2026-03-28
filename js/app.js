@@ -559,9 +559,8 @@ document.getElementById('log-form').addEventListener('submit', async (e) => {
     workout_date: date,
     activity_type: type,
     duration_minutes: mins,
-    notes: notes || null
+    notes: time ? `[${time}] ${notes || ''}`.trim() : (notes || null)
   };
-  if (time) row.workout_time = time;
   if (distance !== null) row.distance_km = distance;
   if (intensity) row.intensity = intensity;
 
