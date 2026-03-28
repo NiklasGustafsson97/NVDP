@@ -68,6 +68,28 @@
   </style>
 </head>
 <body>
+<div id="dbg" style="position:fixed;bottom:70px;left:8px;right:8px;max-height:40vh;overflow-y:auto;z-index:999999;background:rgba(0,0,0,0.92);color:#0f0;font:12px/1.4 monospace;padding:10px;border-radius:8px;border:1px solid #333;display:none;"></div>
+<script>
+(function(){
+  var el=document.getElementById('dbg');
+  var msgs=[];
+  function show(m,c){
+    el.style.display='block';
+    msgs.push('<span style="color:'+(c||'#0f0')+'">'+m+'</span>');
+    if(msgs.length>60)msgs.shift();
+    el.innerHTML=msgs.join('<br>');
+    el.scrollTop=el.scrollHeight;
+  }
+  window._dbg=show;
+  window.onerror=function(m,s,l,c,e){show('[ERR] '+m+' ('+s+':'+l+')','#f44');};
+  window.addEventListener('unhandledrejection',function(e){show('[REJECT] '+(e.reason&&e.reason.message||e.reason),'#f84');});
+  var _log=console.log,_err=console.error,_warn=console.warn;
+  console.log=function(){_log.apply(console,arguments);show('[LOG] '+Array.from(arguments).join(' '));};
+  console.error=function(){_err.apply(console,arguments);show('[ERROR] '+Array.from(arguments).join(' '),'#f44');};
+  console.warn=function(){_warn.apply(console,arguments);show('[WARN] '+Array.from(arguments).join(' '),'#fa0');};
+  show('Debug panel active','#888');
+})();
+</script>
 
 <!-- ═══ BETA GATE ═══ -->
 <div id="gate">

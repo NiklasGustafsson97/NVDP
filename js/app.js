@@ -3,7 +3,14 @@
    ══════════════════════════════════════════ */
 
 // ── Supabase Client ──
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+if(window._dbg) window._dbg('Creating Supabase client...','#8af');
+let sb;
+try {
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  if(window._dbg) window._dbg('Supabase client OK','#8f8');
+} catch(e) {
+  if(window._dbg) window._dbg('Supabase client FAILED: '+e.message,'#f44');
+}
 
 // ── App State ──
 let currentUser = null;
@@ -29,8 +36,10 @@ function gateOpen() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  if(window._dbg) window._dbg('DOMContentLoaded fired','#8af');
   try {
     sb.auth.onAuthStateChange(async (event, session) => {
+      if(window._dbg) window._dbg('onAuthStateChange: '+event,'#8af');
       try {
         if (event === 'SIGNED_IN' && session) {
           await initApp(session.user);
@@ -43,7 +52,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
     });
 
+    if(window._dbg) window._dbg('Calling getSession...','#8af');
     const { data: { session } } = await sb.auth.getSession();
+    if(window._dbg) window._dbg('getSession result: '+(session ? 'HAS session ('+session.user.email+')' : 'NO session')+', gate='+(gateOpen()?'open':'closed'),'#8af');
     if (session) {
       if (gateOpen()) await initApp(session.user);
     } else if (gateOpen()) {
@@ -142,13 +153,15 @@ function showAuth() {
 //  APP INIT
 // ═══════════════════════
 async function initApp(user) {
+  if(window._dbg) window._dbg('initApp called for: '+user.email,'#8af');
   try {
     currentUser = user;
     document.getElementById('auth-view').style.display = 'none';
     document.getElementById('app').classList.add('active');
 
+    if(window._dbg) window._dbg('Fetching profiles...','#8af');
     const { data: profiles, error: profErr } = await sb.from('profiles').select('*');
-    if (profErr) console.error('Profiles fetch error:', profErr);
+    if(window._dbg) window._dbg('Profiles result: '+(profErr ? 'ERROR: '+profErr.message : (profiles ? profiles.length+' found: '+JSON.stringify(profiles.map(p=>p.name)) : 'null')),'#8af');
     if (profErr) console.error('Profiles fetch error:', profErr);
     allProfiles = profiles || [];
     currentProfile = allProfiles.find(p => p.user_id === user.id) || allProfiles[0];
@@ -182,9 +195,12 @@ async function initApp(user) {
     }
 
     document.getElementById('log-date').value = isoDate(new Date());
+    if(window._dbg) window._dbg('Navigating to: '+currentView,'#8af');
     navigate(currentView);
+    if(window._dbg) window._dbg('initApp COMPLETE','#8f8');
   } catch (err) {
     console.error('initApp error:', err);
+    if(window._dbg) window._dbg('initApp CRASHED: '+err.message+'\n'+err.stack,'#f44');
     document.getElementById('app').classList.add('active');
   }
 }
@@ -299,6 +315,7 @@ async function loadDashboard() {
   try { await _loadDashboard(); } catch (e) { console.error('Dashboard error:', e); }
 }
 async function _loadDashboard() {
+  if(window._dbg) window._dbg('_loadDashboard start, profile='+(currentProfile ? currentProfile.name : 'NULL'),'#8af');
   const now = new Date();
   const dayOfWeek = (now.getDay() + 6) % 7; // 0=Mon
   const name = currentProfile?.name || 'du';
