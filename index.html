@@ -296,10 +296,11 @@
 
         <div class="card">
           <div class="card-title mb-8">Gå med i grupp</div>
-          <div class="group-join-form">
-            <input type="text" id="group-join-code" placeholder="XXXXXX" maxlength="6">
-            <button class="btn btn-primary" onclick="joinGroup()">Gå med</button>
+          <div class="form-group">
+            <label>Gruppkod</label>
+            <input type="text" id="group-join-code" placeholder="XXXXXX" maxlength="6" class="code-input">
           </div>
+          <button class="btn btn-primary" onclick="joinGroup()">Gå med</button>
           <div id="group-join-error" class="error-msg hidden" style="margin-top:8px;"></div>
         </div>
       </div>
@@ -390,8 +391,8 @@
   </div>
 </div>
 
-<script src="js/config.js?v=7"></script>
-<script src="js/app.js?v=7"></script>
+<script src="js/config.js?v=8"></script>
+<script src="js/app.js?v=8"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {

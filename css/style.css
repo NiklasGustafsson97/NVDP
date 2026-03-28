@@ -369,12 +369,10 @@ select option { background: #1a1a2e; color: var(--text); }
 .group-code-display .label { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .group-code-actions { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
 
-.group-join-form { display: flex; gap: 8px; }
-.group-join-form input {
-  flex: 1; text-align: center; font-size: 1.1rem; letter-spacing: 4px;
+input.code-input {
+  text-align: center; font-size: 1.2rem; letter-spacing: 6px;
   text-transform: uppercase; font-family: 'Courier New', monospace;
 }
-.group-join-form .btn { flex-shrink: 0; }
 
 .group-member {
   display: flex; align-items: center; gap: 12px; padding: 14px 0;
