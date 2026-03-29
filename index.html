@@ -132,11 +132,18 @@
   <aside id="side-menu" class="side-menu">
     <div class="sm-header">
       <div class="sm-user">
-        <div class="sm-avatar" id="sm-avatar"></div>
+        <div class="sm-avatar" id="sm-avatar" onclick="openAvatarPicker()"></div>
         <div>
-          <div class="sm-name" id="sm-name"></div>
+          <div class="sm-name" id="sm-name" onclick="editProfileName()"></div>
           <div class="sm-email" id="sm-email"></div>
         </div>
+      </div>
+      <div id="avatar-picker" class="avatar-picker hidden">
+        <div class="avatar-picker-grid" id="avatar-picker-grid"></div>
+      </div>
+      <div id="name-edit-row" class="name-edit-row hidden">
+        <input type="text" id="name-edit-input" class="name-edit-input" placeholder="Ditt namn" maxlength="30">
+        <button class="btn btn-sm btn-primary" onclick="saveProfileName()">Spara</button>
       </div>
     </div>
     <div class="sm-section" id="sm-group-section">
@@ -240,6 +247,11 @@
           <div class="compliance-track"><div id="compliance-fill" class="compliance-fill" style="width:0%;background:var(--green);"></div></div>
           <div class="compliance-label"><span id="compliance-text"></span><span id="compliance-target"></span></div>
         </div>
+      </div>
+
+      <div id="weekly-summary-card" class="card hidden">
+        <div class="card-header"><span class="card-title">Veckosummering</span></div>
+        <div id="weekly-summary"></div>
       </div>
 
       <div class="card">
@@ -397,6 +409,14 @@
       <div id="group-has-group" class="hidden">
         <div class="card">
           <div class="card-header">
+            <span class="card-title">Utmaningar</span>
+            <button class="btn btn-sm btn-ghost" onclick="openCreateChallenge()">+ Ny</button>
+          </div>
+          <div id="group-challenges"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
             <span class="card-title">Veckans leaderboard</span>
           </div>
           <div id="group-leaderboard" class="group-leaderboard"></div>
@@ -487,8 +507,8 @@
   </div>
 </div>
 
-<script src="js/config.js?v=17"></script>
-<script src="js/app.js?v=17"></script>
+<script src="js/config.js?v=18"></script>
+<script src="js/app.js?v=18"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {

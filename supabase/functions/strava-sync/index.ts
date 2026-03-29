@@ -77,6 +77,7 @@ serve(async (req) => {
     let imported = 0;
     let skipped = 0;
     let totalFetched = 0;
+    let firstError: string | null = null;
     const debug: Record<string, unknown> = { after, after_date: new Date(after * 1000).toISOString(), last_sync_at: conn.last_sync_at };
 
     // First verify the token works by checking athlete profile
@@ -112,13 +113,25 @@ serve(async (req) => {
 
       for (const activity of activities) {
         const workout = activityToWorkout(activity, conn.profile_id);
-        const { error: insertErr } = await db.from("workouts").upsert(workout, {
-          onConflict: "strava_activity_id",
-          ignoreDuplicates: false,
-        });
+
+        // Check if already imported
+        const { data: existing } = await db.from("workouts")
+          .select("id")
+          .eq("strava_activity_id", activity.id)
+          .maybeSingle();
+
+        let insertErr;
+        if (existing) {
+          const { error } = await db.from("workouts").update(workout).eq("id", existing.id);
+          insertErr = error;
+        } else {
+          const { error } = await db.from("workouts").insert(workout);
+          insertErr = error;
+        }
 
         if (insertErr) {
-          console.error("Workout upsert error:", insertErr);
+          console.error("Workout insert error:", insertErr);
+          if (!firstError) firstError = JSON.stringify(insertErr);
           skipped++;
         } else {
           imported++;
@@ -135,6 +148,7 @@ serve(async (req) => {
       .update({ last_sync_at: new Date().toISOString() })
       .eq("id", conn.id);
 
+    if (firstError) debug.firstError = firstError;
     return new Response(
       JSON.stringify({ imported, skipped, totalFetched, last_sync_at: new Date().toISOString(), debug }),
       {

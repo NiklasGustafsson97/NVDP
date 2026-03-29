@@ -225,6 +225,72 @@ function updateSideMenuContent() {
   updateStravaUI();
 }
 
+const AVATAR_OPTIONS = ['🏃','🚴','💪','🧘','⛷️','🏊','🎯','🔥','⚡','🌟','🏔️','🦁','🐺','🦅','🐻','🎸'];
+
+function openAvatarPicker() {
+  const picker = document.getElementById('avatar-picker');
+  const grid = document.getElementById('avatar-picker-grid');
+  picker.classList.toggle('hidden');
+  if (!picker.classList.contains('hidden')) {
+    grid.innerHTML = AVATAR_OPTIONS.map(e =>
+      `<div class="avatar-option${currentProfile?.avatar === e ? ' selected' : ''}" onclick="selectAvatar('${e}')">${e}</div>`
+    ).join('');
+  }
+}
+
+async function selectAvatar(emoji) {
+  if (!currentProfile) return;
+  const token = (await sb.auth.getSession()).data.session.access_token;
+  await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + currentProfile.id, {
+    method: 'PATCH',
+    headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ avatar: emoji })
+  });
+  currentProfile.avatar = emoji;
+  document.getElementById('avatar-picker').classList.add('hidden');
+  refreshAvatars();
+}
+
+function refreshAvatars() {
+  const a = currentProfile?.avatar;
+  const initial = (currentProfile?.name || 'U')[0].toUpperCase();
+  document.getElementById('user-avatar').textContent = a || initial;
+  document.getElementById('sm-avatar').textContent = a || initial;
+  if (a) {
+    document.getElementById('user-avatar').style.fontSize = '1.1rem';
+    document.getElementById('sm-avatar').style.fontSize = '1.3rem';
+  } else {
+    document.getElementById('user-avatar').style.fontSize = '';
+    document.getElementById('sm-avatar').style.fontSize = '';
+  }
+}
+
+function editProfileName() {
+  const row = document.getElementById('name-edit-row');
+  const input = document.getElementById('name-edit-input');
+  row.classList.toggle('hidden');
+  if (!row.classList.contains('hidden')) {
+    input.value = currentProfile?.name || '';
+    input.focus();
+  }
+}
+
+async function saveProfileName() {
+  const input = document.getElementById('name-edit-input');
+  const newName = input.value.trim();
+  if (!newName || !currentProfile) return;
+  const token = (await sb.auth.getSession()).data.session.access_token;
+  await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + currentProfile.id, {
+    method: 'PATCH',
+    headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: newName })
+  });
+  currentProfile.name = newName;
+  document.getElementById('name-edit-row').classList.add('hidden');
+  document.getElementById('sm-name').textContent = newName;
+  refreshAvatars();
+}
+
 function showAuth() {
   if (!gateOpen()) return;
   document.getElementById('auth-view').style.display = 'flex';
@@ -278,7 +344,7 @@ async function initApp(user, accessToken) {
       }
     }
 
-    document.getElementById('user-avatar').textContent = (currentProfile?.name || 'U')[0].toUpperCase();
+    refreshAvatars();
 
     const typeSelect = document.getElementById('log-type');
     if (typeSelect.options.length <= 1) {
@@ -617,6 +683,9 @@ async function _loadDashboard() {
   document.getElementById('compliance-text').textContent = `${doneCount} av ${targetDays} träningsdagar`;
   document.getElementById('compliance-target').textContent = isDeloadWeek(monday) ? 'Deload-vecka' : '';
 
+  // Weekly summary (shows for completed weeks or on Sunday)
+  renderWeeklySummary(weekWorkouts, allPlans, monday, currentProfile);
+
   // Recent workouts
   const { data: recent } = await sb.from('workouts').select('*')
     .eq('profile_id', currentProfile?.id)
@@ -649,6 +718,47 @@ function isRestDay(dayIdx, plans) {
   const plan = plans.find(p => p.day_of_week === dayIdx);
   if (!plan) return false;
   return plan.is_rest;
+}
+
+function renderWeeklySummary(weekWorkouts, plans, monday, profile) {
+  const card = document.getElementById('weekly-summary-card');
+  const el = document.getElementById('weekly-summary');
+  if (!card || !el) return;
+
+  const now = new Date();
+  const todayDow = (now.getDay() + 6) % 7;
+  if (todayDow < 4 && weekWorkouts.length < 3) {
+    card.classList.add('hidden');
+    return;
+  }
+
+  const totalMins = weekWorkouts.reduce((s, w) => s + w.duration_minutes, 0);
+  const totalHours = (totalMins / 60).toFixed(1);
+  const sessionCount = weekWorkouts.length;
+  const types = {};
+  weekWorkouts.forEach(w => { types[w.activity_type] = (types[w.activity_type] || 0) + 1; });
+  const topType = Object.entries(types).sort((a, b) => b[1] - a[1])[0];
+
+  const longest = weekWorkouts.reduce((max, w) => w.duration_minutes > (max?.duration_minutes || 0) ? w : max, null);
+  const totalDist = weekWorkouts.reduce((s, w) => s + (w.distance_km || 0), 0);
+
+  let plannedSessions = 0;
+  if (plans) plans.forEach(p => { if (!p.is_rest) plannedSessions++; });
+  const compliance = plannedSessions > 0 ? Math.round((sessionCount / plannedSessions) * 100) : 0;
+
+  const prevMonday = addDays(monday, -7);
+  const prevSunday = addDays(prevMonday, 6);
+
+  let items = [];
+  items.push(`<div class="ws-stat"><span class="ws-val">${totalHours}h</span><span class="ws-label">total tid</span></div>`);
+  items.push(`<div class="ws-stat"><span class="ws-val">${sessionCount}</span><span class="ws-label">pass</span></div>`);
+  if (topType) items.push(`<div class="ws-stat"><span class="ws-val">${topType[0]}</span><span class="ws-label">mest ${topType[1]}x</span></div>`);
+  if (totalDist > 0) items.push(`<div class="ws-stat"><span class="ws-val">${totalDist.toFixed(1)}km</span><span class="ws-label">distans</span></div>`);
+  if (longest) items.push(`<div class="ws-stat"><span class="ws-val">${longest.duration_minutes}'</span><span class="ws-label">längsta</span></div>`);
+  if (plannedSessions > 0) items.push(`<div class="ws-stat"><span class="ws-val">${compliance}%</span><span class="ws-label">efterlevnad</span></div>`);
+
+  el.innerHTML = `<div class="ws-grid">${items.join('')}</div>`;
+  card.classList.remove('hidden');
 }
 
 function activityEmoji(type) {
@@ -1432,6 +1542,7 @@ async function _loadGroup() {
   let grpPlans = [];
   if (period) grpPlans = await fetchPlans(period.id);
   renderGroupWeekDetail(allWorkouts, members, grpPlans);
+  renderChallenges(allWorkouts, members);
   renderGroupFeed(allWorkouts, members);
 
   // Group weekly chart
@@ -1586,6 +1697,102 @@ function copyGroupCode() {
     btn.textContent = 'Kopierad!';
     setTimeout(() => btn.textContent = orig, 1500);
   });
+}
+
+// ═══════════════════════
+//  CHALLENGES
+// ═══════════════════════
+async function renderChallenges(allWorkouts, members) {
+  const el = document.getElementById('group-challenges');
+  if (!el || !currentProfile?.group_id) return;
+
+  let challenges = [];
+  try {
+    const { data } = await sb.from('challenges').select('*')
+      .eq('group_id', currentProfile.group_id)
+      .order('end_date', { ascending: false });
+    challenges = data || [];
+  } catch (e) { console.error('Challenges fetch error:', e); }
+
+  if (challenges.length === 0) {
+    el.innerHTML = '<div class="empty-state" style="padding:12px 0;"><p style="font-size:0.85rem;">Inga utmaningar ännu</p></div>';
+    return;
+  }
+
+  const now = new Date();
+  const todayStr = isoDate(now);
+  const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
+
+  el.innerHTML = challenges.slice(0, 5).map(ch => {
+    const isActive = todayStr >= ch.start_date && todayStr <= ch.end_date;
+    const isPast = todayStr > ch.end_date;
+    const statusClass = isActive ? 'ch-active' : isPast ? 'ch-past' : 'ch-future';
+
+    const scores = members.map(m => {
+      const mw = allWorkouts.filter(w => {
+        if (w.profile_id !== m.id) return false;
+        if (w.workout_date < ch.start_date || w.workout_date > ch.end_date) return false;
+        if (ch.activity_filter && w.activity_type !== ch.activity_filter) return false;
+        return true;
+      });
+      let val = 0;
+      if (ch.metric === 'hours') val = mw.reduce((s, w) => s + w.duration_minutes, 0) / 60;
+      else if (ch.metric === 'sessions') val = mw.length;
+      else if (ch.metric === 'km') val = mw.reduce((s, w) => s + (w.distance_km || 0), 0);
+      return { name: m.name.split(' ')[0], val, avatar: m.avatar || m.name[0].toUpperCase(), color: colors[members.indexOf(m) % colors.length] };
+    }).sort((a, b) => b.val - a.val);
+
+    const unit = ch.metric === 'hours' ? 'h' : ch.metric === 'km' ? 'km' : 'st';
+    const maxVal = Math.max(...scores.map(s => s.val), 1);
+
+    const barsHTML = scores.map((s, i) => `
+      <div class="ch-score-row">
+        <span class="ch-rank">${i === 0 && s.val > 0 ? '👑' : (i + 1)}</span>
+        <span class="ch-score-name">${s.avatar} ${s.name}</span>
+        <div class="ch-score-bar"><div class="ch-score-fill" style="width:${(s.val/maxVal)*100}%;background:${s.color};"></div></div>
+        <span class="ch-score-val">${s.val.toFixed(ch.metric === 'sessions' ? 0 : 1)}${unit}</span>
+      </div>`).join('');
+
+    const daysLeft = isActive ? Math.ceil((new Date(ch.end_date) - now) / 86400000) : 0;
+    const statusText = isActive ? `${daysLeft}d kvar` : isPast ? 'Avslutad' : `Startar ${ch.start_date}`;
+
+    return `<div class="challenge-card ${statusClass}">
+      <div class="ch-header">
+        <span class="ch-title">${ch.title}</span>
+        <span class="ch-status">${statusText}</span>
+      </div>
+      <div class="ch-scores">${barsHTML}</div>
+    </div>`;
+  }).join('');
+}
+
+async function openCreateChallenge() {
+  const title = prompt('Namn på utmaningen:');
+  if (!title) return;
+
+  const metricMap = { '1': 'hours', '2': 'sessions', '3': 'km' };
+  const metricChoice = prompt('Mätvärde:\n1. Timmar\n2. Antal pass\n3. Kilometer');
+  const metric = metricMap[metricChoice];
+  if (!metric) { await showAlertModal('Fel', 'Ogiltigt val'); return; }
+
+  const daysStr = prompt('Antal dagar (t.ex. 7 för en vecka, 30 för en månad):', '7');
+  const days = parseInt(daysStr);
+  if (!days || days < 1) return;
+
+  const startDate = isoDate(new Date());
+  const endDate = isoDate(addDays(new Date(), days - 1));
+
+  const { error } = await sb.from('challenges').insert({
+    group_id: currentProfile.group_id,
+    created_by: currentProfile.id,
+    title,
+    metric,
+    start_date: startDate,
+    end_date: endDate
+  });
+
+  if (error) { await showAlertModal('Fel', error.message); return; }
+  loadGroup();
 }
 
 // ═══════════════════════
@@ -1969,7 +2176,8 @@ async function syncStrava() {
     if (res.ok) {
       _stravaConnection.last_sync_at = result.last_sync_at;
       updateStravaUI();
-      const debugInfo = result.debug ? `\n\nHämtade ${result.totalFetched} från Strava (after: ${result.debug.after_date})` : '';
+      const errInfo = result.debug?.firstError ? `\nFel: ${result.debug.firstError}` : '';
+      const debugInfo = result.debug ? `\nHämtade ${result.totalFetched}, importerade ${result.imported}, skippade ${result.skipped}${errInfo}` : '';
       await showAlertModal('Synk klar', `${result.imported} pass importerade.${debugInfo}`);
       navigate(currentView);
     } else {

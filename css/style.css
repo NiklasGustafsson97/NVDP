@@ -166,6 +166,48 @@ select option { background: #1a1a2e; color: var(--text); }
 .sm-members { display: flex; flex-direction: column; gap: 4px; }
 .sm-member { font-size: 0.8rem; color: var(--text-muted); padding: 2px 0; }
 
+/* ── Avatar Picker ── */
+.avatar-picker { margin-top: 12px; }
+.avatar-picker-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+.avatar-option {
+  width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+  font-size: 1.2rem; border-radius: 8px; cursor: pointer; border: 2px solid transparent;
+  background: var(--bg-card-hover); transition: all 0.15s;
+}
+.avatar-option:hover { border-color: var(--accent); transform: scale(1.1); }
+.avatar-option.selected { border-color: var(--accent); background: rgba(214,99,158,0.15); }
+.sm-avatar { cursor: pointer; }
+
+/* ── Name Edit ── */
+.name-edit-row { display: flex; gap: 8px; margin-top: 10px; }
+.name-edit-input {
+  flex: 1; padding: 7px 10px; font-size: 0.85rem;
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text);
+}
+
+/* ── Weekly Summary ── */
+.ws-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 4px 0; }
+.ws-stat { text-align: center; }
+.ws-val { display: block; font-size: 1.1rem; font-weight: 700; color: var(--text); }
+.ws-label { display: block; font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.3px; margin-top: 2px; }
+
+/* ── Challenges ── */
+.challenge-card { padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.challenge-card:last-child { border-bottom: none; }
+.ch-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.ch-title { font-weight: 600; font-size: 0.9rem; }
+.ch-status { font-size: 0.7rem; color: var(--text-dim); }
+.ch-active .ch-status { color: var(--green); font-weight: 600; }
+.ch-past .ch-title { color: var(--text-dim); }
+.ch-scores { display: flex; flex-direction: column; gap: 4px; }
+.ch-score-row { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; }
+.ch-rank { width: 20px; text-align: center; font-weight: 600; color: var(--text-dim); font-size: 0.75rem; }
+.ch-score-name { width: 60px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); }
+.ch-score-bar { flex: 1; height: 6px; background: rgba(255,255,255,0.04); border-radius: 3px; overflow: hidden; }
+.ch-score-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+.ch-score-val { width: 45px; text-align: right; font-weight: 600; font-size: 0.75rem; color: var(--text-muted); }
+
 /* ── Settings ── */
 .sm-setting-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
 .sm-setting-label { font-size: 0.82rem; color: var(--text-muted); }
