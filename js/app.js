@@ -2033,32 +2033,50 @@ async function renderChallenges(allWorkouts, members) {
   }).join('');
 }
 
-async function openCreateChallenge() {
-  const title = prompt('Namn på utmaningen:');
-  if (!title) return;
+let _chMetric = 'hours';
+let _chDays = 14;
 
-  const metricMap = { '1': 'hours', '2': 'sessions', '3': 'km' };
-  const metricChoice = prompt('Mätvärde:\n1. Timmar\n2. Antal pass\n3. Kilometer');
-  const metric = metricMap[metricChoice];
-  if (!metric) { await showAlertModal('Fel', 'Ogiltigt val'); return; }
+function openCreateChallenge() {
+  _chMetric = 'hours';
+  _chDays = 14;
+  document.getElementById('ch-title').value = '';
+  document.querySelectorAll('#challenge-modal .ch-metric-pills [data-metric]').forEach(b => b.classList.toggle('active', b.dataset.metric === 'hours'));
+  document.querySelectorAll('#challenge-modal .ch-metric-pills [data-days]').forEach(b => b.classList.toggle('active', b.dataset.days === '14'));
+  document.getElementById('challenge-modal').classList.remove('hidden');
+}
 
-  const daysStr = prompt('Antal dagar (t.ex. 7 för en vecka, 30 för en månad):', '7');
-  const days = parseInt(daysStr);
-  if (!days || days < 1) return;
+function closeChallengeModal() {
+  document.getElementById('challenge-modal').classList.add('hidden');
+}
+
+function pickChallengeMetric(btn) {
+  _chMetric = btn.dataset.metric;
+  btn.closest('.ch-metric-pills').querySelectorAll('.intensity-pill').forEach(b => b.classList.toggle('active', b === btn));
+}
+
+function pickChallengeDays(btn) {
+  _chDays = parseInt(btn.dataset.days);
+  btn.closest('.ch-metric-pills').querySelectorAll('.intensity-pill').forEach(b => b.classList.toggle('active', b === btn));
+}
+
+async function submitChallenge() {
+  const title = document.getElementById('ch-title').value.trim();
+  if (!title) { document.getElementById('ch-title').focus(); return; }
 
   const startDate = isoDate(new Date());
-  const endDate = isoDate(addDays(new Date(), days - 1));
+  const endDate = isoDate(addDays(new Date(), _chDays - 1));
 
   const { error } = await sb.from('challenges').insert({
     group_id: currentProfile.group_id,
     created_by: currentProfile.id,
     title,
-    metric,
+    metric: _chMetric,
     start_date: startDate,
     end_date: endDate
   });
 
   if (error) { await showAlertModal('Fel', error.message); return; }
+  closeChallengeModal();
   loadGroup();
 }
 

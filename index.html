@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NVDP</title>
-  <link rel="stylesheet" href="css/style.css?v=23">
+  <link rel="stylesheet" href="css/style.css?v=24">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
@@ -553,8 +553,41 @@
   </div>
 </div>
 
+<!-- ═══ CREATE CHALLENGE MODAL ═══ -->
+<div id="challenge-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeChallengeModal()">
+  <div class="modal-box" style="max-width:400px">
+    <div class="modal-header">
+      <h3>Ny utmaning</h3>
+      <button class="btn-close" onclick="closeChallengeModal()">&times;</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:16px;margin-top:16px">
+      <div class="form-group">
+        <label>Namn</label>
+        <input type="text" id="ch-title" placeholder="t.ex. Maratonveckan">
+      </div>
+      <div class="form-group">
+        <label>Mätvärde</label>
+        <div class="ch-metric-pills">
+          <button class="intensity-pill active" data-metric="hours" onclick="pickChallengeMetric(this)">Timmar</button>
+          <button class="intensity-pill" data-metric="sessions" onclick="pickChallengeMetric(this)">Antal pass</button>
+          <button class="intensity-pill" data-metric="km" onclick="pickChallengeMetric(this)">Kilometer</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Längd</label>
+        <div class="ch-metric-pills">
+          <button class="intensity-pill" data-days="7" onclick="pickChallengeDays(this)">1 vecka</button>
+          <button class="intensity-pill active" data-days="14" onclick="pickChallengeDays(this)">2 veckor</button>
+          <button class="intensity-pill" data-days="30" onclick="pickChallengeDays(this)">1 månad</button>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="submitChallenge()" style="margin-top:4px">Skapa utmaning</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/config.js?v=23"></script>
-<script src="js/app.js?v=23"></script>
+<script src="js/app.js?v=24"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {
