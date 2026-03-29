@@ -1,0 +1,75 @@
+name: Run SQL Migrations
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sql/migrations/*.sql'
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run unapplied migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          APPLIED_FILE="sql/migrations/_applied.txt"
+          touch "$APPLIED_FILE"
+          
+          FAILED=0
+          APPLIED_COUNT=0
+          
+          for f in $(ls sql/migrations/*.sql 2>/dev/null | sort); do
+            BASENAME=$(basename "$f")
+            
+            if grep -qF "$BASENAME" "$APPLIED_FILE"; then
+              echo "⏭ Already applied: $BASENAME"
+              continue
+            fi
+            
+            echo "▶ Applying: $BASENAME"
+            SQL_CONTENT=$(cat "$f")
+            
+            RESPONSE=$(curl -s -w "\n%{http_code}" \
+              -X POST "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_REF}/database/query" \
+              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg q "$SQL_CONTENT" '{query: $q}')")
+            
+            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+            
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+              echo "✅ Success: $BASENAME (HTTP $HTTP_CODE)"
+              echo "$BASENAME" >> "$APPLIED_FILE"
+              APPLIED_COUNT=$((APPLIED_COUNT + 1))
+            else
+              echo "❌ Failed: $BASENAME (HTTP $HTTP_CODE)"
+              echo "$BODY"
+              FAILED=1
+              break
+            fi
+          done
+          
+          echo ""
+          echo "Applied $APPLIED_COUNT migration(s)"
+          
+          if [ "$FAILED" -eq 1 ]; then
+            echo "::error::Migration failed. Check logs above."
+            exit 1
+          fi
+
+      - name: Commit applied tracking file
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add sql/migrations/_applied.txt
+          git diff --cached --quiet || git commit -m "Update _applied.txt with new migrations" && git push

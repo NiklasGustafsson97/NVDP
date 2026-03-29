@@ -1,0 +1,2 @@
+# Applied migrations -- managed by GitHub Actions
+# Do not edit manually
