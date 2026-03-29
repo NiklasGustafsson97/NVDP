@@ -58,6 +58,6 @@ const CARDIO_TYPES = [
 ];
 
 // ── Strava Integration ──
-const STRAVA_CLIENT_ID = ''; // Set after registering at developers.strava.com
+const STRAVA_CLIENT_ID = '217664';
 const SUPABASE_FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 const STRAVA_REDIRECT_URI = SUPABASE_FUNCTIONS_URL + '/strava-auth';
