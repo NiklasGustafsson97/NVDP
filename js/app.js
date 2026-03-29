@@ -368,6 +368,44 @@ async function fetchAllWorkouts() {
   return data || [];
 }
 
+async function fetchReactions(workoutId) {
+  const { data } = await sb.from('workout_reactions').select('*').eq('workout_id', workoutId);
+  return data || [];
+}
+
+async function fetchReactionsBulk(workoutIds) {
+  if (!workoutIds.length) return [];
+  const { data } = await sb.from('workout_reactions').select('*').in('workout_id', workoutIds);
+  return data || [];
+}
+
+async function fetchComments(workoutId) {
+  const { data } = await sb.from('workout_comments').select('*').eq('workout_id', workoutId).order('created_at', { ascending: true });
+  return data || [];
+}
+
+async function toggleReaction(workoutId, reactionType) {
+  const existing = await fetchReactions(workoutId);
+  const myReaction = existing.find(r => r.profile_id === currentProfile.id);
+
+  if (myReaction && myReaction.reaction === reactionType) {
+    await sb.from('workout_reactions').delete().eq('id', myReaction.id);
+  } else if (myReaction) {
+    await sb.from('workout_reactions').update({ reaction: reactionType }).eq('id', myReaction.id);
+  } else {
+    await sb.from('workout_reactions').insert({ workout_id: workoutId, profile_id: currentProfile.id, reaction: reactionType });
+  }
+}
+
+async function addComment(workoutId, text) {
+  if (!text.trim()) return;
+  await sb.from('workout_comments').insert({ workout_id: workoutId, profile_id: currentProfile.id, text: text.trim() });
+}
+
+async function deleteComment(commentId) {
+  await sb.from('workout_comments').delete().eq('id', commentId);
+}
+
 async function fetchPlans(periodId) {
   const { data } = await sb.from('period_plans').select('*').eq('period_id', periodId).order('day_of_week');
   return data || [];
@@ -537,9 +575,15 @@ function activityEmoji(type) {
 // ═══════════════════════
 //  WORKOUT MODAL (Edit / Delete)
 // ═══════════════════════
-function openWorkoutModal(w) {
+async function openWorkoutModal(w) {
   selectedWorkout = w;
-  document.getElementById('wm-title').textContent = w.activity_type + ' — ' + formatDate(w.workout_date);
+  const isOwn = w.profile_id === currentProfile.id;
+  const ownerProfile = allProfiles.find(p => p.id === w.profile_id);
+  const ownerName = ownerProfile ? ownerProfile.name : '';
+
+  const titlePrefix = isOwn ? '' : ownerName + ' — ';
+  document.getElementById('wm-title').textContent = titlePrefix + w.activity_type + ' — ' + formatDate(w.workout_date);
+
   const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
   let body = '';
   body += `<div class="modal-detail-row"><span class="mdr-label">Aktivitet</span><span class="mdr-value">${w.activity_type} ${intBadge}</span></div>`;
@@ -548,8 +592,105 @@ function openWorkoutModal(w) {
   if (w.distance_km) body += `<div class="modal-detail-row"><span class="mdr-label">Distans</span><span class="mdr-value">${w.distance_km} km</span></div>`;
   if (w.workout_time) body += `<div class="modal-detail-row"><span class="mdr-label">Klockslag</span><span class="mdr-value">${w.workout_time}</span></div>`;
   if (w.notes && w.notes !== 'Importerad') body += `<div class="modal-detail-row"><span class="mdr-label">Anteckning</span><span class="mdr-value">${w.notes}</span></div>`;
+
+  body += `<div id="wm-reactions" class="wm-reactions"><span class="text-dim">Laddar...</span></div>`;
+  body += `<div id="wm-comments" class="wm-comments"><span class="text-dim">Laddar...</span></div>`;
+
   document.getElementById('wm-body').innerHTML = body;
+
+  const actionsEl = document.getElementById('wm-edit-actions');
+  if (actionsEl) actionsEl.style.display = isOwn ? 'flex' : 'none';
+
   document.getElementById('workout-modal').classList.remove('hidden');
+
+  loadModalSocial(w.id);
+}
+
+async function loadModalSocial(workoutId) {
+  const [reactions, comments] = await Promise.all([fetchReactions(workoutId), fetchComments(workoutId)]);
+
+  const likes = reactions.filter(r => r.reaction === 'like');
+  const dislikes = reactions.filter(r => r.reaction === 'dislike');
+  const myReaction = reactions.find(r => r.profile_id === currentProfile.id);
+
+  const reactEl = document.getElementById('wm-reactions');
+  if (reactEl) {
+    const likeNames = likes.map(r => { const p = allProfiles.find(pr => pr.id === r.profile_id); return p ? p.name.split(' ')[0] : ''; }).filter(Boolean);
+    const dislikeNames = dislikes.map(r => { const p = allProfiles.find(pr => pr.id === r.profile_id); return p ? p.name.split(' ')[0] : ''; }).filter(Boolean);
+    const likeTooltip = likeNames.length ? likeNames.join(', ') : '';
+    const dislikeTooltip = dislikeNames.length ? dislikeNames.join(', ') : '';
+
+    reactEl.innerHTML = `
+      <div class="reaction-bar">
+        <button class="react-btn${myReaction?.reaction === 'like' ? ' active' : ''}" onclick="handleReaction('${workoutId}', 'like')" title="${likeTooltip}">
+          <span class="react-icon">&#128077;</span><span class="react-count">${likes.length || ''}</span>
+        </button>
+        <button class="react-btn${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="handleReaction('${workoutId}', 'dislike')" title="${dislikeTooltip}">
+          <span class="react-icon">&#128078;</span><span class="react-count">${dislikes.length || ''}</span>
+        </button>
+      </div>`;
+  }
+
+  const commEl = document.getElementById('wm-comments');
+  if (commEl) {
+    let html = '<div class="comments-section">';
+    if (comments.length > 0) {
+      html += '<div class="comment-list">';
+      comments.forEach(c => {
+        const author = allProfiles.find(p => p.id === c.profile_id);
+        const name = author ? author.name.split(' ')[0] : '?';
+        const isMine = c.profile_id === currentProfile.id;
+        const ago = timeAgo(c.created_at);
+        html += `<div class="comment-item">
+          <div class="comment-author">${name} <span class="comment-time">${ago}</span></div>
+          <div class="comment-text">${escapeHTML(c.text)}</div>
+          ${isMine ? `<button class="comment-delete" onclick="handleDeleteComment('${c.id}', '${workoutId}')" title="Ta bort">&#10005;</button>` : ''}
+        </div>`;
+      });
+      html += '</div>';
+    }
+    html += `<div class="comment-input-row">
+      <input type="text" id="wm-comment-input" class="comment-input" placeholder="Skriv en kommentar..." onkeydown="if(event.key==='Enter')handleAddComment('${workoutId}')">
+      <button class="btn btn-sm btn-primary comment-send" onclick="handleAddComment('${workoutId}')">Skicka</button>
+    </div>`;
+    html += '</div>';
+    commEl.innerHTML = html;
+  }
+}
+
+function escapeHTML(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function timeAgo(isoStr) {
+  const diff = Date.now() - new Date(isoStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'nu';
+  if (mins < 60) return mins + ' min';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h';
+  const days = Math.floor(hrs / 24);
+  return days + 'd';
+}
+
+async function handleReaction(workoutId, type) {
+  await toggleReaction(workoutId, type);
+  await loadModalSocial(workoutId);
+  if (_feedReactionsCache) refreshFeedReactions();
+}
+
+async function handleAddComment(workoutId) {
+  const input = document.getElementById('wm-comment-input');
+  if (!input || !input.value.trim()) return;
+  await addComment(workoutId, input.value);
+  await loadModalSocial(workoutId);
+}
+
+async function handleDeleteComment(commentId, workoutId) {
+  await deleteComment(commentId);
+  await loadModalSocial(workoutId);
 }
 
 function closeWorkoutModal() {
@@ -1169,6 +1310,7 @@ async function _loadGroup() {
   let grpPlans = [];
   if (period) grpPlans = await fetchPlans(period.id);
   renderGroupWeekDetail(allWorkouts, members, grpPlans);
+  renderGroupFeed(allWorkouts, members);
 
   // Group weekly chart
   renderGroupChart(allWorkouts, members);
@@ -1381,6 +1523,79 @@ function renderGroupWeekDetail(allWorkouts, members, plans) {
       ${nudgeHTML}
     </div>`;
   }).join('');
+}
+
+let _feedReactionsCache = null;
+
+async function renderGroupFeed(allWorkouts, members) {
+  const feedEl = document.getElementById('group-feed');
+  if (!feedEl) return;
+
+  const recent = allWorkouts
+    .filter(w => members.some(m => m.id === w.profile_id))
+    .slice(-20).reverse();
+
+  if (recent.length === 0) {
+    feedEl.innerHTML = '<div class="empty-state"><p>Inga loggade pass ännu</p></div>';
+    return;
+  }
+
+  const workoutIds = recent.map(w => w.id);
+  const reactions = await fetchReactionsBulk(workoutIds);
+  _feedReactionsCache = { recent, members, reactions };
+
+  const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
+
+  feedEl.innerHTML = recent.map(w => {
+    const mi = members.findIndex(m => m.id === w.profile_id);
+    const member = members[mi] || {};
+    const color = colors[mi % colors.length] || '#2E86C1';
+    const likes = reactions.filter(r => r.workout_id === w.id && r.reaction === 'like');
+    const dislikes = reactions.filter(r => r.workout_id === w.id && r.reaction === 'dislike');
+    const myReaction = reactions.find(r => r.workout_id === w.id && r.profile_id === currentProfile.id);
+
+    const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
+    const notesSnip = w.notes && w.notes !== 'Importerad' ? `<div class="feed-notes">${escapeHTML(w.notes)}</div>` : '';
+
+    return `<div class="feed-item" onclick="openFeedWorkout(${recent.indexOf(w)})">
+      <div class="feed-header">
+        <div class="feed-avatar" style="background:${color}">${(member.name || '?')[0].toUpperCase()}</div>
+        <div class="feed-info">
+          <div class="feed-name">${member.name || '?'}</div>
+          <div class="feed-date">${formatDate(w.workout_date)}</div>
+        </div>
+        <div class="feed-type">${activityEmoji(w.activity_type)} ${w.duration_minutes}'${intBadge}</div>
+      </div>
+      ${notesSnip}
+      <div class="feed-reactions" onclick="event.stopPropagation()">
+        <button class="react-btn-sm${myReaction?.reaction === 'like' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${w.id}','like')">
+          &#128077; ${likes.length || ''}
+        </button>
+        <button class="react-btn-sm${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${w.id}','dislike')">
+          &#128078; ${dislikes.length || ''}
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openFeedWorkout(idx) {
+  if (!_feedReactionsCache) return;
+  const w = _feedReactionsCache.recent[idx];
+  if (w) openWorkoutModal(w);
+}
+
+async function handleFeedReaction(workoutId, type) {
+  await toggleReaction(workoutId, type);
+  if (_cachedGroupWorkouts.length && _cachedGroupMembers.length) {
+    await renderGroupFeed(_cachedGroupWorkouts, _cachedGroupMembers);
+  }
+}
+
+async function refreshFeedReactions() {
+  if (_cachedGroupWorkouts.length && _cachedGroupMembers.length) {
+    await renderGroupFeed(_cachedGroupWorkouts, _cachedGroupMembers);
+  }
 }
 
 async function sendNudge(receiverId, receiverName, btnEl) {

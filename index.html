@@ -358,6 +358,13 @@
 
         <div class="card">
           <div class="card-header">
+            <span class="card-title">Flöde</span>
+          </div>
+          <div id="group-feed"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
             <span class="card-title">Veckans träning</span>
           </div>
           <div id="group-week-detail"></div>
@@ -417,7 +424,7 @@
       <button class="btn-close" onclick="closeWorkoutModal()">&times;</button>
     </div>
     <div id="wm-body"></div>
-    <div class="modal-actions">
+    <div class="modal-actions" id="wm-edit-actions">
       <button class="btn btn-primary btn-sm" onclick="editWorkout()">Redigera</button>
       <button class="btn btn-sm" style="background:var(--red);color:#fff;" onclick="deleteWorkout()">Ta bort</button>
     </div>
@@ -433,8 +440,8 @@
   </div>
 </div>
 
-<script src="js/config.js?v=13"></script>
-<script src="js/app.js?v=13"></script>
+<script src="js/config.js?v=14"></script>
+<script src="js/app.js?v=14"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {
