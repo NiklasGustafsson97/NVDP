@@ -704,7 +704,7 @@ async function _loadDashboard() {
           ${activityEmoji(w.activity_type)}
         </div>
         <div class="workout-info">
-          <div class="name">${w.activity_type}${intBadge}${stravaSourceBadge(w)}</div>
+          <div class="name">${w.activity_type}${intBadge}</div>
           <div class="meta">${formatDate(w.workout_date)}${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? ' — ' + w.notes : ''}</div>
         </div>
         <div class="workout-info duration">${w.duration_minutes} min${distStr}</div>
@@ -1166,7 +1166,7 @@ function renderSchema(workouts, plans, monday, isDeload) {
     if (dayWorkouts.length > 0) {
       const wList = dayWorkouts.map(w => {
         const intB = w.intensity ? ` <span class="intensity-badge">${w.intensity}</span>` : '';
-        return `<span class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>${w.duration_minutes}'${intB}${stravaSourceBadge(w)}</span>`;
+        return `<span class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>${w.duration_minutes}'${intB}</span>`;
       }).join(' ');
       rightContent = `<div class="sr-done-info">${wList}</div>`;
     } else if (statusClass === 'missed') {
@@ -1944,7 +1944,7 @@ function renderFeedItems(items, members, reactions) {
           <div class="feed-name">${member.name || '?'}</div>
           <div class="feed-date">${formatDate(w.workout_date)}</div>
         </div>
-        <div class="feed-type">${activityEmoji(w.activity_type)} ${w.duration_minutes}'${intBadge}${stravaSourceBadge(w)}</div>
+        <div class="feed-type">${activityEmoji(w.activity_type)} ${w.duration_minutes}'${intBadge}</div>
       </div>
       ${notesSnip}
       <div class="feed-reactions" onclick="event.stopPropagation()">
