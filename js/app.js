@@ -624,58 +624,49 @@ async function _loadDashboard() {
     tomorrowEl.innerHTML = '';
   }
 
-  // Weekly schedule card
-  if (period) {
-    const schedEl = document.getElementById('dash-week-schedule');
-    let schedHTML = '<div class="dash-schedule">';
-    for (let i = 0; i < 7; i++) {
-      const plan = allPlans.find(p => p.day_of_week === i);
-      const isTodayRow = i === dayOfWeek;
-      const restClass = plan?.is_rest ? ' rest' : '';
-      const shortLabel = plan ? (plan.is_rest ? 'Vila' : stripDayPrefix(plan.label)) : '—';
-      const desc = plan?.description ? ` — ${plan.description}` : '';
-      const indicatorColor = plan?.is_rest ? 'var(--text-dim)' : 'var(--accent)';
-      schedHTML += `<div class="dash-sched-row${isTodayRow ? ' is-today' : ''}">
-        <span class="sched-day">${DAY_NAMES[i]}</span>
-        <span class="sched-indicator" style="background:${isTodayRow ? 'var(--accent)' : indicatorColor};"></span>
-        <span class="sched-label${restClass}">${shortLabel}<span class="sched-desc">${desc}</span></span>
-      </div>`;
-    }
-    schedHTML += '</div>';
-    schedEl.innerHTML = schedHTML;
-  }
-
-  // This week
+  // Combined weekly plan + compliance card
   const monday = mondayOfWeek(now);
   const sunday = addDays(monday, 6);
   const weekWorkouts = await fetchWorkouts(currentProfile?.id, isoDate(monday), isoDate(sunday));
 
-  const dotsContainer = document.getElementById('week-dots-container');
-  let dotsHTML = '';
+  const schedEl = document.getElementById('dash-week-schedule');
   let doneCount = 0;
-  const trainingDays = [1, 2, 3, 4, 5]; // Tue-Sat by default (but depends on plan)
-
+  let schedHTML = '<div class="dash-schedule">';
   for (let i = 0; i < 7; i++) {
+    const plan = allPlans.find(p => p.day_of_week === i);
     const dayDate = addDays(monday, i);
     const dayStr = isoDate(dayDate);
-    const isToday = dayStr === todayStr;
+    const isTodayRow = dayStr === todayStr;
     const dayWorkouts = weekWorkouts.filter(w => w.workout_date === dayStr);
     const isFuture = dayDate > now;
-
-    let dotClass = 'future';
-    if (dayWorkouts.length > 0) { dotClass = 'done'; doneCount++; }
-    else if (isRestDay(i, allPlans) && !isFuture) { dotClass = 'rest'; }
-    else if (!isFuture) { dotClass = 'missed'; }
-
-    const todayClass = isToday ? ' today' : '';
     const mins = dayWorkouts.reduce((s, w) => s + w.duration_minutes, 0);
-    dotsHTML += `
-      <div class="week-dot">
-        <div class="dot ${dotClass}${todayClass}">${mins > 0 ? mins + "'" : (dotClass === 'rest' ? 'R' : '—')}</div>
-        <span class="day-label">${DAY_NAMES[i]}</span>
-      </div>`;
+
+    let statusClass = 'future';
+    if (dayWorkouts.length > 0) { statusClass = 'done'; doneCount++; }
+    else if (plan?.is_rest && !isFuture) { statusClass = 'rest'; }
+    else if (!isFuture && !plan?.is_rest) { statusClass = 'missed'; }
+
+    const shortLabel = plan ? (plan.is_rest ? 'Vila' : stripDayPrefix(plan.label)) : '—';
+    const desc = plan?.description ? ` — ${plan.description}` : '';
+    const restClass = plan?.is_rest ? ' rest' : '';
+
+    let statusHTML = '';
+    if (statusClass === 'done') {
+      statusHTML = `<span class="sched-status done">${mins}'</span>`;
+    } else if (statusClass === 'missed') {
+      statusHTML = `<span class="sched-status missed">Missat</span>`;
+    } else if (statusClass === 'rest' && !isFuture) {
+      statusHTML = `<span class="sched-status rest-ok">—</span>`;
+    }
+
+    schedHTML += `<div class="dash-sched-row${isTodayRow ? ' is-today' : ''} sched-${statusClass}">
+      <span class="sched-day">${DAY_NAMES[i]}</span>
+      <span class="sched-label${restClass}">${shortLabel}<span class="sched-desc">${desc}</span></span>
+      ${statusHTML}
+    </div>`;
   }
-  dotsContainer.innerHTML = dotsHTML;
+  schedHTML += '</div>';
+  schedEl.innerHTML = schedHTML;
 
   const targetDays = allPlans.length > 0 ? allPlans.filter(p => !p.is_rest).length : 5;
   const pct = Math.round((doneCount / targetDays) * 100);

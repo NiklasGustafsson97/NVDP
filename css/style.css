@@ -485,17 +485,22 @@ select option { background: #1a1a2e; color: var(--text); }
 /* ── Dashboard Week Schedule ── */
 .dash-schedule { display: flex; flex-direction: column; gap: 2px; }
 .dash-sched-row {
-  display: flex; align-items: center; gap: 8px; padding: 6px 4px;
-  border-radius: 6px; font-size: 0.8rem; transition: background 0.2s;
+  display: flex; align-items: center; gap: 8px; padding: 7px 4px;
+  border-radius: 6px; font-size: 0.85rem;
 }
-.dash-sched-row.is-today { background: rgba(46,134,193,0.08); }
-.dash-sched-row .sched-day { width: 38px; font-weight: 700; color: var(--text-muted); flex-shrink: 0; }
+.dash-sched-row.is-today { background: rgba(214,99,158,0.08); }
+.dash-sched-row .sched-day { width: 34px; font-weight: 700; color: var(--text-muted); flex-shrink: 0; font-size: 0.8rem; }
 .dash-sched-row.is-today .sched-day { color: var(--accent); }
 .dash-sched-row .sched-label { flex: 1; color: var(--text-dim); }
 .dash-sched-row.is-today .sched-label { color: var(--text); }
 .dash-sched-row .sched-label.rest { font-style: italic; }
 .dash-sched-row .sched-desc { color: var(--text-dim); font-size: 0.7rem; font-weight: 400; }
-.dash-sched-row .sched-indicator { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.sched-status { flex-shrink: 0; font-size: 0.75rem; font-weight: 600; min-width: 42px; text-align: right; }
+.sched-status.done { color: var(--green); }
+.sched-status.missed { color: var(--red); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.3px; }
+.sched-status.rest-ok { color: var(--text-dim); }
+.sched-done .sched-label { color: var(--text-muted); }
+.sched-missed .sched-label { color: var(--text-muted); }
 
 /* ── Group View ── */
 .group-code-display {
