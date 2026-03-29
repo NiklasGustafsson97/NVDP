@@ -104,6 +104,50 @@ select option { background: #1a1a2e; color: var(--text); }
 }
 .topbar button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.85rem; }
 .topbar button:hover { color: var(--text); }
+.topbar .avatar { cursor: pointer; transition: box-shadow 0.15s; }
+.topbar .avatar:hover { box-shadow: 0 0 0 2px var(--accent); }
+
+/* ── Side Menu ── */
+.side-menu-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);
+}
+.side-menu {
+  position: fixed; top: 0; right: -300px; width: 280px; height: 100%;
+  background: var(--bg-card); border-left: 1px solid var(--border);
+  z-index: 201; transition: right 0.25s ease;
+  display: flex; flex-direction: column; overflow-y: auto;
+}
+.side-menu.open { right: 0; }
+.sm-header { padding: 24px 20px 16px; border-bottom: 1px solid var(--border); }
+.sm-user { display: flex; align-items: center; gap: 12px; }
+.sm-avatar {
+  width: 40px; height: 40px; border-radius: 50%; background: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem; font-weight: 700; color: #fff; flex-shrink: 0;
+}
+.sm-name { font-weight: 700; font-size: 0.95rem; }
+.sm-email { font-size: 0.75rem; color: var(--text-dim); margin-top: 2px; }
+.sm-section { padding: 12px 20px; }
+.sm-section-title { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); font-weight: 700; margin-bottom: 8px; }
+.sm-divider { height: 1px; background: var(--border); margin: 0 20px; }
+.sm-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  background: none; border: none; color: var(--text-muted); cursor: pointer;
+  padding: 10px 4px; font-size: 0.85rem; border-radius: 6px;
+  transition: background 0.15s;
+}
+.sm-item:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+.sm-item.sm-logout { color: var(--red); }
+.sm-item.sm-logout:hover { background: rgba(231,76,60,0.08); }
+.sm-item.sm-leave { color: var(--red); font-size: 0.8rem; margin-top: 8px; }
+.sm-code-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.sm-code { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 700; color: var(--accent); letter-spacing: 2px; }
+.sm-members { display: flex; flex-direction: column; gap: 4px; }
+.sm-member { font-size: 0.8rem; color: var(--text-muted); padding: 2px 0; }
+
+/* ── Feed More Button ── */
+.feed-more-btn { display: block; width: 100%; margin-top: 12px; text-align: center; }
 
 /* ── Bottom Nav ── */
 .bottom-nav {
@@ -150,7 +194,7 @@ select option { background: #1a1a2e; color: var(--text); }
 /* ── Today / Tomorrow Cards ── */
 .dash-today-row { display: flex; gap: 12px; margin-bottom: 16px; }
 .dash-today-main { flex: 3; border-left: 3px solid var(--accent); margin-bottom: 0; }
-.dash-tomorrow-card { flex: 1; margin-bottom: 0; text-align: center; display: flex; flex-direction: column; }
+.dash-tomorrow-card { flex: 1; margin-bottom: 0; display: flex; flex-direction: column; }
 .dash-tomorrow-card .card-header { margin-bottom: 8px; }
 .today-workout { font-size: 1.2rem; font-weight: 600; margin-bottom: 4px; }
 .today-desc { color: var(--text-muted); font-size: 0.85rem; }
@@ -312,12 +356,17 @@ select option { background: #1a1a2e; color: var(--text); }
 .vd-compact.delta-warn .vd-pct, .vd-compact.delta-warn .vd-msg { color: var(--amber); }
 .vd-compact.delta-neutral .vd-pct { color: var(--text-muted); }
 
-/* ── Streak Badge ── */
+/* ── Streak ── */
+.streak-card {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px;
+}
 .streak-badge {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 6px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: 600;
+  padding: 4px 12px; border-radius: 14px; font-size: 0.8rem; font-weight: 600;
   background: rgba(243,156,18,0.12); color: var(--amber);
 }
+.chart-container-sm { height: 200px; position: relative; }
 
 /* ── Loading ── */
 .spinner {
@@ -610,6 +659,58 @@ input.code-input {
 .confirm-actions .btn { flex: 1; }
 .btn-danger { background: var(--red); color: #fff; }
 .btn-danger:hover { background: #c0392b; transform: translateY(-1px); }
+
+/* ── Strava Integration ── */
+.strava-connect-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 10px 14px; border-radius: var(--radius-sm);
+  background: #FC4C02; color: #fff; border: none;
+  font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  font-family: var(--font); transition: all 0.2s;
+}
+.strava-connect-btn:hover { background: #e04400; transform: translateY(-1px); }
+.strava-connect-btn svg { flex-shrink: 0; }
+
+.strava-status {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.strava-connected-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 0.8rem; color: var(--green);
+}
+.strava-connected-row svg { flex-shrink: 0; }
+.strava-sync-info {
+  font-size: 0.7rem; color: var(--text-dim);
+}
+.strava-actions {
+  display: flex; gap: 6px; margin-top: 4px;
+}
+.strava-sync-btn {
+  display: flex; align-items: center; gap: 4px;
+  padding: 5px 12px; border-radius: 14px; font-size: 0.75rem; font-weight: 600;
+  cursor: pointer; border: 1px solid var(--border);
+  color: var(--text-muted); background: transparent;
+  transition: all 0.2s; font-family: var(--font);
+}
+.strava-sync-btn:hover { background: var(--bg-card-hover); color: var(--text); }
+.strava-sync-btn.syncing { opacity: 0.5; cursor: wait; }
+.strava-disconnect-btn {
+  display: flex; align-items: center; gap: 4px;
+  padding: 5px 12px; border-radius: 14px; font-size: 0.75rem; font-weight: 600;
+  cursor: pointer; border: 1px solid rgba(231,76,60,0.2);
+  color: var(--red); background: transparent;
+  transition: all 0.2s; font-family: var(--font);
+}
+.strava-disconnect-btn:hover { background: rgba(231,76,60,0.08); }
+
+.strava-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 6px; border-radius: 8px;
+  font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
+  background: rgba(252,76,2,0.12); color: #FC4C02;
+  margin-left: 4px; vertical-align: middle;
+}
+.strava-badge svg { width: 10px; height: 10px; }
 
 /* ── Utility ── */
 .mt-8 { margin-top: 8px; }

@@ -138,8 +138,64 @@ document.getElementById('auth-form').addEventListener('submit', async (e) => {
 });
 
 async function logout() {
+  closeSideMenu();
   await sb.auth.signOut();
   showAuth();
+}
+
+function toggleSideMenu() {
+  const menu = document.getElementById('side-menu');
+  const overlay = document.getElementById('side-menu-overlay');
+  const open = menu.classList.contains('open');
+  if (open) { closeSideMenu(); } else { openSideMenu(); }
+}
+
+function openSideMenu() {
+  document.getElementById('side-menu').classList.add('open');
+  document.getElementById('side-menu-overlay').classList.remove('hidden');
+  updateSideMenuContent();
+}
+
+function closeSideMenu() {
+  document.getElementById('side-menu').classList.remove('open');
+  document.getElementById('side-menu-overlay').classList.add('hidden');
+}
+
+function updateSideMenuContent() {
+  const smName = document.getElementById('sm-name');
+  const smEmail = document.getElementById('sm-email');
+  const smAvatar = document.getElementById('sm-avatar');
+  if (currentProfile) {
+    smName.textContent = currentProfile.name;
+    smAvatar.textContent = currentProfile.name[0].toUpperCase();
+  }
+  if (currentUser) smEmail.textContent = currentUser.email;
+
+  const groupSection = document.getElementById('sm-group-section');
+  const groupInfo = document.getElementById('sm-group-info');
+  if (currentProfile?.group_id) {
+    groupSection.style.display = '';
+    const code = _cachedGroupCode || '------';
+    const memberEls = _cachedGroupMembers || [];
+    const memberList = memberEls.map(m => {
+      const isMe = m.id === currentProfile.id;
+      return `<div class="sm-member">${m.name}${isMe ? ' (du)' : ''}</div>`;
+    }).join('');
+    groupInfo.innerHTML = `
+      <div class="sm-code-row">
+        <span class="sm-code">${code}</span>
+        <button class="btn btn-sm btn-ghost" onclick="copyGroupCode()">Kopiera</button>
+      </div>
+      <div class="sm-members">${memberList}</div>
+      <button class="sm-item sm-leave" onclick="closeSideMenu();leaveGroup()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Lämna grupp
+      </button>`;
+  } else {
+    groupSection.style.display = 'none';
+  }
+
+  updateStravaUI();
 }
 
 function showAuth() {
@@ -195,7 +251,6 @@ async function initApp(user, accessToken) {
       }
     }
 
-    document.getElementById('user-name').textContent = currentProfile?.name || user.email;
     document.getElementById('user-avatar').textContent = (currentProfile?.name || 'U')[0].toUpperCase();
 
     const typeSelect = document.getElementById('log-type');
@@ -212,6 +267,8 @@ async function initApp(user, accessToken) {
 
     updateNudgeBadge();
     registerPushSubscription();
+    checkStravaConnection();
+    handleStravaRedirect();
   } catch (err) {
     console.error('initApp error:', err);
     document.getElementById('app').classList.add('active');
@@ -551,8 +608,8 @@ async function _loadDashboard() {
           ${activityEmoji(w.activity_type)}
         </div>
         <div class="workout-info">
-          <div class="name">${w.activity_type}${intBadge}</div>
-          <div class="meta">${formatDate(w.workout_date)}${w.notes && w.notes !== 'Importerad' ? ' — ' + w.notes : ''}</div>
+          <div class="name">${w.activity_type}${intBadge}${stravaSourceBadge(w)}</div>
+          <div class="meta">${formatDate(w.workout_date)}${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? ' — ' + w.notes : ''}</div>
         </div>
         <div class="workout-info duration">${w.duration_minutes} min${distStr}</div>
       </div>`;
@@ -586,12 +643,13 @@ async function openWorkoutModal(w) {
 
   const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
   let body = '';
-  body += `<div class="modal-detail-row"><span class="mdr-label">Aktivitet</span><span class="mdr-value">${w.activity_type} ${intBadge}</span></div>`;
+  body += `<div class="modal-detail-row"><span class="mdr-label">Aktivitet</span><span class="mdr-value">${w.activity_type} ${intBadge}${stravaSourceBadge(w)}</span></div>`;
   body += `<div class="modal-detail-row"><span class="mdr-label">Datum</span><span class="mdr-value">${w.workout_date}</span></div>`;
   body += `<div class="modal-detail-row"><span class="mdr-label">Tid</span><span class="mdr-value">${w.duration_minutes} min</span></div>`;
   if (w.distance_km) body += `<div class="modal-detail-row"><span class="mdr-label">Distans</span><span class="mdr-value">${w.distance_km} km</span></div>`;
   if (w.workout_time) body += `<div class="modal-detail-row"><span class="mdr-label">Klockslag</span><span class="mdr-value">${w.workout_time}</span></div>`;
-  if (w.notes && w.notes !== 'Importerad') body += `<div class="modal-detail-row"><span class="mdr-label">Anteckning</span><span class="mdr-value">${w.notes}</span></div>`;
+  if (w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]')) body += `<div class="modal-detail-row"><span class="mdr-label">Anteckning</span><span class="mdr-value">${w.notes}</span></div>`;
+  if (w.source === 'strava') body += `<div class="modal-detail-row"><span class="mdr-label">Källa</span><span class="mdr-value" style="color:#FC4C02;">Strava auto-import</span></div>`;
 
   body += `<div id="wm-reactions" class="wm-reactions"><span class="text-dim">Laddar...</span></div>`;
   body += `<div id="wm-comments" class="wm-comments"><span class="text-dim">Laddar...</span></div>`;
@@ -952,7 +1010,7 @@ function renderSchema(workouts, plans, monday, isDeload) {
     if (dayWorkouts.length > 0) {
       const wList = dayWorkouts.map(w => {
         const intB = w.intensity ? ` <span class="intensity-badge">${w.intensity}</span>` : '';
-        return `<span class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>${w.duration_minutes}'${intB}</span>`;
+        return `<span class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>${w.duration_minutes}'${intB}${stravaSourceBadge(w)}</span>`;
       }).join(' ');
       rightContent = `<div class="sr-done-info">${wList}</div>`;
     } else if (statusClass === 'missed') {
@@ -1160,22 +1218,56 @@ async function _loadTrends() {
   const streak = calcStreak(myWorkouts, currentProfile.id);
   const streakEl = document.getElementById('personal-streak');
   if (streakEl) {
-    streakEl.innerHTML = `<div class="text-center mt-8"><span class="streak-badge">${streak} veckor i rad</span></div>`;
+    streakEl.innerHTML = `<span class="streak-badge">${streak} veckor i rad</span>`;
   }
 
-  // Season totals
-  const totalsEl = document.getElementById('personal-totals');
-  if (totalsEl) {
+  // Season totals pie chart
+  const pieCanvas = document.getElementById('chart-season-pie');
+  if (pieCanvas) {
+    if (window._chartSeasonPie) window._chartSeasonPie.destroy();
     const byType = {};
     myWorkouts.forEach(w => { byType[w.activity_type] = (byType[w.activity_type] || 0) + w.duration_minutes; });
     const totalAll = myWorkouts.reduce((s, w) => s + w.duration_minutes, 0);
-    let html = '';
-    Object.keys(byType).sort().forEach(t => {
-      const pct = Math.round((byType[t] / totalAll) * 100);
-      html += `<div class="summary-row"><span class="label">${t}</span><span class="value">${(byType[t]/60).toFixed(1)}h (${pct}%)</span></div>`;
+    const types = Object.keys(byType).sort();
+    window._chartSeasonPie = new Chart(pieCanvas.getContext('2d'), {
+      type: 'doughnut',
+      data: {
+        labels: types,
+        datasets: [{ data: types.map(t => +(byType[t] / 60).toFixed(1)), backgroundColor: types.map(t => ACTIVITY_COLORS[t] || '#555'), borderWidth: 0 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        cutout: '55%',
+        plugins: {
+          legend: { position: 'right', labels: { color: '#aaa', padding: 10, font: { size: 11 }, generateLabels: (chart) => {
+            const ds = chart.data.datasets[0];
+            return chart.data.labels.map((l, i) => ({
+              text: `${l}  ${ds.data[i]}h`,
+              fillStyle: ds.backgroundColor[i],
+              hidden: false, index: i
+            }));
+          }}},
+          tooltip: { callbacks: { label: c => {
+            const pct = totalAll > 0 ? Math.round((byType[c.label] / totalAll) * 100) : 0;
+            return `${c.label}: ${c.parsed}h (${pct}%)`;
+          }}}
+        }
+      },
+      plugins: [{
+        id: 'centerTotal',
+        afterDraw(chart) {
+          const { ctx, width, height } = chart;
+          const x = chart.chartArea.left + (chart.chartArea.right - chart.chartArea.left) / 2;
+          const y = chart.chartArea.top + (chart.chartArea.bottom - chart.chartArea.top) / 2;
+          ctx.save();
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.font = '700 1.1rem ' + getComputedStyle(document.body).fontFamily;
+          ctx.fillStyle = '#fff';
+          ctx.fillText((totalAll / 60).toFixed(1) + 'h', x, y);
+          ctx.restore();
+        }
+      }]
     });
-    html += `<div class="summary-row total"><span class="label">Totalt</span><span class="value">${(totalAll/60).toFixed(1)}h</span></div>`;
-    totalsEl.innerHTML = html;
   }
 }
 
@@ -1215,6 +1307,7 @@ let grpChartMode = 'cardio';
 let chartGroupWeekly = null;
 let _cachedGroupWorkouts = [];
 let _cachedGroupMembers = [];
+let _cachedGroupCode = '';
 
 function generateCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -1254,7 +1347,7 @@ async function _loadGroup() {
   } catch (e) { console.error('Group fetch error:', e); }
 
   if (group) {
-    document.getElementById('group-code-value').textContent = group.code;
+    _cachedGroupCode = group.code;
     document.getElementById('group-subtitle').textContent = group.name;
   }
 
@@ -1267,19 +1360,6 @@ async function _loadGroup() {
     });
     members = await resp.json();
   } catch (e) { console.error('Members fetch error:', e); }
-
-  // Render members
-  const membersEl = document.getElementById('group-members');
-  const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
-  membersEl.innerHTML = members.map((m, i) => {
-    const isMe = m.id === currentProfile.id;
-    return `<div class="group-member">
-      <div class="member-avatar" style="background:${colors[i % colors.length]};">${m.name[0].toUpperCase()}</div>
-      <div class="member-info">
-        <div class="member-name">${m.name}${isMe ? ' (du)' : ''}</div>
-      </div>
-    </div>`;
-  }).join('');
 
   // Leaderboard: hours this week
   const now = new Date();
@@ -1457,9 +1537,9 @@ async function leaveGroup() {
 }
 
 function copyGroupCode() {
-  const code = document.getElementById('group-code-value').textContent;
-  navigator.clipboard.writeText(code).then(() => {
-    const btn = document.querySelector('.group-code-actions .btn');
+  navigator.clipboard.writeText(_cachedGroupCode).then(() => {
+    const btn = document.querySelector('.sm-code-row .btn');
+    if (!btn) return;
     const orig = btn.textContent;
     btn.textContent = 'Kopierad!';
     setTimeout(() => btn.textContent = orig, 1500);
@@ -1526,27 +1606,59 @@ function renderGroupWeekDetail(allWorkouts, members, plans) {
 }
 
 let _feedReactionsCache = null;
+let _feedAllItems = [];
+let _feedShown = 0;
+const FEED_PAGE = 10;
 
 async function renderGroupFeed(allWorkouts, members) {
   const feedEl = document.getElementById('group-feed');
+  const moreBtn = document.getElementById('feed-more-btn');
   if (!feedEl) return;
 
-  const recent = allWorkouts
+  _feedAllItems = allWorkouts
     .filter(w => members.some(m => m.id === w.profile_id))
-    .slice(-20).reverse();
+    .reverse();
+  _feedShown = 0;
 
-  if (recent.length === 0) {
+  if (_feedAllItems.length === 0) {
     feedEl.innerHTML = '<div class="empty-state"><p>Inga loggade pass ännu</p></div>';
+    if (moreBtn) moreBtn.classList.add('hidden');
     return;
   }
 
-  const workoutIds = recent.map(w => w.id);
+  const visible = _feedAllItems.slice(0, FEED_PAGE);
+  _feedShown = visible.length;
+  const workoutIds = visible.map(w => w.id);
   const reactions = await fetchReactionsBulk(workoutIds);
-  _feedReactionsCache = { recent, members, reactions };
+  _feedReactionsCache = { recent: _feedAllItems, members, reactions };
 
+  feedEl.innerHTML = renderFeedItems(visible, members, reactions);
+  if (moreBtn) moreBtn.classList.toggle('hidden', _feedShown >= _feedAllItems.length);
+}
+
+async function showMoreFeed() {
+  if (!_feedReactionsCache) return;
+  const { members, reactions: prevReactions } = _feedReactionsCache;
+  const nextBatch = _feedAllItems.slice(_feedShown, _feedShown + FEED_PAGE);
+  if (nextBatch.length === 0) return;
+
+  const newIds = nextBatch.map(w => w.id);
+  const newReactions = await fetchReactionsBulk(newIds);
+  const allReactions = [...prevReactions, ...newReactions];
+  _feedReactionsCache.reactions = allReactions;
+
+  const feedEl = document.getElementById('group-feed');
+  feedEl.innerHTML += renderFeedItems(nextBatch, members, allReactions);
+  _feedShown += nextBatch.length;
+
+  const moreBtn = document.getElementById('feed-more-btn');
+  if (moreBtn) moreBtn.classList.toggle('hidden', _feedShown >= _feedAllItems.length);
+}
+
+function renderFeedItems(items, members, reactions) {
   const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
-
-  feedEl.innerHTML = recent.map(w => {
+  return items.map(w => {
+    const globalIdx = _feedAllItems.indexOf(w);
     const mi = members.findIndex(m => m.id === w.profile_id);
     const member = members[mi] || {};
     const color = colors[mi % colors.length] || '#2E86C1';
@@ -1557,14 +1669,14 @@ async function renderGroupFeed(allWorkouts, members) {
     const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
     const notesSnip = w.notes && w.notes !== 'Importerad' ? `<div class="feed-notes">${escapeHTML(w.notes)}</div>` : '';
 
-    return `<div class="feed-item" onclick="openFeedWorkout(${recent.indexOf(w)})">
+    return `<div class="feed-item" onclick="openFeedWorkout(${globalIdx})">
       <div class="feed-header">
         <div class="feed-avatar" style="background:${color}">${(member.name || '?')[0].toUpperCase()}</div>
         <div class="feed-info">
           <div class="feed-name">${member.name || '?'}</div>
           <div class="feed-date">${formatDate(w.workout_date)}</div>
         </div>
-        <div class="feed-type">${activityEmoji(w.activity_type)} ${w.duration_minutes}'${intBadge}</div>
+        <div class="feed-type">${activityEmoji(w.activity_type)} ${w.duration_minutes}'${intBadge}${stravaSourceBadge(w)}</div>
       </div>
       ${notesSnip}
       <div class="feed-reactions" onclick="event.stopPropagation()">
@@ -1708,6 +1820,141 @@ function formatTimeAgo(date) {
   const diffDays = Math.floor(diffHours / 24);
   if (diffDays === 1) return 'Igår';
   return `${diffDays} dagar sedan`;
+}
+
+// ═══════════════════════
+//  STRAVA INTEGRATION
+// ═══════════════════════
+let _stravaConnection = null;
+
+async function checkStravaConnection() {
+  if (!currentProfile) return;
+  try {
+    const { data, error } = await sb.from('strava_connections')
+      .select('*')
+      .eq('profile_id', currentProfile.id)
+      .maybeSingle();
+    _stravaConnection = error ? null : data;
+  } catch (e) {
+    _stravaConnection = null;
+  }
+  updateStravaUI();
+}
+
+function updateStravaUI() {
+  const el = document.getElementById('sm-strava-info');
+  if (!el) return;
+
+  if (!STRAVA_CLIENT_ID) {
+    el.innerHTML = '<div class="strava-sync-info">Strava Client ID ej konfigurerat</div>';
+    return;
+  }
+
+  if (_stravaConnection) {
+    const syncText = _stravaConnection.last_sync_at
+      ? `Senast synkad: ${new Date(_stravaConnection.last_sync_at).toLocaleString('sv-SE', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+      : 'Ej synkad ännu';
+    el.innerHTML = `
+      <div class="strava-status">
+        <div class="strava-connected-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>
+          Strava kopplad
+        </div>
+        <div class="strava-sync-info">${syncText}</div>
+        <div class="strava-actions">
+          <button class="strava-sync-btn" id="strava-sync-btn" onclick="syncStrava()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            Synka nu
+          </button>
+          <button class="strava-disconnect-btn" onclick="disconnectStrava()">Koppla från</button>
+        </div>
+      </div>`;
+  } else {
+    el.innerHTML = `
+      <button class="strava-connect-btn" onclick="connectStrava()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.599h4.172L10.463 0l-7 13.828h4.169"/></svg>
+        Koppla Strava
+      </button>`;
+  }
+}
+
+function connectStrava() {
+  if (!STRAVA_CLIENT_ID || !currentProfile) return;
+  const scope = 'activity:read_all';
+  const state = currentProfile.id;
+  const url = `https://www.strava.com/oauth/authorize?client_id=${STRAVA_CLIENT_ID}&redirect_uri=${encodeURIComponent(STRAVA_REDIRECT_URI)}&response_type=code&scope=${scope}&state=${state}&approval_prompt=auto`;
+  window.location.href = url;
+}
+
+async function disconnectStrava() {
+  if (!_stravaConnection) return;
+  const confirmed = await showConfirmModal(
+    'Koppla från Strava',
+    'Dina manuella pass påverkas inte. Automatisk import stoppas.',
+    'Koppla från',
+    true
+  );
+  if (!confirmed) return;
+
+  const { error } = await sb.from('strava_connections')
+    .delete()
+    .eq('id', _stravaConnection.id);
+  if (error) {
+    await showAlertModal('Fel', 'Kunde inte koppla från: ' + error.message);
+    return;
+  }
+  _stravaConnection = null;
+  updateStravaUI();
+}
+
+async function syncStrava() {
+  if (!_stravaConnection || !currentProfile) return;
+  const btn = document.getElementById('strava-sync-btn');
+  if (btn) { btn.classList.add('syncing'); btn.textContent = 'Synkar...'; }
+
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/strava-sync', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ profile_id: currentProfile.id }),
+    });
+
+    const result = await res.json();
+    if (res.ok) {
+      _stravaConnection.last_sync_at = result.last_sync_at;
+      updateStravaUI();
+      await showAlertModal('Synk klar', `${result.imported} pass importerade.`);
+      navigate(currentView);
+    } else {
+      await showAlertModal('Synk-fel', result.error || 'Okänt fel');
+    }
+  } catch (e) {
+    console.error('Strava sync error:', e);
+    await showAlertModal('Synk-fel', 'Nätverksfel vid synkning');
+  }
+
+  if (btn) { btn.classList.remove('syncing'); btn.textContent = 'Synka nu'; }
+}
+
+function handleStravaRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('strava_connected')) {
+    history.replaceState(null, '', window.location.pathname);
+    setTimeout(() => showAlertModal('Strava kopplad!', 'Ditt Strava-konto är nu anslutet. Dina pass synkas automatiskt.'), 500);
+  } else if (params.has('strava_error')) {
+    const err = params.get('strava_error');
+    history.replaceState(null, '', window.location.pathname);
+    setTimeout(() => showAlertModal('Strava-fel', 'Kunde inte koppla Strava: ' + err), 500);
+  }
+}
+
+function stravaSourceBadge(workout) {
+  if (workout.source !== 'strava') return '';
+  return `<span class="strava-badge"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.599h4.172L10.463 0l-7 13.828h4.169"/></svg>Strava</span>`;
 }
 
 // ═══════════════════════

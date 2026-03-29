@@ -1,0 +1,11 @@
+[project]
+id = ""
+
+[functions.strava-auth]
+verify_jwt = false
+
+[functions.strava-webhook]
+verify_jwt = false
+
+[functions.strava-sync]
+verify_jwt = true

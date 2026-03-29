@@ -56,3 +56,8 @@ const CARDIO_TYPES = [
   'Stakmaskin',
   'Längdskidor',
 ];
+
+// ── Strava Integration ──
+const STRAVA_CLIENT_ID = ''; // Set after registering at developers.strava.com
+const SUPABASE_FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
+const STRAVA_REDIRECT_URI = SUPABASE_FUNCTIONS_URL + '/strava-auth';
