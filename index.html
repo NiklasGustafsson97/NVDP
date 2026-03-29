@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NVDP</title>
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=20">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
@@ -492,8 +492,8 @@
     </div>
     <div id="wm-body"></div>
     <div class="modal-actions" id="wm-edit-actions">
-      <button class="btn btn-primary btn-sm" onclick="editWorkout()">Redigera</button>
-      <button class="btn btn-sm" style="background:var(--red);color:#fff;" onclick="deleteWorkout()">Ta bort</button>
+      <button class="btn btn-outline btn-sm" onclick="editWorkout()">Redigera</button>
+      <button class="btn btn-danger-text btn-sm" onclick="deleteWorkout()">Ta bort</button>
     </div>
   </div>
 </div>
@@ -507,8 +507,8 @@
   </div>
 </div>
 
-<script src="js/config.js?v=18"></script>
-<script src="js/app.js?v=18"></script>
+<script src="js/config.js?v=20"></script>
+<script src="js/app.js?v=20"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {

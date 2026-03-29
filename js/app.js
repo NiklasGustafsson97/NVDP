@@ -798,10 +798,13 @@ async function openWorkoutModal(w) {
 
   document.getElementById('workout-modal').classList.remove('hidden');
 
-  loadModalSocial(w.id);
+  loadModalSocial(w.id, isOwn);
 }
 
-async function loadModalSocial(workoutId) {
+async function loadModalSocial(workoutId, isOwn) {
+  if (isOwn === undefined) {
+    isOwn = selectedWorkout && selectedWorkout.profile_id === currentProfile.id;
+  }
   const [reactions, comments] = await Promise.all([fetchReactions(workoutId), fetchComments(workoutId)]);
 
   const likes = reactions.filter(r => r.reaction === 'like');
@@ -815,20 +818,31 @@ async function loadModalSocial(workoutId) {
     const likeTooltip = likeNames.length ? likeNames.join(', ') : '';
     const dislikeTooltip = dislikeNames.length ? dislikeNames.join(', ') : '';
 
-    reactEl.innerHTML = `
-      <div class="reaction-bar">
-        <button class="react-btn${myReaction?.reaction === 'like' ? ' active' : ''}" onclick="handleReaction('${workoutId}', 'like')" title="${likeTooltip}">
-          <span class="react-icon">👍</span><span class="react-count">${likes.length || ''}</span>
-        </button>
-        <button class="react-btn${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="handleReaction('${workoutId}', 'dislike')" title="${dislikeTooltip}">
-          <span class="react-icon">👎</span><span class="react-count">${dislikes.length || ''}</span>
-        </button>
-      </div>`;
+    if (isOwn) {
+      const summary = [];
+      if (likes.length) summary.push(`👍 ${likes.length}`);
+      if (dislikes.length) summary.push(`👎 ${dislikes.length}`);
+      reactEl.innerHTML = summary.length
+        ? `<div class="reaction-bar"><span class="reaction-summary" title="${likeTooltip}">${summary.join('  ')}</span></div>`
+        : '';
+    } else {
+      reactEl.innerHTML = `
+        <div class="reaction-bar">
+          <button class="react-btn${myReaction?.reaction === 'like' ? ' active' : ''}" onclick="handleReaction('${workoutId}', 'like')" title="${likeTooltip}">
+            <span class="react-icon">👍</span><span class="react-count">${likes.length || ''}</span>
+          </button>
+          <button class="react-btn${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="handleReaction('${workoutId}', 'dislike')" title="${dislikeTooltip}">
+            <span class="react-icon">👎</span><span class="react-count">${dislikes.length || ''}</span>
+          </button>
+        </div>`;
+    }
   }
 
   const commEl = document.getElementById('wm-comments');
   if (commEl) {
     let html = '<div class="comments-section">';
+    html += `<div class="comment-section-label">Kommentarer</div>`;
+
     if (comments.length > 0) {
       html += '<div class="comment-list">';
       comments.forEach(c => {
@@ -843,10 +857,15 @@ async function loadModalSocial(workoutId) {
         </div>`;
       });
       html += '</div>';
+    } else {
+      html += '<div class="comment-empty">Inga kommentarer \u00e4nnu</div>';
     }
+
     html += `<div class="comment-input-row">
       <input type="text" id="wm-comment-input" class="comment-input" placeholder="Skriv en kommentar..." onkeydown="if(event.key==='Enter')handleAddComment('${workoutId}')">
-      <button class="btn btn-sm btn-primary comment-send" onclick="handleAddComment('${workoutId}')">Skicka</button>
+      <button class="btn btn-sm btn-primary comment-send" onclick="handleAddComment('${workoutId}')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
     </div>`;
     html += '</div>';
     commEl.innerHTML = html;
