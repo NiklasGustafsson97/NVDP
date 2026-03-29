@@ -322,6 +322,22 @@
         <p>Planerat vs faktiskt</p>
       </div>
 
+      <!-- Plan info bar (shown when AI plan is active) -->
+      <div id="plan-info-bar" class="plan-info-bar hidden">
+        <div class="pib-left">
+          <div class="pib-goal" id="pib-goal"></div>
+          <div class="pib-phase" id="pib-phase"></div>
+        </div>
+        <div class="pib-right">
+          <div class="pib-progress">
+            <div class="pib-progress-track"><div class="pib-progress-fill" id="pib-progress-fill"></div></div>
+            <span class="pib-progress-label" id="pib-progress-label"></span>
+          </div>
+        </div>
+      </div>
+
+      <div id="schema-generate-btn-container"></div>
+
       <div class="schema-tabs" id="schema-person-tabs"></div>
 
       <div class="schema-week-nav">
@@ -581,8 +597,174 @@
   </div>
 </div>
 
-<script src="js/config.js?v=23"></script>
-<script src="js/app.js?v=25"></script>
+<!-- ═══ PLAN WIZARD MODAL ═══ -->
+<div id="plan-wizard" class="modal-overlay hidden" onclick="if(event.target===this)closePlanWizard()">
+  <div class="modal-box wizard-box">
+    <div class="modal-header">
+      <h3 id="wizard-title">Skapa träningsplan</h3>
+      <button class="btn-close" onclick="closePlanWizard()">&times;</button>
+    </div>
+
+    <!-- Progress indicator -->
+    <div class="wizard-progress">
+      <div class="wizard-step-dot active" data-step="0"></div>
+      <div class="wizard-step-line"></div>
+      <div class="wizard-step-dot" data-step="1"></div>
+      <div class="wizard-step-line"></div>
+      <div class="wizard-step-dot" data-step="2"></div>
+      <div class="wizard-step-line"></div>
+      <div class="wizard-step-dot" data-step="3"></div>
+    </div>
+
+    <!-- Step 0: Goal -->
+    <div class="wizard-step active" id="wizard-step-0">
+      <div class="wizard-step-title">Vad är ditt mål?</div>
+      <div class="wizard-goal-grid" id="wizard-goal-grid"></div>
+      <div id="wizard-goal-fields" class="hidden">
+        <div class="form-group" id="wiz-goal-text-group">
+          <label>Beskriv ditt mål</label>
+          <input type="text" id="wiz-goal-text" placeholder="t.ex. Halvmarathon under 1:45">
+        </div>
+        <div class="form-row" id="wiz-race-fields" style="display:none">
+          <div class="form-group flex-1">
+            <label>Loppdatum</label>
+            <input type="date" id="wiz-goal-date">
+          </div>
+          <div class="form-group flex-1">
+            <label>Måltid (valfritt)</label>
+            <input type="text" id="wiz-goal-time" placeholder="1:45:00">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 1: Constraints -->
+    <div class="wizard-step" id="wizard-step-1">
+      <div class="wizard-step-title">Dina ramar</div>
+      <div class="form-group">
+        <label>Pass per vecka</label>
+        <div class="wiz-slider-row">
+          <input type="range" id="wiz-sessions" min="2" max="7" value="5" oninput="document.getElementById('wiz-sessions-val').textContent=this.value">
+          <span class="wiz-slider-val" id="wiz-sessions-val">5</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Timmar per vecka</label>
+        <div class="wiz-slider-row">
+          <input type="range" id="wiz-hours" min="2" max="15" value="5" step="0.5" oninput="document.getElementById('wiz-hours-val').textContent=this.value">
+          <span class="wiz-slider-val" id="wiz-hours-val">5</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Tillgängliga dagar</label>
+        <div class="wiz-day-toggles" id="wiz-avail-days">
+          <button type="button" class="wiz-day-btn active" data-day="0">Mån</button>
+          <button type="button" class="wiz-day-btn active" data-day="1">Tis</button>
+          <button type="button" class="wiz-day-btn active" data-day="2">Ons</button>
+          <button type="button" class="wiz-day-btn active" data-day="3">Tors</button>
+          <button type="button" class="wiz-day-btn active" data-day="4">Fre</button>
+          <button type="button" class="wiz-day-btn active" data-day="5">Lör</button>
+          <button type="button" class="wiz-day-btn active" data-day="6">Sön</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Max längd per pass</label>
+        <select id="wiz-max-session">
+          <option value="45">45 min</option>
+          <option value="60">60 min</option>
+          <option value="90" selected>90 min</option>
+          <option value="120">120 min</option>
+          <option value="150">150 min</option>
+          <option value="180">180 min</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Skador / begränsningar (valfritt)</label>
+        <input type="text" id="wiz-injuries" placeholder="t.ex. Ont i höger knä">
+      </div>
+    </div>
+
+    <!-- Step 2: Current level -->
+    <div class="wizard-step" id="wizard-step-2">
+      <div class="wizard-step-title">Din nuvarande nivå</div>
+      <div id="wiz-baseline-auto" class="wiz-baseline-auto hidden">
+        <div class="wiz-baseline-badge">Baserat på dina loggade pass (senaste 4v)</div>
+      </div>
+      <div class="form-row">
+        <div class="form-group flex-1">
+          <label>Pass per vecka (snitt)</label>
+          <input type="number" id="wiz-base-sessions" min="0" max="14" value="3">
+        </div>
+        <div class="form-group flex-1">
+          <label>Timmar per vecka (snitt)</label>
+          <input type="number" id="wiz-base-hours" min="0" max="30" step="0.5" value="3">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Längsta pass senaste 4v (min)</label>
+        <input type="number" id="wiz-base-longest" min="0" max="600" value="60">
+      </div>
+      <div class="form-group">
+        <label>Fitnessnivå</label>
+        <div class="wiz-level-pills" id="wiz-fitness-level">
+          <button type="button" class="intensity-pill" data-value="beginner">Nybörjare</button>
+          <button type="button" class="intensity-pill active" data-value="intermediate">Medel</button>
+          <button type="button" class="intensity-pill" data-value="advanced">Erfaren</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Preferences -->
+    <div class="wizard-step" id="wizard-step-3">
+      <div class="wizard-step-title">Dina preferenser</div>
+      <div class="form-group">
+        <label>Vilka aktiviteter vill du ha?</label>
+        <div class="wiz-activity-checks" id="wiz-activity-types"></div>
+      </div>
+      <div class="form-group">
+        <label>Inkludera gym/styrka?</label>
+        <div class="wiz-toggle-row">
+          <button type="button" class="intensity-pill active" id="wiz-gym-yes" onclick="setWizGym(true)">Ja</button>
+          <button type="button" class="intensity-pill" id="wiz-gym-no" onclick="setWizGym(false)">Nej</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Önskade vilodagar</label>
+        <div class="wiz-day-toggles" id="wiz-rest-days">
+          <button type="button" class="wiz-day-btn active" data-day="0">Mån</button>
+          <button type="button" class="wiz-day-btn" data-day="1">Tis</button>
+          <button type="button" class="wiz-day-btn" data-day="2">Ons</button>
+          <button type="button" class="wiz-day-btn" data-day="3">Tors</button>
+          <button type="button" class="wiz-day-btn" data-day="4">Fre</button>
+          <button type="button" class="wiz-day-btn" data-day="5">Lör</button>
+          <button type="button" class="wiz-day-btn active" data-day="6">Sön</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Startdatum</label>
+        <input type="date" id="wiz-start-date">
+      </div>
+    </div>
+
+    <!-- Loading state -->
+    <div class="wizard-step" id="wizard-step-loading" style="display:none">
+      <div class="wiz-loading">
+        <div class="spinner"></div>
+        <p class="wiz-loading-text">Genererar ditt träningsschema...</p>
+        <p class="wiz-loading-sub">Detta kan ta 15-30 sekunder</p>
+      </div>
+    </div>
+
+    <!-- Navigation buttons -->
+    <div class="wizard-nav" id="wizard-nav">
+      <button class="btn btn-ghost btn-sm" id="wiz-prev" onclick="wizardPrev()" style="visibility:hidden">Tillbaka</button>
+      <button class="btn btn-primary btn-sm" id="wiz-next" onclick="wizardNext()">Nästa</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/config.js?v=24"></script>
+<script src="js/app.js?v=26"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {

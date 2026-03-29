@@ -891,6 +891,145 @@ input.code-input {
 }
 .invite-decline-btn:hover { background: rgba(255,255,255,0.04); color: var(--text-muted); }
 
+/* ── Plan Info Bar ── */
+.plan-info-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-radius: var(--radius-sm);
+  background: rgba(214,99,158,0.06); border: 1px solid rgba(214,99,158,0.15);
+  margin-bottom: 12px; gap: 12px;
+}
+.pib-left { flex: 1; min-width: 0; }
+.pib-goal { font-weight: 600; font-size: 0.85rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pib-phase {
+  display: inline-block; margin-top: 4px; padding: 2px 10px;
+  border-radius: 10px; font-size: 0.7rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.3px;
+  background: rgba(214,99,158,0.12); color: var(--accent);
+}
+.pib-right { flex-shrink: 0; text-align: right; }
+.pib-progress { display: flex; align-items: center; gap: 8px; }
+.pib-progress-track { width: 60px; height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
+.pib-progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.4s ease; }
+.pib-progress-label { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); }
+
+/* ── Generate Plan Button ── */
+.schema-generate-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; padding: 14px; margin-bottom: 16px;
+  background: linear-gradient(135deg, rgba(214,99,158,0.12), rgba(46,134,193,0.12));
+  border: 1px dashed rgba(214,99,158,0.3); border-radius: var(--radius);
+  color: var(--accent); font-size: 0.9rem; font-weight: 600;
+  cursor: pointer; transition: all 0.2s; font-family: var(--font);
+}
+.schema-generate-btn:hover {
+  background: linear-gradient(135deg, rgba(214,99,158,0.18), rgba(46,134,193,0.18));
+  border-color: var(--accent); transform: translateY(-1px);
+}
+.schema-generate-btn svg { flex-shrink: 0; }
+
+/* ── Plan Wizard ── */
+.wizard-box { max-width: 480px; max-height: 85vh; overflow-y: auto; }
+
+.wizard-progress {
+  display: flex; align-items: center; justify-content: center;
+  gap: 0; margin-bottom: 24px; padding: 0 20px;
+}
+.wizard-step-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: rgba(255,255,255,0.1); border: 2px solid var(--border);
+  transition: all 0.2s; flex-shrink: 0;
+}
+.wizard-step-dot.active { background: var(--accent); border-color: var(--accent); }
+.wizard-step-dot.done { background: var(--green); border-color: var(--green); }
+.wizard-step-line { flex: 1; height: 2px; background: var(--border); max-width: 40px; }
+
+.wizard-step { display: none; }
+.wizard-step.active { display: block; animation: fadeIn 0.3s ease; }
+.wizard-step-title { font-size: 1rem; font-weight: 700; margin-bottom: 16px; }
+
+.wizard-goal-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px;
+}
+.wizard-goal-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px; border-radius: var(--radius-sm);
+  background: var(--bg-card); border: 2px solid var(--border);
+  cursor: pointer; transition: all 0.2s; font-family: var(--font);
+  color: var(--text-muted); font-size: 0.85rem; font-weight: 500;
+}
+.wizard-goal-card:hover { border-color: rgba(214,99,158,0.3); color: var(--text); }
+.wizard-goal-card.selected { border-color: var(--accent); background: rgba(214,99,158,0.08); color: var(--text); }
+.wizard-goal-card .goal-icon { font-size: 1.2rem; }
+
+.wiz-slider-row { display: flex; align-items: center; gap: 12px; }
+.wiz-slider-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+.wiz-slider-val { font-weight: 700; font-size: 1rem; min-width: 24px; text-align: right; color: var(--accent); }
+
+.wiz-day-toggles { display: flex; gap: 4px; flex-wrap: wrap; }
+.wiz-day-btn {
+  padding: 8px 10px; border-radius: 8px; font-size: 0.75rem; font-weight: 600;
+  cursor: pointer; border: 1px solid var(--border); color: var(--text-dim);
+  background: transparent; transition: all 0.2s; font-family: var(--font);
+  min-width: 42px; text-align: center;
+}
+.wiz-day-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.wiz-day-btn:hover:not(.active) { background: var(--bg-card-hover); color: var(--text-muted); }
+
+.wiz-baseline-auto { margin-bottom: 12px; }
+.wiz-baseline-badge {
+  display: inline-block; padding: 4px 12px; border-radius: 10px;
+  font-size: 0.75rem; font-weight: 600;
+  background: rgba(46,204,113,0.1); color: var(--green);
+}
+
+.wiz-level-pills { display: flex; gap: 8px; }
+.wiz-toggle-row { display: flex; gap: 8px; }
+
+.wiz-activity-checks { display: flex; flex-wrap: wrap; gap: 6px; }
+.wiz-activity-check {
+  padding: 8px 16px; border-radius: 20px; font-size: 0.82rem; font-weight: 600;
+  cursor: pointer; border: 1px solid var(--border); color: var(--text-muted);
+  background: transparent; transition: all 0.2s; font-family: var(--font);
+}
+.wiz-activity-check.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.wiz-activity-check:hover:not(.active) { background: var(--bg-card-hover); color: var(--text); }
+
+.wiz-loading { text-align: center; padding: 40px 20px; }
+.wiz-loading .spinner { margin: 0 auto 16px; }
+.wiz-loading-text { font-weight: 600; font-size: 1rem; margin-bottom: 4px; }
+.wiz-loading-sub { color: var(--text-dim); font-size: 0.85rem; }
+
+.wizard-nav { display: flex; justify-content: space-between; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+
+/* ── Intensity Zone Badges (enhanced for plan workouts) ── */
+.zone-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
+  margin-left: 6px; vertical-align: middle;
+}
+.zone-badge.zone-z1 { background: rgba(52,152,219,0.15); color: #3498DB; }
+.zone-badge.zone-z2 { background: rgba(46,204,113,0.15); color: #2ECC71; }
+.zone-badge.zone-z3 { background: rgba(243,156,18,0.15); color: #F39C12; }
+.zone-badge.zone-z4 { background: rgba(230,126,34,0.15); color: #E67E22; }
+.zone-badge.zone-z5 { background: rgba(231,76,60,0.15); color: #E74C3C; }
+.zone-badge.zone-mixed { background: rgba(155,89,182,0.15); color: #9B59B6; }
+
+/* ── Phase Badge in Schema ── */
+.phase-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
+  margin-left: 8px;
+}
+.phase-base { background: rgba(52,152,219,0.12); color: #3498DB; }
+.phase-build { background: rgba(46,204,113,0.12); color: #2ECC71; }
+.phase-peak { background: rgba(243,156,18,0.12); color: #F39C12; }
+.phase-taper { background: rgba(155,89,182,0.12); color: #9B59B6; }
+.phase-deload { background: rgba(231,76,60,0.12); color: #E74C3C; }
+.phase-recovery { background: rgba(26,188,156,0.12); color: #1ABC9C; }
+
+/* ── Schema Plan Target Duration ── */
+.sr-target { font-size: 0.7rem; color: var(--text-dim); margin-top: 2px; }
+
 /* ── Utility ── */
 .mt-8 { margin-top: 8px; }
 .mt-16 { margin-top: 16px; }

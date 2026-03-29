@@ -57,6 +57,41 @@ const CARDIO_TYPES = [
   'Längdskidor',
 ];
 
+// ── Plan Generation ──
+const PLAN_GENERATION_ENABLED = true;
+
+const GOAL_TYPES = [
+  { id: 'race', label: 'Lopp / Tävling', icon: '🏁' },
+  { id: 'fitness', label: 'Allmän fitness', icon: '💪' },
+  { id: 'weight_loss', label: 'Gå ner i vikt', icon: '⚖️' },
+  { id: 'sport_specific', label: 'Sportspecifikt', icon: '🎯' },
+  { id: 'custom', label: 'Eget mål', icon: '✏️' },
+];
+
+const FITNESS_LEVELS = [
+  { id: 'beginner', label: 'Nybörjare' },
+  { id: 'intermediate', label: 'Medel' },
+  { id: 'advanced', label: 'Erfaren' },
+];
+
+const INTENSITY_ZONE_COLORS = {
+  Z1: '#3498DB',
+  Z2: '#2ECC71',
+  Z3: '#F39C12',
+  Z4: '#E67E22',
+  Z5: '#E74C3C',
+  mixed: '#9B59B6',
+};
+
+const PHASE_LABELS = {
+  base: 'Bas',
+  build: 'Bygg',
+  peak: 'Topp',
+  taper: 'Nedtrappning',
+  deload: 'Deload',
+  recovery: 'Återhämtning',
+};
+
 // ── Strava Integration ──
 const STRAVA_CLIENT_ID = '217664';
 const SUPABASE_FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';

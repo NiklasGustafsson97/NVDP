@@ -382,6 +382,11 @@ function navigate(view) {
   const navEl = document.querySelector(`.nav-item[data-view="${view}"]`);
   if (navEl) navEl.classList.add('active');
 
+  if (view === 'dashboard' || view === 'schema') {
+    _activePlan = null;
+    _activePlanWeeks = [];
+    _activePlanWorkouts = [];
+  }
   if (view === 'dashboard') loadDashboard();
   else if (view === 'log') resetLogForm();
   else if (view === 'schema') loadSchema();
@@ -589,24 +594,55 @@ async function _loadDashboard() {
   document.getElementById('dash-greeting').textContent = `Hej ${firstName}!`;
   document.getElementById('dash-date').textContent = now.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' });
 
-  const periods = await fetchPeriods();
-  const todayStr = isoDate(now);
-  const period = periods.find(p => todayStr >= p.start_date && todayStr <= p.end_date);
-  let allPlans = [];
-  if (period) allPlans = await fetchPlans(period.id);
-
   const todayEl = document.getElementById('today-content');
   const tomorrowEl = document.getElementById('tomorrow-content');
-  const todayPlan = allPlans.find(p => p.day_of_week === dayOfWeek);
+  const todayStr = isoDate(now);
+  const tomorrowDate = addDays(now, 1);
+  const tomorrowStr = isoDate(tomorrowDate);
   const tomorrowDow = (dayOfWeek + 1) % 7;
-  const tomorrowPlan = allPlans.find(p => p.day_of_week === tomorrowDow);
 
-  if (period) {
+  // Check for AI plan first
+  let useAiPlan = false;
+  let todayPlan = null;
+  let tomorrowPlan = null;
+  let allPlans = [];
+
+  if (PLAN_GENERATION_ENABLED) {
+    if (!_activePlan) {
+      _activePlan = await fetchActivePlan(currentProfile?.id);
+      if (_activePlan) _activePlanWeeks = await fetchPlanWeeks(_activePlan.id);
+    }
+    if (_activePlan && todayStr >= _activePlan.start_date && todayStr <= _activePlan.end_date) {
+      useAiPlan = true;
+      const monday = mondayOfWeek(now);
+      const sunday = addDays(monday, 6);
+      const planWorkouts = await fetchPlanWorkoutsByDate(_activePlan.id, isoDate(monday), isoDate(sunday));
+      todayPlan = planWorkouts.find(pw => pw.workout_date === todayStr);
+      tomorrowPlan = planWorkouts.find(pw => pw.workout_date === tomorrowStr);
+    }
+  }
+
+  if (!useAiPlan) {
+    const periods = await fetchPeriods();
+    const period = periods.find(p => todayStr >= p.start_date && todayStr <= p.end_date);
+    if (period) allPlans = await fetchPlans(period.id);
+    todayPlan = allPlans.find(p => p.day_of_week === dayOfWeek);
+    tomorrowPlan = allPlans.find(p => p.day_of_week === tomorrowDow);
+  }
+
+  const hasPlan = useAiPlan || allPlans.length > 0;
+
+  if (hasPlan) {
     if (todayPlan && todayPlan.is_rest) {
       todayEl.innerHTML = `<div class="today-rest">Vilodag</div>`;
     } else if (todayPlan) {
-      todayEl.innerHTML = `<div class="today-workout">${stripDayPrefix(todayPlan.label)}</div>
-        <div class="today-desc">${todayPlan.description || ''}</div>`;
+      const label = useAiPlan ? (todayPlan.label || todayPlan.activity_type) : stripDayPrefix(todayPlan.label);
+      const desc = todayPlan.description || '';
+      const zoneBadge = (useAiPlan && todayPlan.intensity_zone)
+        ? ` <span class="zone-badge zone-${todayPlan.intensity_zone.toLowerCase()}">${todayPlan.intensity_zone}</span>`
+        : '';
+      todayEl.innerHTML = `<div class="today-workout">${label}${zoneBadge}</div>
+        <div class="today-desc">${desc}</div>`;
     } else {
       todayEl.innerHTML = `<div class="today-rest">Ingen planerad träning</div>`;
     }
@@ -614,7 +650,8 @@ async function _loadDashboard() {
     if (tomorrowPlan && tomorrowPlan.is_rest) {
       tomorrowEl.innerHTML = `<div class="tomorrow-rest">Vila</div>`;
     } else if (tomorrowPlan) {
-      tomorrowEl.innerHTML = `<div class="tomorrow-workout">${stripDayPrefix(tomorrowPlan.label)}</div>
+      const label = useAiPlan ? (tomorrowPlan.label || tomorrowPlan.activity_type) : stripDayPrefix(tomorrowPlan.label);
+      tomorrowEl.innerHTML = `<div class="tomorrow-workout">${label}</div>
         <div class="tomorrow-desc">${tomorrowPlan.description || ''}</div>`;
     } else {
       tomorrowEl.innerHTML = `<div class="tomorrow-rest">—</div>`;
@@ -629,11 +666,30 @@ async function _loadDashboard() {
   const sunday = addDays(monday, 6);
   const weekWorkouts = await fetchWorkouts(currentProfile?.id, isoDate(monday), isoDate(sunday));
 
+  // Get plan data for weekly schedule (AI plan or legacy)
+  let weekPlanItems = [];
+  if (useAiPlan) {
+    const pw = await fetchPlanWorkoutsByDate(_activePlan.id, isoDate(monday), isoDate(sunday));
+    weekPlanItems = pw.map(p => ({
+      day_of_week: p.day_of_week,
+      label: p.label || p.activity_type,
+      description: p.description,
+      is_rest: p.is_rest,
+    }));
+  } else {
+    weekPlanItems = allPlans.map(p => ({
+      day_of_week: p.day_of_week,
+      label: stripDayPrefix(p.label),
+      description: p.description,
+      is_rest: p.is_rest,
+    }));
+  }
+
   const schedEl = document.getElementById('dash-week-schedule');
   let doneCount = 0;
   let schedHTML = '<div class="dash-schedule">';
   for (let i = 0; i < 7; i++) {
-    const plan = allPlans.find(p => p.day_of_week === i);
+    const plan = weekPlanItems.find(p => p.day_of_week === i);
     const dayDate = addDays(monday, i);
     const dayStr = isoDate(dayDate);
     const isTodayRow = dayStr === todayStr;
@@ -646,7 +702,7 @@ async function _loadDashboard() {
     else if (plan?.is_rest && !isFuture) { statusClass = 'rest'; }
     else if (!isFuture && !plan?.is_rest) { statusClass = 'missed'; }
 
-    const shortLabel = plan ? (plan.is_rest ? 'Vila' : stripDayPrefix(plan.label)) : '—';
+    const shortLabel = plan ? (plan.is_rest ? 'Vila' : plan.label) : '—';
     const desc = plan?.description ? ` — ${plan.description}` : '';
     const restClass = plan?.is_rest ? ' rest' : '';
 
@@ -668,16 +724,28 @@ async function _loadDashboard() {
   schedHTML += '</div>';
   schedEl.innerHTML = schedHTML;
 
-  const targetDays = allPlans.length > 0 ? allPlans.filter(p => !p.is_rest).length : 5;
+  const targetDays = weekPlanItems.length > 0 ? weekPlanItems.filter(p => !p.is_rest).length : 5;
   const pct = Math.round((doneCount / targetDays) * 100);
   document.getElementById('compliance-fill').style.width = Math.min(pct, 100) + '%';
   document.getElementById('compliance-fill').style.background = pct >= 80 ? 'var(--green)' : pct >= 50 ? 'var(--amber)' : 'var(--red)';
   document.getElementById('compliance-pct').textContent = pct + '%';
   document.getElementById('compliance-text').textContent = `${doneCount} av ${targetDays} träningsdagar`;
-  document.getElementById('compliance-target').textContent = isDeloadWeek(monday) ? 'Deload-vecka' : '';
+
+  const phaseText = useAiPlan
+    ? (() => {
+        const cw = _activePlanWeeks.find(w => {
+          const ws = new Date(_activePlan.start_date);
+          ws.setDate(ws.getDate() + (w.week_number - 1) * 7);
+          const we = addDays(ws, 6);
+          return todayStr >= isoDate(ws) && todayStr <= isoDate(we);
+        });
+        return cw ? PHASE_LABELS[cw.phase] || '' : '';
+      })()
+    : (isDeloadWeek(monday) ? 'Deload-vecka' : '');
+  document.getElementById('compliance-target').textContent = phaseText;
 
   // Weekly summary (shows for completed weeks or on Sunday)
-  renderWeeklySummary(weekWorkouts, allPlans, monday, currentProfile);
+  renderWeeklySummary(weekWorkouts, weekPlanItems, monday, currentProfile);
 
   // Recent workouts
   const { data: recent } = await sb.from('workouts').select('*')
@@ -1035,26 +1103,60 @@ async function _loadSchema() {
   const targetMonday = addDays(currentMonday, schemaWeekOffset * 7);
   const targetSunday = addDays(targetMonday, 6);
   const wk = weekNumber(targetMonday);
-  const deload = isDeloadWeek(targetMonday);
-
-  document.getElementById('schema-week-label').textContent =
-    `V${wk}${deload ? ' (Deload)' : ''} — ${formatDate(targetMonday)} till ${formatDate(targetSunday)}`;
   const todayBtn = document.getElementById('schema-today-btn');
   if (todayBtn) todayBtn.classList.toggle('hidden', schemaWeekOffset === 0);
 
   const workouts = await fetchWorkouts(profile?.id, isoDate(targetMonday), isoDate(targetSunday));
-
-  // Fetch plans
-  const periods = await fetchPeriods();
-  const mondayStr = isoDate(targetMonday);
-  const period = periods.find(p => mondayStr >= p.start_date && mondayStr <= p.end_date);
-  let plans = [];
-  if (period) plans = await fetchPlans(period.id);
-
   const invitations = await fetchInvitationsForWeek(profile?.id, isoDate(targetMonday), isoDate(targetSunday));
   const isOwnSchema = profile?.id === currentProfile?.id;
 
-  renderSchema(workouts, plans, targetMonday, deload, invitations, isOwnSchema, profile);
+  // Check for AI-generated plan
+  if (isOwnSchema && PLAN_GENERATION_ENABLED) {
+    if (!_activePlan) {
+      _activePlan = await fetchActivePlan(profile?.id);
+      if (_activePlan) {
+        _activePlanWeeks = await fetchPlanWeeks(_activePlan.id);
+      }
+    }
+  }
+
+  const isInActivePlan = _activePlan &&
+    isoDate(targetMonday) >= _activePlan.start_date &&
+    isoDate(targetSunday) <= _activePlan.end_date;
+
+  if (isOwnSchema && isInActivePlan) {
+    // AI plan mode
+    const planWorkouts = await fetchPlanWorkoutsByDate(_activePlan.id, isoDate(targetMonday), isoDate(targetSunday));
+    const currentWeek = planWorkouts.length > 0 ? planWorkouts[0].plan_weeks : null;
+    const phase = currentWeek?.phase || 'base';
+    const weekNum = currentWeek?.week_number || '?';
+    const phaseLabel = PHASE_LABELS[phase] || phase;
+
+    document.getElementById('schema-week-label').textContent =
+      `V${wk} — ${phaseLabel} v${weekNum} — ${formatDate(targetMonday)} till ${formatDate(targetSunday)}`;
+
+    updatePlanInfoBar(_activePlan, _activePlanWeeks);
+    renderGenerateButton();
+    renderSchemaPlan(workouts, planWorkouts, targetMonday, invitations, isOwnSchema, profile, phase);
+  } else {
+    // Legacy mode (period_plans)
+    const deload = isDeloadWeek(targetMonday);
+    document.getElementById('schema-week-label').textContent =
+      `V${wk}${deload ? ' (Deload)' : ''} — ${formatDate(targetMonday)} till ${formatDate(targetSunday)}`;
+
+    if (isOwnSchema) {
+      updatePlanInfoBar(null, []);
+    }
+    renderGenerateButton();
+
+    const periods = await fetchPeriods();
+    const mondayStr = isoDate(targetMonday);
+    const period = periods.find(p => mondayStr >= p.start_date && mondayStr <= p.end_date);
+    let plans = [];
+    if (period) plans = await fetchPlans(period.id);
+
+    renderSchema(workouts, plans, targetMonday, deload, invitations, isOwnSchema, profile);
+  }
 }
 
 function schemaWeekPrev() {
@@ -1187,6 +1289,89 @@ function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchem
 
     const canClick = isOwnSchema && (isFuture || isToday) && !plan?.is_rest && dayWorkouts.length === 0;
     const clickAttr = canClick ? ` onclick="openPlanModal('${dayStr}', ${JSON.stringify(plan || {}).replace(/"/g, '&quot;')}, '${DAY_NAMES_FULL[i]}')" style="cursor:pointer;"` : '';
+
+    html += `<div class="sr-card${isToday ? ' sr-today' : ''} sr-${statusClass}"${clickAttr}>
+      <div class="sr-left">
+        <div class="sr-day">${DAY_NAMES[i]}</div>
+        <div class="sr-date">${dayDate.getDate()}/${dayDate.getMonth() + 1}</div>
+      </div>
+      <div class="sr-main">
+        <div class="sr-plan-text">${planText}</div>
+      </div>
+      <div class="sr-right-status">${rightContent}</div>
+    </div>`;
+  }
+
+  container.innerHTML = html;
+}
+
+// ── AI Plan Schema Renderer ──
+
+function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSchema, profile, phase) {
+  invitations = invitations || [];
+  const container = document.getElementById('schema-content');
+  const todayStr = isoDate(new Date());
+  const profileId = profile?.id || currentProfile?.id;
+
+  let html = '';
+  for (let i = 0; i < 7; i++) {
+    const dayDate = addDays(monday, i);
+    const dayStr = isoDate(dayDate);
+    const dayWorkouts = workouts.filter(w => w.workout_date === dayStr);
+    const planWo = planWorkouts.find(pw => pw.day_of_week === i);
+    const isToday = dayStr === todayStr;
+    const isFuture = dayDate > new Date();
+    const totalMins = dayWorkouts.reduce((s, w) => s + w.duration_minutes, 0);
+
+    const dayInvs = invitations.filter(inv => inv.workout_date === dayStr);
+    const acceptedInv = dayInvs.find(inv => inv.status === 'accepted');
+    const pendingInv = dayInvs.find(inv => inv.status === 'pending');
+
+    let statusClass = 'future';
+    if (dayWorkouts.length > 0) statusClass = 'done';
+    else if (planWo?.is_rest) statusClass = 'rest';
+    else if (!isFuture) statusClass = 'missed';
+
+    let planText = '';
+    if (acceptedInv) {
+      const partnerId = acceptedInv.sender_id === profileId ? acceptedInv.receiver_id : acceptedInv.sender_id;
+      const partner = allProfiles.find(p => p.id === partnerId);
+      const initials = partner ? partner.name.split(' ').map(n => n[0]).join('').toUpperCase() : '?';
+      planText = `<span class="shared-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>${initials}</span> `;
+      planText += acceptedInv.description || acceptedInv.activity_type;
+    } else if (planWo?.is_rest) {
+      planText = '<span class="sr-rest-label">Vila</span>';
+    } else if (planWo) {
+      const zoneBadge = planWo.intensity_zone
+        ? ` <span class="zone-badge zone-${planWo.intensity_zone.toLowerCase()}">${planWo.intensity_zone}</span>`
+        : '';
+      planText = `<span>${planWo.description || planWo.label || planWo.activity_type}${zoneBadge}</span>`;
+      if (planWo.target_duration_minutes > 0) {
+        planText += `<div class="sr-target">${planWo.target_duration_minutes} min${planWo.target_distance_km ? ' · ' + planWo.target_distance_km + ' km' : ''}</div>`;
+      }
+    }
+
+    if (pendingInv && !acceptedInv) {
+      const isSender = pendingInv.sender_id === profileId;
+      planText += isSender
+        ? ' <span class="invite-pending-badge">Inbjudan skickad</span>'
+        : ' <span class="invite-pending-badge">Inbjudan mottagen</span>';
+    }
+
+    let rightContent = '';
+    if (dayWorkouts.length > 0) {
+      const wList = dayWorkouts.map(w => {
+        const intB = w.intensity ? ` <span class="intensity-badge">${w.intensity}</span>` : '';
+        return `<span class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>${w.duration_minutes}'${intB}</span>`;
+      }).join(' ');
+      rightContent = `<div class="sr-done-info">${wList}</div>`;
+    } else if (statusClass === 'missed') {
+      rightContent = '<div class="sr-missed-mark">Missat</div>';
+    }
+
+    const fakePlan = planWo ? { label: planWo.label, description: planWo.description, is_rest: planWo.is_rest, day_of_week: planWo.day_of_week } : {};
+    const canClick = isOwnSchema && (isFuture || isToday) && !planWo?.is_rest && dayWorkouts.length === 0;
+    const clickAttr = canClick ? ` onclick="openPlanModal('${dayStr}', ${JSON.stringify(fakePlan).replace(/"/g, '&quot;')}, '${DAY_NAMES_FULL[i]}')" style="cursor:pointer;"` : '';
 
     html += `<div class="sr-card${isToday ? ' sr-today' : ''} sr-${statusClass}"${clickAttr}>
       <div class="sr-left">
@@ -2580,4 +2765,379 @@ async function sendPushToUser(receiverId) {
   // that retrieves the receiver's push subscription and sends a web push.
   // For now, the nudge is stored in the DB and shown when the user opens the app.
   console.log('Nudge stored in DB for user', receiverId);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  AI TRAINING PLAN GENERATOR
+// ═══════════════════════════════════════════════════════════════════
+
+let _activePlan = null;
+let _activePlanWeeks = [];
+let _activePlanWorkouts = [];
+let _wizardStep = 0;
+let _wizardGoalType = null;
+let _wizardIncludeGym = true;
+
+// ── Fetch active plan ──
+
+async function fetchActivePlan(profileId) {
+  if (!profileId) return null;
+  try {
+    const { data } = await sb.from('training_plans')
+      .select('*')
+      .eq('profile_id', profileId)
+      .eq('status', 'active')
+      .maybeSingle();
+    return data;
+  } catch (e) {
+    console.error('Fetch active plan error:', e);
+    return null;
+  }
+}
+
+async function fetchPlanWeeks(planId) {
+  const { data } = await sb.from('plan_weeks')
+    .select('*')
+    .eq('plan_id', planId)
+    .order('week_number');
+  return data || [];
+}
+
+async function fetchPlanWorkoutsForWeek(weekId) {
+  const { data } = await sb.from('plan_workouts')
+    .select('*')
+    .eq('plan_week_id', weekId)
+    .order('day_of_week');
+  return data || [];
+}
+
+async function fetchPlanWorkoutsByDate(planId, startDate, endDate) {
+  const { data } = await sb.from('plan_workouts')
+    .select('*, plan_weeks!inner(plan_id, week_number, phase, notes)')
+    .eq('plan_weeks.plan_id', planId)
+    .gte('workout_date', startDate)
+    .lte('workout_date', endDate)
+    .order('workout_date');
+  return data || [];
+}
+
+// ── Plan info bar ──
+
+function updatePlanInfoBar(plan, planWeeks) {
+  const bar = document.getElementById('plan-info-bar');
+  if (!plan) {
+    bar.classList.add('hidden');
+    return;
+  }
+  bar.classList.remove('hidden');
+
+  const goalEl = document.getElementById('pib-goal');
+  goalEl.textContent = plan.goal_text || GOAL_TYPES.find(g => g.id === plan.goal_type)?.label || plan.goal_type;
+
+  const today = isoDate(new Date());
+  const currentWeek = planWeeks.find(w => {
+    const weekStart = new Date(plan.start_date);
+    weekStart.setDate(weekStart.getDate() + (w.week_number - 1) * 7);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    return today >= isoDate(weekStart) && today <= isoDate(weekEnd);
+  });
+
+  const phaseEl = document.getElementById('pib-phase');
+  if (currentWeek) {
+    const phaseLabel = PHASE_LABELS[currentWeek.phase] || currentWeek.phase;
+    phaseEl.textContent = `${phaseLabel} — V${currentWeek.week_number}`;
+    phaseEl.className = `pib-phase phase-badge phase-${currentWeek.phase}`;
+  } else {
+    phaseEl.textContent = '';
+  }
+
+  const totalWeeks = planWeeks.length;
+  const startD = new Date(plan.start_date);
+  const todayD = new Date();
+  const elapsedWeeks = Math.max(0, Math.floor((todayD - startD) / (7 * 86400000)));
+  const pct = Math.min(100, Math.round((elapsedWeeks / totalWeeks) * 100));
+
+  document.getElementById('pib-progress-fill').style.width = pct + '%';
+  document.getElementById('pib-progress-label').textContent = `${elapsedWeeks}/${totalWeeks}v`;
+}
+
+// ── Generate button ──
+
+function renderGenerateButton() {
+  const container = document.getElementById('schema-generate-btn-container');
+  if (!container) return;
+  if (!PLAN_GENERATION_ENABLED) { container.innerHTML = ''; return; }
+
+  const isOwn = (allProfiles[schemaPersonIdx] || currentProfile)?.id === currentProfile?.id;
+  if (!isOwn) { container.innerHTML = ''; return; }
+
+  if (_activePlan) {
+    container.innerHTML = `<button class="schema-generate-btn" onclick="openPlanWizard()" style="border-style:solid;border-color:var(--border);background:var(--bg-card);">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      Skapa nytt schema
+    </button>`;
+  } else {
+    container.innerHTML = `<button class="schema-generate-btn" onclick="openPlanWizard()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      Skapa AI-träningsschema
+    </button>`;
+  }
+}
+
+// ═══════════════════════
+//  PLAN WIZARD
+// ═══════════════════════
+
+function openPlanWizard() {
+  _wizardStep = 0;
+  _wizardGoalType = null;
+  _wizardIncludeGym = true;
+
+  const grid = document.getElementById('wizard-goal-grid');
+  grid.innerHTML = GOAL_TYPES.map(g =>
+    `<div class="wizard-goal-card" data-goal="${g.id}" onclick="selectWizardGoal('${g.id}')">
+      <span class="goal-icon">${g.icon}</span>
+      <span>${g.label}</span>
+    </div>`
+  ).join('');
+
+  document.getElementById('wizard-goal-fields').classList.add('hidden');
+  document.getElementById('wiz-race-fields').style.display = 'none';
+
+  const actGrid = document.getElementById('wiz-activity-types');
+  actGrid.innerHTML = ACTIVITY_TYPES.filter(t => t !== 'Vila').map(t =>
+    `<button type="button" class="wiz-activity-check active" data-type="${t}" onclick="toggleWizActivity(this)">${t}</button>`
+  ).join('');
+
+  const nextMon = new Date();
+  const dow = nextMon.getDay();
+  const diff = dow === 0 ? 1 : dow === 1 ? 0 : 8 - dow;
+  nextMon.setDate(nextMon.getDate() + diff);
+  document.getElementById('wiz-start-date').value = isoDate(nextMon);
+
+  autoPopulateBaseline();
+  updateWizardUI();
+  document.getElementById('plan-wizard').classList.remove('hidden');
+}
+
+function closePlanWizard() {
+  document.getElementById('plan-wizard').classList.add('hidden');
+}
+
+function selectWizardGoal(goalId) {
+  _wizardGoalType = goalId;
+  document.querySelectorAll('.wizard-goal-card').forEach(c => c.classList.toggle('selected', c.dataset.goal === goalId));
+  document.getElementById('wizard-goal-fields').classList.remove('hidden');
+  document.getElementById('wiz-race-fields').style.display = (goalId === 'race') ? '' : 'none';
+
+  const placeholders = {
+    race: 't.ex. Halvmarathon under 1:45',
+    fitness: 't.ex. Bygga kondition och må bra',
+    weight_loss: 't.ex. Tappa 5 kg och behålla muskelmassa',
+    sport_specific: 't.ex. Förbättra Hyrox-tid till under 75 min',
+    custom: 'Beskriv ditt mål...',
+  };
+  document.getElementById('wiz-goal-text').placeholder = placeholders[goalId] || '';
+}
+
+function toggleWizActivity(btn) {
+  btn.classList.toggle('active');
+}
+
+function setWizGym(val) {
+  _wizardIncludeGym = val;
+  document.getElementById('wiz-gym-yes').classList.toggle('active', val);
+  document.getElementById('wiz-gym-no').classList.toggle('active', !val);
+}
+
+async function autoPopulateBaseline() {
+  if (!currentProfile) return;
+  try {
+    const fourWeeksAgo = new Date();
+    fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
+    const workouts = await fetchWorkouts(currentProfile.id, isoDate(fourWeeksAgo), isoDate(new Date()));
+
+    if (workouts.length === 0) {
+      document.getElementById('wiz-baseline-auto').classList.add('hidden');
+      return;
+    }
+
+    const totalMins = workouts.reduce((s, w) => s + w.duration_minutes, 0);
+    const weekCount = 4;
+    const avgSessions = Math.round(workouts.length / weekCount * 10) / 10;
+    const avgHours = Math.round(totalMins / weekCount / 60 * 10) / 10;
+    const longestSession = Math.max(...workouts.map(w => w.duration_minutes));
+
+    document.getElementById('wiz-base-sessions').value = Math.round(avgSessions);
+    document.getElementById('wiz-base-hours').value = avgHours;
+    document.getElementById('wiz-base-longest').value = longestSession;
+    document.getElementById('wiz-baseline-auto').classList.remove('hidden');
+  } catch (e) {
+    console.error('Auto-populate baseline error:', e);
+  }
+}
+
+function updateWizardUI() {
+  for (let i = 0; i <= 3; i++) {
+    const stepEl = document.getElementById(`wizard-step-${i}`);
+    if (stepEl) stepEl.classList.toggle('active', i === _wizardStep);
+  }
+
+  document.querySelectorAll('.wizard-step-dot').forEach(dot => {
+    const s = parseInt(dot.dataset.step);
+    dot.classList.toggle('active', s === _wizardStep);
+    dot.classList.toggle('done', s < _wizardStep);
+  });
+
+  const prevBtn = document.getElementById('wiz-prev');
+  prevBtn.style.visibility = _wizardStep === 0 ? 'hidden' : 'visible';
+
+  const nextBtn = document.getElementById('wiz-next');
+  nextBtn.textContent = _wizardStep === 3 ? 'Generera schema' : 'Nästa';
+
+  // Init day button toggles
+  document.querySelectorAll('.wiz-day-btn').forEach(btn => {
+    btn.onclick = () => btn.classList.toggle('active');
+  });
+
+  // Init fitness level pills
+  document.querySelectorAll('#wiz-fitness-level .intensity-pill').forEach(pill => {
+    pill.onclick = () => {
+      document.querySelectorAll('#wiz-fitness-level .intensity-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+    };
+  });
+}
+
+function wizardPrev() {
+  if (_wizardStep > 0) { _wizardStep--; updateWizardUI(); }
+}
+
+async function wizardNext() {
+  if (_wizardStep < 3) {
+    if (_wizardStep === 0 && !_wizardGoalType) {
+      await showAlertModal('Välj mål', 'Du måste välja en måltyp för att fortsätta.');
+      return;
+    }
+    _wizardStep++;
+    updateWizardUI();
+    return;
+  }
+
+  await submitPlanWizard();
+}
+
+async function submitPlanWizard() {
+  const goalText = document.getElementById('wiz-goal-text').value.trim();
+  const goalDate = document.getElementById('wiz-goal-date').value || null;
+  const goalTime = document.getElementById('wiz-goal-time').value.trim();
+
+  let fullGoalText = goalText;
+  if (goalTime && _wizardGoalType === 'race') fullGoalText += ` (mål: ${goalTime})`;
+
+  const sessionsPerWeek = parseInt(document.getElementById('wiz-sessions').value);
+  const hoursPerWeek = parseFloat(document.getElementById('wiz-hours').value);
+  const maxSessionMin = parseInt(document.getElementById('wiz-max-session').value);
+  const injuries = document.getElementById('wiz-injuries').value.trim() || null;
+
+  const availDays = [];
+  document.querySelectorAll('#wiz-avail-days .wiz-day-btn.active').forEach(b => availDays.push(parseInt(b.dataset.day)));
+
+  const baseSessions = parseInt(document.getElementById('wiz-base-sessions').value) || 3;
+  const baseHours = parseFloat(document.getElementById('wiz-base-hours').value) || 3;
+  const baseLongest = parseInt(document.getElementById('wiz-base-longest').value) || 60;
+  const fitnessLevel = document.querySelector('#wiz-fitness-level .intensity-pill.active')?.dataset.value || 'intermediate';
+
+  const activityTypes = [];
+  document.querySelectorAll('#wiz-activity-types .wiz-activity-check.active').forEach(b => activityTypes.push(b.dataset.type));
+
+  const restDays = [];
+  document.querySelectorAll('#wiz-rest-days .wiz-day-btn.active').forEach(b => restDays.push(parseInt(b.dataset.day)));
+
+  const startDate = document.getElementById('wiz-start-date').value;
+
+  if (!fullGoalText) {
+    await showAlertModal('Saknar mål', 'Beskriv ditt mål innan du genererar.');
+    return;
+  }
+  if (activityTypes.length === 0) {
+    await showAlertModal('Saknar aktiviteter', 'Välj minst en aktivitetstyp.');
+    return;
+  }
+
+  const activityMix = {};
+  const pct = Math.round(100 / activityTypes.length);
+  activityTypes.forEach((t, i) => {
+    activityMix[t] = i === activityTypes.length - 1 ? 100 - pct * (activityTypes.length - 1) : pct;
+  });
+
+  const payload = {
+    profile_id: currentProfile.id,
+    goal_type: _wizardGoalType,
+    goal_text: fullGoalText,
+    goal_date: goalDate,
+    constraints: {
+      sessions_per_week: sessionsPerWeek,
+      hours_per_week: hoursPerWeek,
+      available_days: availDays,
+      max_session_minutes: maxSessionMin,
+      injuries: injuries,
+    },
+    baseline: {
+      sessions_per_week: baseSessions,
+      hours_per_week: baseHours,
+      activity_mix: activityMix,
+      fitness_level: fitnessLevel,
+      longest_session_minutes: baseLongest,
+    },
+    preferences: {
+      activity_types: activityTypes,
+      include_gym: _wizardIncludeGym,
+      preferred_rest_days: restDays,
+    },
+    start_date: startDate,
+  };
+
+  // Show loading
+  document.querySelectorAll('.wizard-step').forEach(s => s.classList.remove('active'));
+  document.getElementById('wizard-step-loading').style.display = 'block';
+  document.getElementById('wizard-nav').style.display = 'none';
+
+  try {
+    const session = (await sb.auth.getSession()).data.session;
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/generate-plan', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const result = await res.json();
+
+    if (!res.ok) {
+      throw new Error(result.error || 'Generation failed');
+    }
+
+    closePlanWizard();
+    document.getElementById('wizard-step-loading').style.display = 'none';
+    document.getElementById('wizard-nav').style.display = '';
+
+    await showAlertModal('Schema skapat!', `${result.plan_name}\n${result.weeks} veckor: ${result.start_date} till ${result.end_date}`);
+
+    _activePlan = null;
+    _activePlanWeeks = [];
+    _activePlanWorkouts = [];
+    navigate('schema');
+
+  } catch (e) {
+    console.error('Plan generation error:', e);
+    document.getElementById('wizard-step-loading').style.display = 'none';
+    document.getElementById('wizard-nav').style.display = '';
+    _wizardStep = 3;
+    updateWizardUI();
+    await showAlertModal('Fel', 'Kunde inte generera schema: ' + e.message);
+  }
 }

@@ -31,3 +31,6 @@ jobs:
 
       - name: Deploy strava-sync
         run: supabase functions deploy strava-sync --no-verify-jwt
+
+      - name: Deploy generate-plan
+        run: supabase functions deploy generate-plan --no-verify-jwt
