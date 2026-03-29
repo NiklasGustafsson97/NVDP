@@ -818,10 +818,10 @@ async function loadModalSocial(workoutId) {
     reactEl.innerHTML = `
       <div class="reaction-bar">
         <button class="react-btn${myReaction?.reaction === 'like' ? ' active' : ''}" onclick="handleReaction('${workoutId}', 'like')" title="${likeTooltip}">
-          <svg class="react-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="18" height="18"><path d="M7 22V11l-5-1 3-9h8v10l-2 5h4l2-5V6h3a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-3" /><path d="M14 2h4a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2"/><path d="M7 11V2H3.5a1.5 1.5 0 0 0-1.42 1.97L5 11"/></svg><span class="react-count">${likes.length || ''}</span>
+          <span class="react-icon">👍</span><span class="react-count">${likes.length || ''}</span>
         </button>
         <button class="react-btn${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="handleReaction('${workoutId}', 'dislike')" title="${dislikeTooltip}">
-          <svg class="react-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="18" height="18" style="transform:scaleY(-1)"><path d="M7 22V11l-5-1 3-9h8v10l-2 5h4l2-5V6h3a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-3" /><path d="M14 2h4a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2"/><path d="M7 11V2H3.5a1.5 1.5 0 0 0-1.42 1.97L5 11"/></svg><span class="react-count">${dislikes.length || ''}</span>
+          <span class="react-icon">👎</span><span class="react-count">${dislikes.length || ''}</span>
         </button>
       </div>`;
   }
