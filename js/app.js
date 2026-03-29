@@ -689,7 +689,7 @@ async function _loadDashboard() {
   // Recent workouts
   const { data: recent } = await sb.from('workouts').select('*')
     .eq('profile_id', currentProfile?.id)
-    .order('workout_date', { ascending: false }).limit(5);
+    .order('workout_date', { ascending: false }).limit(10);
 
   const recentEl = document.getElementById('recent-workouts');
   if (!recent || recent.length === 0) {
