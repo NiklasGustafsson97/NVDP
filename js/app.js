@@ -166,6 +166,8 @@ function setTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
   localStorage.setItem('nvdp-theme', theme);
   document.querySelectorAll('#theme-toggle .sm-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.val === theme));
+  if (window._chartSeasonPie) { window._chartSeasonPie.update(); }
+  if (window.chartWeekly) { window.chartWeekly.update(); }
 }
 
 function setUnit(unit) {
@@ -1265,8 +1267,8 @@ async function _loadTrends() {
         }}},
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + 'h' } },
-        x: { grid: { display: false }, ticks: { color: '#888' } }
+        y: { beginAtZero: true, grid: { color: () => getComputedStyle(document.body).getPropertyValue('--border').trim() }, ticks: { color: () => getComputedStyle(document.body).getPropertyValue('--text-muted').trim(), callback: v => v.toFixed(1) + 'h' } },
+        x: { grid: { display: false }, ticks: { color: () => getComputedStyle(document.body).getPropertyValue('--text-muted').trim() } }
       }
     },
     plugins: [{
@@ -1402,13 +1404,15 @@ async function _loadTrends() {
           legend: {
             position: 'bottom',
             labels: {
-              color: getComputedStyle(document.body).getPropertyValue('--text-muted').trim() || '#aaa',
+              color: () => getComputedStyle(document.body).getPropertyValue('--text').trim() || '#fff',
               padding: 12, usePointStyle: true, pointStyle: 'circle', font: { size: 11 },
               generateLabels: (chart) => {
                 const ds = chart.data.datasets[0];
+                const c = getComputedStyle(document.body).getPropertyValue('--text').trim() || '#fff';
                 return chart.data.labels.map((l, i) => ({
                   text: `${l}  ${ds.data[i]}h`,
                   fillStyle: ds.backgroundColor[i],
+                  fontColor: c,
                   pointStyle: 'circle',
                   hidden: false, index: i
                 }));
@@ -1433,7 +1437,7 @@ async function _loadTrends() {
           ctx.save();
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.font = '700 1.1rem ' + getComputedStyle(document.body).fontFamily;
-          ctx.fillStyle = '#fff';
+          ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--text').trim() || '#fff';
           ctx.fillText((totalAll / 60).toFixed(1) + 'h', x, y);
           ctx.restore();
         }
