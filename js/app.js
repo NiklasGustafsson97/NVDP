@@ -1969,7 +1969,8 @@ async function syncStrava() {
     if (res.ok) {
       _stravaConnection.last_sync_at = result.last_sync_at;
       updateStravaUI();
-      await showAlertModal('Synk klar', `${result.imported} pass importerade.`);
+      const debugInfo = result.debug ? `\n\nHämtade ${result.totalFetched} från Strava (after: ${result.debug.after_date})` : '';
+      await showAlertModal('Synk klar', `${result.imported} pass importerade.${debugInfo}`);
       navigate(currentView);
     } else {
       await showAlertModal('Synk-fel', result.error || 'Okänt fel');

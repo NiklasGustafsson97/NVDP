@@ -65,27 +65,49 @@ serve(async (req) => {
 
     const accessToken = await refreshTokenIfNeeded(conn);
 
-    // Fetch activities since last sync (or last 30 days)
-    const after = conn.last_sync_at
+    // Always look back at least 7 days to catch missed activities
+    const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
+    const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
+    const lastSyncTs = conn.last_sync_at
       ? Math.floor(new Date(conn.last_sync_at).getTime() / 1000)
-      : Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
+      : 0;
+    const after = Math.min(lastSyncTs || thirtyDaysAgo, sevenDaysAgo);
 
     let page = 1;
     let imported = 0;
     let skipped = 0;
+    let totalFetched = 0;
+    const debug: Record<string, unknown> = { after, after_date: new Date(after * 1000).toISOString(), last_sync_at: conn.last_sync_at };
+
+    // First verify the token works by checking athlete profile
+    const athleteRes = await fetch("https://www.strava.com/api/v3/athlete", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!athleteRes.ok) {
+      const errBody = await athleteRes.text();
+      return new Response(
+        JSON.stringify({ error: "Strava API error", status: athleteRes.status, detail: errBody }),
+        { status: 502, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+      );
+    }
+    const athlete = await athleteRes.json();
+    debug.athlete_id = athlete.id;
+    debug.token_scope = conn.access_token ? "present" : "missing";
 
     while (page <= 5) {
-      const activitiesRes = await fetch(
-        `https://www.strava.com/api/v3/athlete/activities?after=${after}&per_page=50&page=${page}`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
+      const url = `https://www.strava.com/api/v3/athlete/activities?after=${after}&per_page=50&page=${page}`;
+      const activitiesRes = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
 
       if (!activitiesRes.ok) {
-        console.error("Failed to fetch activities:", activitiesRes.status);
+        const errBody = await activitiesRes.text();
+        debug.activities_error = { status: activitiesRes.status, body: errBody };
         break;
       }
 
       const activities: StravaActivity[] = await activitiesRes.json();
+      totalFetched += activities.length;
       if (activities.length === 0) break;
 
       for (const activity of activities) {
@@ -114,7 +136,7 @@ serve(async (req) => {
       .eq("id", conn.id);
 
     return new Response(
-      JSON.stringify({ imported, skipped, last_sync_at: new Date().toISOString() }),
+      JSON.stringify({ imported, skipped, totalFetched, last_sync_at: new Date().toISOString(), debug }),
       {
         status: 200,
         headers: { ...corsHeaders(), "Content-Type": "application/json" },
