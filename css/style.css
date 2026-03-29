@@ -10,7 +10,8 @@
   --text: #e8e8ec;
   --text-muted: #8a8a9a;
   --text-dim: #55556a;
-  --accent: #2E86C1;
+  --accent: #D6639E;
+  --accent-hover: #c0527f;
   --accent-love: #E74C3C;
   --green: #2ECC71;
   --red: #E74C3C;
@@ -21,6 +22,25 @@
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --nav-h: 64px;
 }
+
+[data-theme="light"] {
+  --bg: #f4f5f7;
+  --bg-card: rgba(0,0,0,0.03);
+  --bg-card-hover: rgba(0,0,0,0.06);
+  --bg-input: rgba(0,0,0,0.04);
+  --border: rgba(0,0,0,0.1);
+  --text: #1a1a2e;
+  --text-muted: #5a5a6e;
+  --text-dim: #8a8a9a;
+  --shadow: 0 4px 24px rgba(0,0,0,0.08);
+}
+[data-theme="light"] .topbar { background: rgba(244,245,247,0.95); }
+[data-theme="light"] .bottom-nav { background: rgba(244,245,247,0.95); }
+[data-theme="light"] .modal-box,
+[data-theme="light"] .confirm-box { background: #fff; }
+[data-theme="light"] .side-menu { background: #fff; }
+[data-theme="light"] select option { background: #fff; color: var(--text); }
+[data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); }
 
 html { font-size: 15px; }
 body {
@@ -74,7 +94,7 @@ select option { background: #1a1a2e; color: var(--text); }
   font-family: var(--font);
 }
 .btn-primary { background: var(--accent); color: #fff; width: 100%; }
-.btn-primary:hover { background: #2474a8; transform: translateY(-1px); }
+.btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
 .btn-love { background: var(--accent-love); color: #fff; }
 .btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
 .btn-ghost:hover { background: var(--bg-card-hover); }
@@ -145,6 +165,17 @@ select option { background: #1a1a2e; color: var(--text); }
 .sm-code { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 700; color: var(--accent); letter-spacing: 2px; }
 .sm-members { display: flex; flex-direction: column; gap: 4px; }
 .sm-member { font-size: 0.8rem; color: var(--text-muted); padding: 2px 0; }
+
+/* ── Settings ── */
+.sm-setting-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
+.sm-setting-label { font-size: 0.82rem; color: var(--text-muted); }
+.sm-toggle-group { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.sm-toggle-btn {
+  padding: 5px 12px; font-size: 0.75rem; font-weight: 600; cursor: pointer;
+  background: none; border: none; color: var(--text-dim); transition: all 0.15s;
+}
+.sm-toggle-btn.active { background: var(--accent); color: #fff; }
+.sm-toggle-btn:not(.active):hover { background: var(--bg-card-hover); color: var(--text-muted); }
 
 /* ── Feed More Button ── */
 .feed-more-btn { display: block; width: 100%; margin-top: 12px; text-align: center; }
@@ -270,11 +301,11 @@ select option { background: #1a1a2e; color: var(--text); }
 /* ── Schema View ── */
 .schema-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
 .schema-tab {
-  padding: 8px 16px; border-radius: 20px; font-size: 0.85rem; font-weight: 600;
-  cursor: pointer; border: 1px solid var(--border); color: var(--text-muted);
+  padding: 6px 14px; border-radius: 16px; font-size: 0.8rem; font-weight: 600;
+  cursor: pointer; border: none; background: none; color: var(--text-dim);
   transition: all 0.2s;
 }
-.schema-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.schema-tab.active { background: rgba(255,255,255,0.06); color: var(--text); }
 
 .schema-week-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .schema-week-nav button { background: none; border: 1px solid var(--border); color: var(--text); border-radius: var(--radius-sm); padding: 6px 12px; cursor: pointer; font-size: 0.85rem; }
@@ -366,7 +397,7 @@ select option { background: #1a1a2e; color: var(--text); }
   padding: 4px 12px; border-radius: 14px; font-size: 0.8rem; font-weight: 600;
   background: rgba(243,156,18,0.12); color: var(--amber);
 }
-.chart-container-sm { height: 200px; position: relative; }
+.chart-container-sm { height: 240px; position: relative; overflow: visible; }
 
 /* ── Loading ── */
 .spinner {
@@ -491,8 +522,8 @@ input.code-input {
   font-size: 0.85rem; transition: all 0.15s;
 }
 .react-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
-.react-btn.active { background: rgba(46,134,193,0.15); border-color: var(--accent); color: var(--accent); }
-.react-icon { font-size: 1rem; }
+.react-btn.active { background: rgba(214,99,158,0.15); border-color: var(--accent); color: var(--accent); }
+.react-svg { flex-shrink: 0; }
 .react-count { font-weight: 600; min-width: 8px; }
 
 .react-btn-sm {
@@ -502,7 +533,7 @@ input.code-input {
   font-size: 0.8rem; transition: all 0.15s;
 }
 .react-btn-sm:hover { background: rgba(255,255,255,0.06); color: var(--text-muted); }
-.react-btn-sm.active { color: var(--accent); border-color: rgba(46,134,193,0.3); background: rgba(46,134,193,0.08); }
+.react-btn-sm.active { color: var(--accent); border-color: rgba(214,99,158,0.3); background: rgba(214,99,158,0.08); }
 
 /* ── Comments ── */
 .wm-comments { margin-top: 12px; }

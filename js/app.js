@@ -40,6 +40,7 @@ async function fetchProfilesDirect(accessToken) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  restoreSettings();
   try {
     sb.auth.onAuthStateChange(async (event, session) => {
       try {
@@ -159,6 +160,32 @@ function openSideMenu() {
 function closeSideMenu() {
   document.getElementById('side-menu').classList.remove('open');
   document.getElementById('side-menu-overlay').classList.add('hidden');
+}
+
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('nvdp-theme', theme);
+  document.querySelectorAll('#theme-toggle .sm-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.val === theme));
+}
+
+function setUnit(unit) {
+  localStorage.setItem('nvdp-unit', unit);
+  document.querySelectorAll('#unit-toggle .sm-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.val === unit));
+}
+
+function setWeekStart(ws) {
+  localStorage.setItem('nvdp-weekstart', ws);
+  document.querySelectorAll('#weekstart-toggle .sm-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.val === ws));
+}
+
+function restoreSettings() {
+  const theme = localStorage.getItem('nvdp-theme') || 'dark';
+  const unit = localStorage.getItem('nvdp-unit') || 'km';
+  const ws = localStorage.getItem('nvdp-weekstart') || 'mon';
+  if (theme !== 'dark') document.documentElement.setAttribute('data-theme', theme);
+  document.querySelectorAll('#theme-toggle .sm-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.val === theme));
+  document.querySelectorAll('#unit-toggle .sm-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.val === unit));
+  document.querySelectorAll('#weekstart-toggle .sm-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.val === ws));
 }
 
 function updateSideMenuContent() {
@@ -681,10 +708,10 @@ async function loadModalSocial(workoutId) {
     reactEl.innerHTML = `
       <div class="reaction-bar">
         <button class="react-btn${myReaction?.reaction === 'like' ? ' active' : ''}" onclick="handleReaction('${workoutId}', 'like')" title="${likeTooltip}">
-          <span class="react-icon">&#128077;</span><span class="react-count">${likes.length || ''}</span>
+          <svg class="react-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="18" height="18"><path d="M7 22V11l-5-1 3-9h8v10l-2 5h4l2-5V6h3a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-3" /><path d="M14 2h4a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2"/><path d="M7 11V2H3.5a1.5 1.5 0 0 0-1.42 1.97L5 11"/></svg><span class="react-count">${likes.length || ''}</span>
         </button>
         <button class="react-btn${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="handleReaction('${workoutId}', 'dislike')" title="${dislikeTooltip}">
-          <span class="react-icon">&#128078;</span><span class="react-count">${dislikes.length || ''}</span>
+          <svg class="react-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="18" height="18" style="transform:scaleY(-1)"><path d="M7 22V11l-5-1 3-9h8v10l-2 5h4l2-5V6h3a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-3" /><path d="M14 2h4a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2"/><path d="M7 11V2H3.5a1.5 1.5 0 0 0-1.42 1.97L5 11"/></svg><span class="react-count">${dislikes.length || ''}</span>
         </button>
       </div>`;
   }
@@ -1066,7 +1093,11 @@ async function _loadTrends() {
   });
 
   const weeks = Object.keys(weekData).sort();
-  const labels = weeks.map(w => `V${weekNumber(new Date(w))}`);
+  const labels = weeks.map(w => {
+    const mon = new Date(w);
+    const wn = weekNumber(mon);
+    return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
+  });
   const myData = weeks.map(w => {
     const d = weekData[w];
     const types = trendMode === 'cardio' ? CARDIO_TYPES : [...CARDIO_TYPES, 'Gym'];
@@ -1239,18 +1270,29 @@ async function _loadTrends() {
         responsive: true, maintainAspectRatio: false,
         cutout: '55%',
         plugins: {
-          legend: { position: 'right', labels: { color: '#aaa', padding: 10, font: { size: 11 }, generateLabels: (chart) => {
-            const ds = chart.data.datasets[0];
-            return chart.data.labels.map((l, i) => ({
-              text: `${l}  ${ds.data[i]}h`,
-              fillStyle: ds.backgroundColor[i],
-              hidden: false, index: i
-            }));
-          }}},
-          tooltip: { callbacks: { label: c => {
-            const pct = totalAll > 0 ? Math.round((byType[c.label] / totalAll) * 100) : 0;
-            return `${c.label}: ${c.parsed}h (${pct}%)`;
-          }}}
+          legend: {
+            position: 'bottom',
+            labels: {
+              color: getComputedStyle(document.body).getPropertyValue('--text-muted').trim() || '#aaa',
+              padding: 12, usePointStyle: true, pointStyle: 'circle', font: { size: 11 },
+              generateLabels: (chart) => {
+                const ds = chart.data.datasets[0];
+                return chart.data.labels.map((l, i) => ({
+                  text: `${l}  ${ds.data[i]}h`,
+                  fillStyle: ds.backgroundColor[i],
+                  pointStyle: 'circle',
+                  hidden: false, index: i
+                }));
+              }
+            }
+          },
+          tooltip: {
+            z: 9999,
+            callbacks: { label: c => {
+              const pct = totalAll > 0 ? Math.round((byType[c.label] / totalAll) * 100) : 0;
+              return ` ${c.label}: ${c.parsed}h (${pct}%)`;
+            }}
+          }
         }
       },
       plugins: [{
@@ -1681,10 +1723,10 @@ function renderFeedItems(items, members, reactions) {
       ${notesSnip}
       <div class="feed-reactions" onclick="event.stopPropagation()">
         <button class="react-btn-sm${myReaction?.reaction === 'like' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${w.id}','like')">
-          &#128077; ${likes.length || ''}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg> ${likes.length || ''}
         </button>
         <button class="react-btn-sm${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${w.id}','dislike')">
-          &#128078; ${dislikes.length || ''}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg> ${dislikes.length || ''}
         </button>
       </div>
     </div>`;
