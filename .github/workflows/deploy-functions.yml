@@ -30,4 +30,4 @@ jobs:
         run: supabase functions deploy strava-webhook --no-verify-jwt
 
       - name: Deploy strava-sync
-        run: supabase functions deploy strava-sync
+        run: supabase functions deploy strava-sync --no-verify-jwt
