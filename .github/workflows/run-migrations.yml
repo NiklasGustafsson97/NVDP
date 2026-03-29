@@ -7,13 +7,14 @@ on:
       - 'sql/migrations/*.sql'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   migrate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run unapplied migrations
         env:
@@ -30,11 +31,11 @@ jobs:
             BASENAME=$(basename "$f")
             
             if grep -qF "$BASENAME" "$APPLIED_FILE"; then
-              echo "⏭ Already applied: $BASENAME"
+              echo "Already applied: $BASENAME"
               continue
             fi
             
-            echo "▶ Applying: $BASENAME"
+            echo "Applying: $BASENAME"
             SQL_CONTENT=$(cat "$f")
             
             RESPONSE=$(curl -s -w "\n%{http_code}" \
@@ -47,11 +48,11 @@ jobs:
             BODY=$(echo "$RESPONSE" | sed '$d')
             
             if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-              echo "✅ Success: $BASENAME (HTTP $HTTP_CODE)"
+              echo "Success: $BASENAME (HTTP $HTTP_CODE)"
               echo "$BASENAME" >> "$APPLIED_FILE"
               APPLIED_COUNT=$((APPLIED_COUNT + 1))
             else
-              echo "❌ Failed: $BASENAME (HTTP $HTTP_CODE)"
+              echo "Failed: $BASENAME (HTTP $HTTP_CODE)"
               echo "$BODY"
               FAILED=1
               break
@@ -72,4 +73,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add sql/migrations/_applied.txt
-          git diff --cached --quiet || git commit -m "Update _applied.txt with new migrations" && git push
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update _applied.txt with new migrations"
+            git push
+          else
+            echo "No changes to commit"
+          fi
