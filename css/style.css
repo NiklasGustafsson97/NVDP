@@ -804,6 +804,87 @@ input.code-input {
 }
 .strava-badge svg { width: 10px; height: 10px; }
 
+/* ── Workout Invitations ── */
+.shared-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 8px; border-radius: 10px;
+  font-size: 0.7rem; font-weight: 700;
+  background: rgba(46,204,113,0.12); color: var(--green);
+  margin-right: 4px; vertical-align: middle;
+}
+.shared-badge svg { flex-shrink: 0; }
+
+.invite-pending-badge {
+  display: inline-block;
+  padding: 1px 7px; border-radius: 8px;
+  font-size: 0.6rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+  background: rgba(241,196,15,0.12); color: #f1c40f;
+  margin-left: 6px; vertical-align: middle;
+}
+
+.sr-card[onclick] { transition: background 0.15s; }
+.sr-card[onclick]:hover { background: var(--bg-card-hover); }
+
+.invite-user-list {
+  max-height: 240px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px;
+  margin-top: 10px;
+}
+.invite-user-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 10px;
+  cursor: pointer; transition: background 0.15s;
+}
+.invite-user-row:hover { background: rgba(255,255,255,0.04); }
+.invite-user-row.selected { background: rgba(214,99,158,0.1); }
+.invite-user-avatar {
+  width: 34px; height: 34px; border-radius: 50%;
+  background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.72rem; font-weight: 700; flex-shrink: 0;
+}
+.invite-user-name { font-size: 0.9rem; font-weight: 500; color: var(--text); }
+.invite-check { color: var(--accent); font-weight: 700; margin-left: auto; font-size: 1.1rem; }
+
+.invite-form { padding: 12px 0 0; }
+.invite-form-label {
+  font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--text-dim); margin-bottom: 10px;
+}
+.invite-form-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 8px;
+}
+.invite-form-row label {
+  width: 90px; flex-shrink: 0; font-size: 0.82rem;
+  color: var(--text-muted); font-weight: 500;
+}
+.invite-form-row .form-input {
+  flex: 1; background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 12px; font-size: 0.85rem; color: var(--text);
+  outline: none; font-family: var(--font);
+}
+.invite-form-row .form-input:focus { border-color: var(--accent); }
+
+.nudge-actions {
+  display: flex; gap: 6px; margin-top: 6px;
+}
+.invite-accept-btn {
+  background: rgba(46,204,113,0.15); color: var(--green);
+  border: 1px solid rgba(46,204,113,0.3); border-radius: 14px;
+  padding: 5px 14px; font-size: 0.75rem; font-weight: 600;
+  cursor: pointer; font-family: var(--font); transition: all 0.15s;
+}
+.invite-accept-btn:hover { background: rgba(46,204,113,0.25); }
+.invite-decline-btn {
+  background: transparent; color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 14px;
+  padding: 5px 14px; font-size: 0.75rem; font-weight: 600;
+  cursor: pointer; font-family: var(--font); transition: all 0.15s;
+}
+.invite-decline-btn:hover { background: rgba(255,255,255,0.04); color: var(--text-muted); }
+
 /* ── Utility ── */
 .mt-8 { margin-top: 8px; }
 .mt-16 { margin-top: 16px; }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NVDP</title>
-  <link rel="stylesheet" href="css/style.css?v=20">
+  <link rel="stylesheet" href="css/style.css?v=23">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
@@ -483,6 +483,52 @@
 
 </div>
 
+<!-- ═══ PLAN DETAIL / INVITE MODAL ═══ -->
+<div id="plan-modal" class="modal-overlay hidden" onclick="if(event.target===this)closePlanModal()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="pm-title">Planerat pass</h3>
+      <button class="btn-close" onclick="closePlanModal()">&times;</button>
+    </div>
+    <div id="pm-body"></div>
+    <div id="pm-actions" class="modal-actions"></div>
+  </div>
+</div>
+
+<!-- ═══ INVITE USER PICKER ═══ -->
+<div id="invite-picker" class="modal-overlay hidden" onclick="if(event.target===this)closeInvitePicker()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Bjud in till pass</h3>
+      <button class="btn-close" onclick="closeInvitePicker()">&times;</button>
+    </div>
+    <div id="invite-picker-body">
+      <input type="text" id="invite-search" class="comment-input" placeholder="Sök användare..." oninput="filterInviteUsers()">
+      <div id="invite-user-list" class="invite-user-list"></div>
+    </div>
+    <div id="invite-form" class="invite-form hidden">
+      <div class="invite-form-label">Passdetaljer</div>
+      <div class="invite-form-row">
+        <label>Aktivitet</label>
+        <input type="text" id="invite-activity" class="form-input">
+      </div>
+      <div class="invite-form-row">
+        <label>Längd (min)</label>
+        <input type="number" id="invite-duration" class="form-input">
+      </div>
+      <div class="invite-form-row">
+        <label>Intensitet</label>
+        <input type="text" id="invite-intensity" class="form-input" placeholder="t.ex. Z2">
+      </div>
+      <div class="invite-form-row">
+        <label>Beskrivning</label>
+        <input type="text" id="invite-desc" class="form-input" placeholder="Valfritt">
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="confirmSendInvitation()" style="margin-top:12px;">Skicka inbjudan</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ WORKOUT DETAIL MODAL ═══ -->
 <div id="workout-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeWorkoutModal()">
   <div class="modal-box">
@@ -507,8 +553,8 @@
   </div>
 </div>
 
-<script src="js/config.js?v=20"></script>
-<script src="js/app.js?v=22"></script>
+<script src="js/config.js?v=23"></script>
+<script src="js/app.js?v=23"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {
