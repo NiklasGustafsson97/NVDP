@@ -95,7 +95,17 @@ document.getElementById('auth-form').addEventListener('submit', async (e) => {
   btn.textContent = authMode === 'login' ? 'Loggar in...' : 'Skapar konto...';
 
   if (authMode === 'register') {
-    const name = document.getElementById('auth-name').value.trim() || email.split('@')[0];
+    const firstName = document.getElementById('auth-firstname').value.trim();
+    const lastName = document.getElementById('auth-lastname').value.trim();
+    if (!firstName || !lastName) {
+      errEl.style.color = 'var(--red)';
+      errEl.textContent = 'Ange både förnamn och efternamn.';
+      errEl.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = 'Skapa konto';
+      return;
+    }
+    const name = `${firstName} ${lastName}`;
     const reservedNames = ['niklas', 'love', 'niklas gustafsson', 'love gustafsson'];
     if (reservedNames.includes(name.toLowerCase())) {
       errEl.style.color = 'var(--red)';
@@ -547,6 +557,12 @@ async function fetchReactionsBulk(workoutIds) {
 
 async function fetchComments(workoutId) {
   const { data } = await sb.from('workout_comments').select('*').eq('workout_id', workoutId).order('created_at', { ascending: true });
+  return data || [];
+}
+
+async function fetchCommentsBulk(workoutIds) {
+  if (!workoutIds.length) return [];
+  const { data } = await sb.from('workout_comments').select('*').in('workout_id', workoutIds).order('created_at', { ascending: true });
   return data || [];
 }
 
@@ -2348,33 +2364,41 @@ async function renderGroupFeed(allWorkouts, members) {
   const visible = _feedAllItems.slice(0, FEED_PAGE);
   _feedShown = visible.length;
   const workoutIds = visible.map(w => w.id);
-  const reactions = await fetchReactionsBulk(workoutIds);
-  _feedReactionsCache = { recent: _feedAllItems, members, reactions };
+  const [reactions, comments] = await Promise.all([
+    fetchReactionsBulk(workoutIds),
+    fetchCommentsBulk(workoutIds)
+  ]);
+  _feedReactionsCache = { recent: _feedAllItems, members, reactions, comments };
 
-  feedEl.innerHTML = renderFeedItems(visible, members, reactions);
+  feedEl.innerHTML = renderFeedItems(visible, members, reactions, comments);
   if (moreBtn) moreBtn.classList.toggle('hidden', _feedShown >= _feedAllItems.length);
 }
 
 async function showMoreFeed() {
   if (!_feedReactionsCache) return;
-  const { members, reactions: prevReactions } = _feedReactionsCache;
+  const { members, reactions: prevReactions, comments: prevComments } = _feedReactionsCache;
   const nextBatch = _feedAllItems.slice(_feedShown, _feedShown + FEED_PAGE);
   if (nextBatch.length === 0) return;
 
   const newIds = nextBatch.map(w => w.id);
-  const newReactions = await fetchReactionsBulk(newIds);
+  const [newReactions, newComments] = await Promise.all([
+    fetchReactionsBulk(newIds),
+    fetchCommentsBulk(newIds)
+  ]);
   const allReactions = [...prevReactions, ...newReactions];
+  const allComments = [...prevComments, ...newComments];
   _feedReactionsCache.reactions = allReactions;
+  _feedReactionsCache.comments = allComments;
 
   const feedEl = document.getElementById('group-feed');
-  feedEl.innerHTML += renderFeedItems(nextBatch, members, allReactions);
+  feedEl.innerHTML += renderFeedItems(nextBatch, members, allReactions, allComments);
   _feedShown += nextBatch.length;
 
   const moreBtn = document.getElementById('feed-more-btn');
   if (moreBtn) moreBtn.classList.toggle('hidden', _feedShown >= _feedAllItems.length);
 }
 
-function renderFeedItems(items, members, reactions) {
+function renderFeedItems(items, members, reactions, comments) {
   const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
   return items.map(w => {
     const globalIdx = _feedAllItems.indexOf(w);
@@ -2384,9 +2408,20 @@ function renderFeedItems(items, members, reactions) {
     const likes = reactions.filter(r => r.workout_id === w.id && r.reaction === 'like');
     const dislikes = reactions.filter(r => r.workout_id === w.id && r.reaction === 'dislike');
     const myReaction = reactions.find(r => r.workout_id === w.id && r.profile_id === currentProfile.id);
+    const wComments = (comments || []).filter(c => c.workout_id === w.id);
+    const commentCount = wComments.length;
+    const lastComment = wComments.length ? wComments[wComments.length - 1] : null;
 
     const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
     const notesSnip = w.notes && w.notes !== 'Importerad' ? `<div class="feed-notes">${escapeHTML(w.notes)}</div>` : '';
+
+    let lastCommentHtml = '';
+    if (lastComment) {
+      const commenter = members.find(m => m.id === lastComment.profile_id);
+      const commenterName = commenter ? commenter.name : '?';
+      const truncated = lastComment.text.length > 80 ? lastComment.text.slice(0, 80) + '...' : lastComment.text;
+      lastCommentHtml = `<div class="feed-last-comment"><span class="feed-comment-author">${escapeHTML(commenterName)}</span> ${escapeHTML(truncated)}</div>`;
+    }
 
     return `<div class="feed-item" onclick="openFeedWorkout(${globalIdx})">
       <div class="feed-header">
@@ -2405,7 +2440,9 @@ function renderFeedItems(items, members, reactions) {
         <button class="react-btn-sm${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${w.id}','dislike')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg> ${dislikes.length || ''}
         </button>
+        <span class="feed-comment-count">💬 ${commentCount || ''}</span>
       </div>
+      ${lastCommentHtml}
     </div>`;
   }).join('');
 }

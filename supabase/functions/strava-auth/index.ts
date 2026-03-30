@@ -44,6 +44,14 @@ serve(async (req) => {
 
     const db = supabaseAdmin();
 
+    // Remove any previous connection for this Strava athlete from a different
+    // profile so the unique constraint on strava_athlete_id won't block us.
+    await db
+      .from("strava_connections")
+      .delete()
+      .eq("strava_athlete_id", athlete.id)
+      .neq("profile_id", state);
+
     const { error: upsertErr } = await db.from("strava_connections").upsert(
       {
         profile_id: state,

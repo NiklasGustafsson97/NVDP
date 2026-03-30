@@ -38,7 +38,7 @@
 [data-theme="light"] .bottom-nav { background: rgba(244,245,247,0.95); }
 [data-theme="light"] .modal-box,
 [data-theme="light"] .confirm-box { background: #fff; }
-[data-theme="light"] .side-menu { background: #fff; }
+[data-theme="light"] .side-menu { background: rgba(255,255,255,0.82); }
 [data-theme="light"] select option { background: #fff; color: var(--text); }
 [data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); }
 
@@ -61,8 +61,9 @@ a { color: var(--accent); text-decoration: none; }
 
 /* ── Auth View ── */
 .auth-container {
+  position: fixed; inset: 0; z-index: 9998;
   display: flex; align-items: center; justify-content: center;
-  height: 100dvh; padding: 24px; overflow: hidden;
+  background: var(--bg); padding: 24px; overflow: hidden;
 }
 .auth-box {
   background: var(--bg-card); border: 1px solid var(--border);
@@ -142,7 +143,8 @@ select option { background: #1a1a2e; color: var(--text); }
 }
 .side-menu {
   position: fixed; top: 0; right: -300px; width: 280px; height: 100%;
-  background: var(--bg-card); border-left: 1px solid var(--border);
+  background: rgba(11,13,23,0.82); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border-left: 1px solid var(--border);
   z-index: 201; transition: right 0.25s ease;
   display: flex; flex-direction: column; overflow-y: auto;
 }
@@ -645,11 +647,20 @@ input.code-input {
 .feed-date { font-size: 0.7rem; color: var(--text-dim); }
 .feed-type { font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
 .feed-notes { font-size: 0.8rem; color: var(--text-muted); margin-top: 6px; padding-left: 42px; }
-.feed-reactions { display: flex; gap: 4px; margin-top: 6px; padding-left: 42px; }
+.feed-reactions { display: flex; gap: 4px; margin-top: 6px; padding-left: 42px; align-items: center; }
+.feed-comment-count { font-size: 0.75rem; color: var(--text-dim); margin-left: 4px; user-select: none; }
+.feed-last-comment {
+  font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; padding-left: 42px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.feed-comment-author { font-weight: 600; color: var(--text); margin-right: 2px; }
 
 /* ── Form Row (side-by-side) ── */
 .form-row { display: flex; gap: 12px; }
-.form-row .form-group.flex-1 { flex: 1; }
+.form-row .form-group.flex-1 { flex: 1; min-width: 0; }
+@media (max-width: 400px) {
+  .form-row { flex-direction: column; gap: 0; }
+}
 
 /* ── Clickable Workout Items ── */
 .workout-item.clickable { cursor: pointer; transition: background 0.15s; border-radius: var(--radius-sm); padding: 12px 8px; margin: 0 -8px; }
