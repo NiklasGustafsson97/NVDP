@@ -14,6 +14,16 @@
 --   Base durations here are scaled by app.js projectPlan() (+8%/build week).
 -- ═══════════════════════════════════════════════════════════════════════════
 
+-- Monday: Vila (clean label)
+UPDATE public.period_plans SET label = 'Vila'
+WHERE period_id = (SELECT id FROM public.periods WHERE name = 'Period 1 — Bygga bas och uthållighet')
+  AND day_of_week = 0;
+
+-- Sunday: Vila (clean label)
+UPDATE public.period_plans SET label = 'Vila'
+WHERE period_id = (SELECT id FROM public.periods WHERE name = 'Period 1 — Bygga bas och uthållighet')
+  AND day_of_week = 6;
+
 -- Tuesday: Distansträning Z2
 UPDATE public.period_plans
 SET label = 'Distans Z2',
@@ -58,6 +68,16 @@ WHERE period_id = (SELECT id FROM public.periods WHERE name = 'Period 1 — Bygg
 --   Cycling volume increases. Strides remain on easy day.
 --   Never two hard days in rad. Pattern: Hard-Easy-Hard-Easy-Long-Rest-Rest.
 -- ═══════════════════════════════════════════════════════════════════════════
+
+-- Monday: Vila (clean label)
+UPDATE public.period_plans SET label = 'Vila'
+WHERE period_id = (SELECT id FROM public.periods WHERE name = 'Period 2 — Bygga bas och intensitet')
+  AND day_of_week = 0;
+
+-- Sunday: Vila (clean label)
+UPDATE public.period_plans SET label = 'Vila'
+WHERE period_id = (SELECT id FROM public.periods WHERE name = 'Period 2 — Bygga bas och intensitet')
+  AND day_of_week = 6;
 
 -- Tuesday: VO2max-intervaller
 UPDATE public.period_plans
