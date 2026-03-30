@@ -1214,13 +1214,19 @@ function getBuildWeekIndex(weekIdx) {
   return build;
 }
 
-function scaleDuration(desc, factor) {
-  if (!desc) return desc;
-  return desc.replace(/(\d+)([–\-])(\d+)(\s*min)/g, (_, lo, dash, hi, suffix) => {
-    return Math.round(parseInt(lo) * factor) + dash + Math.round(parseInt(hi) * factor) + suffix;
-  }).replace(/(?<!\d[–\-])(\d+)(\s*min)(?![^(]*\))/g, (_, num, suffix) => {
-    return Math.round(parseInt(num) * factor) + suffix;
-  });
+function scaleDescription(desc, factor) {
+  if (!desc || factor === 1) return desc;
+  return desc
+    .replace(/(\d+)([–\-])(\d+)(\s*km\b)(?!\s*[/)])/g, (_, lo, dash, hi, suffix) => {
+      return Math.round(parseInt(lo) * factor) + dash + Math.round(parseInt(hi) * factor) + suffix;
+    })
+    .replace(/(?<!\d[–\-])(\d+)(\s*km\b)(?!\s*[/)])/g, (m, num, suffix, offset) => {
+      if (desc.substring(Math.max(0, offset - 6), offset).match(/[:\d]\/$/)) return m;
+      return Math.round(parseInt(num) * factor) + suffix;
+    })
+    .replace(/(\d+)([–\-])(\d+)(\s*min)\s*(cykel|stakmaskin|längdskidor)/gi, (_, lo, dash, hi, suffix, act) => {
+      return Math.round(parseInt(lo) * factor) + dash + Math.round(parseInt(hi) * factor) + suffix + ' ' + act;
+    });
 }
 
 function projectPlan(plan, weekIdx, isDeload) {
@@ -1229,16 +1235,7 @@ function projectPlan(plan, weekIdx, isDeload) {
   const factor = isDeload ? 0.7 : Math.pow(1.08, buildIdx);
   const projected = { ...plan };
   projected.label = stripDayPrefix(plan.label);
-  projected.description = scaleDuration(plan.description, factor);
-
-  if (!isDeload && buildIdx >= 4 && plan.day_of_week === 4) {
-    projected.label = 'Kvalitet';
-    const baseDesc = plan.description || '';
-    projected.description = scaleDuration(
-      baseDesc.replace(/lugn[a]?\s*/i, '').replace(/Z1[–\-]?Z2|Z2/i, 'inkl intervaller'),
-      factor
-    );
-  }
+  projected.description = scaleDescription(plan.description, factor);
   return projected;
 }
 
@@ -1289,9 +1286,13 @@ function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchem
     } else if (plan?.is_rest) {
       planText = '<span class="sr-rest-label">Vila</span>';
     } else if (plan) {
-      const dd = dedupPlanText(plan.label, plan.description);
-      if (dd.desc) planText = dd.desc;
-      else if (dd.label) planText = dd.label;
+      const lbl = plan.label || '';
+      const desc = plan.description || '';
+      if (lbl && desc) {
+        planText = `<div class="sr-plan-label">${lbl}</div><div class="sr-plan-desc">${desc}</div>`;
+      } else {
+        planText = desc || lbl;
+      }
     }
 
     if (pendingInv && !acceptedInv) {
@@ -1370,10 +1371,13 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
       const zoneBadge = planWo.intensity_zone
         ? ` <span class="zone-badge zone-${planWo.intensity_zone.toLowerCase()}">${planWo.intensity_zone}</span>`
         : '';
-      planText = `<span>${planWo.description || planWo.label || planWo.activity_type}${zoneBadge}</span>`;
-      if (planWo.target_duration_minutes > 0) {
-        planText += `<div class="sr-target">${planWo.target_duration_minutes} min${planWo.target_distance_km ? ' · ' + planWo.target_distance_km + ' km' : ''}</div>`;
-      }
+      const lbl = planWo.label || planWo.activity_type;
+      const desc = planWo.description || '';
+      const meta = planWo.target_duration_minutes > 0
+        ? `<span class="sr-target">${planWo.target_duration_minutes} min${planWo.target_distance_km ? ' · ' + planWo.target_distance_km + ' km' : ''}</span>`
+        : '';
+      planText = `<div class="sr-plan-label">${lbl}${zoneBadge} ${meta}</div>`;
+      if (desc) planText += `<div class="sr-plan-desc">${desc}</div>`;
     }
 
     if (pendingInv && !acceptedInv) {

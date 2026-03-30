@@ -224,18 +224,19 @@ from (
 where not exists (select 1 from public.periods p where p.name = v.name);
 
 -- Period 1 — weekly template (0 = Monday … 6 = Sunday)
+-- Philosophy: van der Poel polarized base. 80-90% Z1-Z2. ONE quality/week. Volume first.
 insert into public.period_plans (period_id, day_of_week, label, description, is_rest)
 select p.id, v.day_of_week, v.label, v.description, v.is_rest
 from public.periods p
 cross join (
   values
-    (0, 'Mån, Vila'::text, null::text, true),
-    (1, 'Tis - Z2', '35–45 min lugn löpning Z2', false),
-    (2, 'Ons - Z2', 'Cykel 45–60 min Z2', false),
-    (3, 'Tors - kvalitet', '50–70 min löpning inkl intervaller', false),
-    (4, 'Fre - Z2', '30–45 min mycket lugn löpning (Z1–Z2)', false),
-    (5, 'Lör - långpass', 'Långpass Z2: 60 min, bygg mot 80–90', false),
-    (6, 'Sön, Vila', null, true)
+    (0, 'Vila'::text, null::text, true),
+    (1, 'Distans Z2', '7–8 km lugn löpning Z2 (5:45–6:15/km). Ska kännas enkelt hela vägen — du ska kunna prata obehindrat. Puls under 150.', false),
+    (2, 'Cykel Z2', '45–60 min cykel Z2, jämn watt, puls under 145. Alternativ: stakmaskin eller längdskidor. Fokus: aerob volym utan belastning på ben.', false),
+    (3, 'Tröskelpass', '15 min uppvärm Z2 → 4×5 min i Z4 (puls 170–178, ~4:40–5:00/km), 3 min lugn jogg mellan → 10 min nedvarvning. Kontrollerad ansträngning — inte maxat.', false),
+    (4, 'Lätt + strides', '5–6 km mycket lugn Z1 (6:00–6:30/km) + 6×20 sek strides (snabbt men avslappnat, full vila mellan). Strides aktiverar snabbfibrerna utan att trötta.', false),
+    (5, 'Långpass Z2', '12–14 km lugn Z2 (5:45–6:15/km). Öka med ~1 km/vecka. Sista 2 km får ligga i övre Z2. Veckans viktigaste pass — bygg uthålligheten.', false),
+    (6, 'Vila', null, true)
 ) as v(day_of_week, label, description, is_rest)
 where p.name = 'Period 1 — Bygga bas och uthållighet'
   and not exists (
@@ -243,18 +244,19 @@ where p.name = 'Period 1 — Bygga bas och uthållighet'
   );
 
 -- Period 2 — weekly template
+-- Philosophy: van der Poel build. TWO quality sessions (VO2max + tempo). Progressive long run.
 insert into public.period_plans (period_id, day_of_week, label, description, is_rest)
 select p.id, v.day_of_week, v.label, v.description, v.is_rest
 from public.periods p
 cross join (
   values
-    (0, 'Mån, Vila'::text, null::text, true),
-    (1, 'Tis - kvalitet', '45–55 min löpning inkl intervaller', false),
-    (2, 'Ons - Z2', 'Cykel 90–120 min Z2', false),
-    (3, 'Tors - kvalitet', '60–75 min löpning inkl intervaller', false),
-    (4, 'Fre - Z2', '35–45 min lugn löpning + 6–10 s strides', false),
-    (5, 'Lör - långpass', 'Långpass Z2: 90–120 min', false),
-    (6, 'Sön, Vila', null, true)
+    (0, 'Vila'::text, null::text, true),
+    (1, 'VO2max-intervaller', '15 min uppvärm Z2 → 5×3 min i Z5 (puls 180+, ~3:50–4:15/km), 3 min lugn jogg mellan → 10 min nedvarvning. Ska kännas tungt rep 3–5.', false),
+    (2, 'Lång cykel Z2', '90–120 min cykel Z2, jämnt tempo, puls under 145. Bygg aerob kapacitet utan löpbelastning. Ta med vätska.', false),
+    (3, 'Tempopass', '15 min uppvärm Z2 → 20–25 min sammanhängande tempo i Z4 (4:30–4:50/km, puls 170–178) → 10 min nedvarvning. Jämnt och kontrollerat — inte tävling.', false),
+    (4, 'Lätt + strides', '6–7 km lugn Z1-Z2 (6:00–6:30/km) + 8×20 sek strides (snabbt, avslappnat, full vila). Återhämtning efter gårdagens tempo.', false),
+    (5, 'Långpass progressivt', '16–18 km: första 13 km i Z2 (5:30–6:00/km), sista 3–5 km progressivt ner mot Z4 (4:50→4:30/km). Tränar att springa snabbt på trötta ben.', false),
+    (6, 'Vila', null, true)
 ) as v(day_of_week, label, description, is_rest)
 where p.name = 'Period 2 — Bygga bas och intensitet'
   and not exists (

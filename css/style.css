@@ -281,10 +281,10 @@ select option { background: #1a1a2e; color: var(--text); }
 .dash-tomorrow-card { flex: 1; margin-bottom: 0; display: flex; flex-direction: column; }
 .dash-tomorrow-card .card-header { margin-bottom: 8px; }
 .today-workout { font-size: 1.2rem; font-weight: 600; margin-bottom: 4px; }
-.today-desc { color: var(--text-muted); font-size: 0.85rem; }
+.today-desc { color: var(--text-muted); font-size: 0.82rem; line-height: 1.45; }
 .today-rest { color: var(--text-dim); font-style: italic; }
 .tomorrow-workout { font-size: 1rem; font-weight: 600; }
-.tomorrow-desc { color: var(--text-muted); font-size: 0.75rem; margin-top: 4px; }
+.tomorrow-desc { color: var(--text-muted); font-size: 0.75rem; margin-top: 4px; line-height: 1.4; }
 .tomorrow-rest { color: var(--text-dim); font-style: italic; }
 
 /* ── Compliance ── */
@@ -369,7 +369,7 @@ select option { background: #1a1a2e; color: var(--text); }
 
 /* ── Schema Cards ── */
 .sr-card {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: flex-start; gap: 10px;
   padding: 12px 14px; border-radius: var(--radius-sm);
   border: 1px solid var(--border); margin-bottom: 5px;
   background: var(--bg-card); transition: background 0.15s;
@@ -386,7 +386,10 @@ select option { background: #1a1a2e; color: var(--text); }
 .sr-date { font-size: 0.6rem; color: var(--text-dim); margin-top: 1px; }
 
 .sr-main { flex: 1; min-width: 0; }
+.sr-plan-label { font-size: 0.85rem; font-weight: 700; color: var(--text); margin-bottom: 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sr-plan-desc { font-size: 0.78rem; color: var(--text-dim); line-height: 1.45; margin-top: 2px; }
 .sr-plan-text { font-size: 0.85rem; color: var(--text); }
+.sr-target { font-size: 0.7rem; color: var(--text-dim); font-weight: 400; }
 .sr-rest-label { font-style: italic; color: var(--text-dim); }
 
 .sr-right-status { flex-shrink: 0; text-align: right; min-width: 50px; }
