@@ -96,6 +96,15 @@ document.getElementById('auth-form').addEventListener('submit', async (e) => {
 
   if (authMode === 'register') {
     const name = document.getElementById('auth-name').value.trim() || email.split('@')[0];
+    const reservedNames = ['niklas', 'love', 'niklas gustafsson', 'love gustafsson'];
+    if (reservedNames.includes(name.toLowerCase())) {
+      errEl.style.color = 'var(--red)';
+      errEl.textContent = 'Det namnet är redan taget. Välj ett annat.';
+      errEl.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = 'Skapa konto';
+      return;
+    }
     const { data, error } = await sb.auth.signUp({
       email, password,
       options: { data: { name } }

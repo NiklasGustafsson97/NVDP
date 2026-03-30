@@ -4,9 +4,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY") || "";
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || "";
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
-const LLM_PROVIDER = Deno.env.get("LLM_PROVIDER") || "openai";
+const LLM_PROVIDER = Deno.env.get("LLM_PROVIDER") || "gemini";
 
 function corsHeaders() {
   return {
@@ -194,14 +195,44 @@ async function callAnthropic(userPrompt: string): Promise<LLMPlan> {
   return JSON.parse(jsonStr);
 }
 
+async function callGemini(userPrompt: string): Promise<LLMPlan> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+      contents: [{ role: "user", parts: [{ text: userPrompt + "\n\nRespond ONLY with valid JSON matching the output schema. No markdown fences." }] }],
+      generationConfig: {
+        temperature: 0.4,
+        responseMimeType: "application/json",
+      },
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini API error ${res.status}: ${err}`);
+  }
+  const data = await res.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error("Gemini returned empty response");
+  return JSON.parse(text);
+}
+
 async function generatePlan(userPrompt: string): Promise<LLMPlan> {
+  if (LLM_PROVIDER === "gemini" && GEMINI_API_KEY) {
+    return callGemini(userPrompt);
+  }
   if (LLM_PROVIDER === "anthropic" && ANTHROPIC_API_KEY) {
     return callAnthropic(userPrompt);
   }
   if (OPENAI_API_KEY) {
     return callOpenAI(userPrompt);
   }
-  throw new Error("No LLM API key configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in Edge Function secrets.");
+  if (GEMINI_API_KEY) {
+    return callGemini(userPrompt);
+  }
+  throw new Error("No LLM API key configured. Set GEMINI_API_KEY (free), OPENAI_API_KEY, or ANTHROPIC_API_KEY in Edge Function secrets.");
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -383,7 +414,7 @@ serve(async (req) => {
       start_date: startDate,
       end_date: endDateStr,
       status: "active",
-      generation_model: LLM_PROVIDER === "anthropic" ? "claude-sonnet" : "gpt-4o",
+      generation_model: LLM_PROVIDER === "gemini" ? "gemini-2.0-flash" : LLM_PROVIDER === "anthropic" ? "claude-sonnet" : "gpt-4o",
     }).select("id").single();
 
     if (tpErr) throw new Error(`Insert training_plan failed: ${JSON.stringify(tpErr)}`);
