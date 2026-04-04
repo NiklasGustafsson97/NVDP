@@ -1,22 +1,26 @@
 -- ============================================================================
 -- Migration: Enable RLS on unprotected tables (challenges, workout_reactions,
 --            workout_comments) and add per-operation policies.
+-- Idempotent: safe to re-run.
 -- ============================================================================
 
 -- ── workout_reactions ──
 
 alter table public.workout_reactions enable row level security;
 
+drop policy if exists "wr_select_authenticated" on public.workout_reactions;
 create policy "wr_select_authenticated"
   on public.workout_reactions for select to authenticated
   using (true);
 
+drop policy if exists "wr_insert_own" on public.workout_reactions;
 create policy "wr_insert_own"
   on public.workout_reactions for insert to authenticated
   with check (
     exists (select 1 from public.profiles p where p.id = profile_id and p.user_id = auth.uid())
   );
 
+drop policy if exists "wr_update_own" on public.workout_reactions;
 create policy "wr_update_own"
   on public.workout_reactions for update to authenticated
   using (
@@ -26,6 +30,7 @@ create policy "wr_update_own"
     exists (select 1 from public.profiles p where p.id = profile_id and p.user_id = auth.uid())
   );
 
+drop policy if exists "wr_delete_own" on public.workout_reactions;
 create policy "wr_delete_own"
   on public.workout_reactions for delete to authenticated
   using (
@@ -36,16 +41,19 @@ create policy "wr_delete_own"
 
 alter table public.workout_comments enable row level security;
 
+drop policy if exists "wc_select_authenticated" on public.workout_comments;
 create policy "wc_select_authenticated"
   on public.workout_comments for select to authenticated
   using (true);
 
+drop policy if exists "wc_insert_own" on public.workout_comments;
 create policy "wc_insert_own"
   on public.workout_comments for insert to authenticated
   with check (
     exists (select 1 from public.profiles p where p.id = profile_id and p.user_id = auth.uid())
   );
 
+drop policy if exists "wc_update_own" on public.workout_comments;
 create policy "wc_update_own"
   on public.workout_comments for update to authenticated
   using (
@@ -55,6 +63,7 @@ create policy "wc_update_own"
     exists (select 1 from public.profiles p where p.id = profile_id and p.user_id = auth.uid())
   );
 
+drop policy if exists "wc_delete_own" on public.workout_comments;
 create policy "wc_delete_own"
   on public.workout_comments for delete to authenticated
   using (
@@ -65,16 +74,19 @@ create policy "wc_delete_own"
 
 alter table public.challenges enable row level security;
 
+drop policy if exists "ch_select_authenticated" on public.challenges;
 create policy "ch_select_authenticated"
   on public.challenges for select to authenticated
   using (true);
 
+drop policy if exists "ch_insert_own" on public.challenges;
 create policy "ch_insert_own"
   on public.challenges for insert to authenticated
   with check (
     exists (select 1 from public.profiles p where p.id = created_by and p.user_id = auth.uid())
   );
 
+drop policy if exists "ch_update_creator" on public.challenges;
 create policy "ch_update_creator"
   on public.challenges for update to authenticated
   using (
@@ -84,6 +96,7 @@ create policy "ch_update_creator"
     exists (select 1 from public.profiles p where p.id = created_by and p.user_id = auth.uid())
   );
 
+drop policy if exists "ch_delete_creator" on public.challenges;
 create policy "ch_delete_creator"
   on public.challenges for delete to authenticated
   using (
