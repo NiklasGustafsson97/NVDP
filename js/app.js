@@ -2210,7 +2210,7 @@ async function _loadGroup() {
   const lbEl = document.getElementById('group-leaderboard');
   const rankClasses = ['gold', 'silver', 'bronze'];
   lbEl.innerHTML = weekHours.map((m, i) => `
-    <div class="lb-row">
+    <div class="lb-row clickable" onclick="openMemberProfile('${m.id}')">
       <div class="lb-rank ${rankClasses[i] || ''}">${i + 1}</div>
       <div class="lb-name">${m.name}</div>
       <div class="lb-value">${m.hours.toFixed(1)}h</div>
@@ -2588,7 +2588,7 @@ function renderGroupWeekDetail(allWorkouts, members, plans) {
       : '';
 
     return `<div class="grp-member-week">
-      <div class="grp-mw-header">
+      <div class="grp-mw-header clickable" onclick="openMemberProfile('${m.id}')">
         <div class="grp-mw-avatar" style="background:${colors[mi % colors.length]}">${m.name[0].toUpperCase()}</div>
         <div class="grp-mw-name">${m.name}${isMe ? ' (du)' : ''}</div>
         <div class="grp-mw-total">${(totalMins / 60).toFixed(1)}h</div>
@@ -3223,6 +3223,95 @@ function garminSourceBadge(workout) {
 
 function sourceBadge(workout) {
   return stravaSourceBadge(workout) + garminSourceBadge(workout);
+}
+
+// ═══════════════════════
+//  MEMBER PROFILE MODAL
+// ═══════════════════════
+async function openMemberProfile(memberId) {
+  const modal = document.getElementById('member-profile-modal');
+  const titleEl = document.getElementById('mp-title');
+  const bodyEl = document.getElementById('mp-body');
+  if (!modal || !bodyEl) return;
+
+  const member = allProfiles.find(p => p.id === memberId);
+  if (!member) return;
+
+  const isMe = memberId === currentProfile.id;
+  titleEl.textContent = isMe ? `${member.name} (du)` : member.name;
+  bodyEl.innerHTML = '<div class="text-dim" style="padding:16px;text-align:center;">Laddar...</div>';
+  modal.classList.remove('hidden');
+
+  const { data: workouts } = await sb.from('workouts').select('*')
+    .eq('profile_id', memberId)
+    .order('workout_date', { ascending: false });
+  const all = workouts || [];
+
+  const now = new Date();
+  const monday = mondayOfWeek(now);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const weekW = all.filter(w => w.workout_date >= isoDate(monday));
+  const monthW = all.filter(w => w.workout_date >= isoDate(monthStart));
+
+  const weekMins = weekW.reduce((s, w) => s + w.duration_minutes, 0);
+  const monthMins = monthW.reduce((s, w) => s + w.duration_minutes, 0);
+  const totalSessions = all.length;
+
+  // Activity type breakdown (last 30 days)
+  const thirtyDaysAgo = new Date(now);
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const last30 = all.filter(w => w.workout_date >= isoDate(thirtyDaysAgo));
+  const typeCounts = {};
+  last30.forEach(w => { typeCounts[w.activity_type] = (typeCounts[w.activity_type] || 0) + 1; });
+  const typeEntries = Object.entries(typeCounts).sort((a, b) => b[1] - a[1]);
+
+  let html = '<div class="mp-stats">';
+  html += `<div class="mp-stat"><div class="mp-stat-value">${(weekMins / 60).toFixed(1)}h</div><div class="mp-stat-label">Denna vecka</div></div>`;
+  html += `<div class="mp-stat"><div class="mp-stat-value">${(monthMins / 60).toFixed(1)}h</div><div class="mp-stat-label">Denna månad</div></div>`;
+  html += `<div class="mp-stat"><div class="mp-stat-value">${totalSessions}</div><div class="mp-stat-label">Totalt pass</div></div>`;
+  html += '</div>';
+
+  if (typeEntries.length > 0) {
+    html += '<div class="mp-section-title">Senaste 30 dagarna</div>';
+    html += '<div class="mp-type-bars">';
+    const maxCount = typeEntries[0][1];
+    typeEntries.forEach(([type, count]) => {
+      const pct = Math.round((count / maxCount) * 100);
+      const color = ACTIVITY_COLORS[type] || '#555';
+      html += `<div class="mp-type-row">
+        <span class="mp-type-label">${activityEmoji(type)} ${type}</span>
+        <div class="mp-type-bar-bg"><div class="mp-type-bar" style="width:${pct}%;background:${color};"></div></div>
+        <span class="mp-type-count">${count}</span>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  // Recent workouts
+  const recentSlice = all.slice(0, 10);
+  if (recentSlice.length > 0) {
+    html += '<div class="mp-section-title">Senaste pass</div>';
+    html += '<div class="mp-recent">';
+    recentSlice.forEach(w => {
+      const distStr = w.distance_km ? ` | ${w.distance_km} km` : '';
+      const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
+      html += `<div class="workout-item clickable" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
+        <div class="workout-icon" style="background:${ACTIVITY_COLORS[w.activity_type] || '#555'}22;">${activityEmoji(w.activity_type)}</div>
+        <div class="workout-info">
+          <div class="name">${w.activity_type}${intBadge}</div>
+          <div class="meta">${formatDate(w.workout_date)}</div>
+        </div>
+        <div class="workout-info duration">${w.duration_minutes} min${distStr}</div>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  bodyEl.innerHTML = html;
+}
+
+function closeMemberProfile() {
+  document.getElementById('member-profile-modal')?.classList.add('hidden');
 }
 
 // ═══════════════════════

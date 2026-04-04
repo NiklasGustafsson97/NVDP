@@ -28,7 +28,49 @@ export const STRAVA_TYPE_MAP: Record<string, string> = {
   RollerSki: "Längdskidor",
   Elliptical: "Stakmaskin",
   StairStepper: "Stakmaskin",
+  Swim: "Annat",
+  Rowing: "Annat",
 };
+
+// Activities that should NOT be imported (not training)
+const STRAVA_SKIP_TYPES = new Set([
+  "Walk",
+  "Hike",
+  "Yoga",
+  "Meditation",
+  "Canoeing",
+  "Kayaking",
+  "Sail",
+  "Surfing",
+  "Windsurf",
+  "Kitesurf",
+  "Golf",
+  "Skateboard",
+  "Snowboard",
+  "AlpineSki",
+  "IceSkate",
+  "InlineSkate",
+  "Velomobile",
+  "Handcycle",
+  "Wheelchair",
+  "Snowshoe",
+  "Soccer",
+  "Tennis",
+  "Badminton",
+  "Pickleball",
+  "Racquetball",
+  "Squash",
+  "TableTennis",
+  "VirtualRow",
+]);
+
+export function shouldImportActivity(activity: StravaActivity): boolean {
+  const sportType = activity.sport_type || activity.type;
+  if (STRAVA_SKIP_TYPES.has(sportType)) return false;
+  // Skip very short activities (<5 min) as they're likely accidental
+  if (activity.moving_time < 300) return false;
+  return true;
+}
 
 export function mapStravaType(stravaType: string): string {
   return STRAVA_TYPE_MAP[stravaType] || "Annat";

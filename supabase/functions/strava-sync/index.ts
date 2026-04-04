@@ -5,6 +5,7 @@ import {
   supabaseAdmin,
   refreshTokenIfNeeded,
   activityToWorkout,
+  shouldImportActivity,
   corsHeaders,
   type StravaActivity,
 } from "../_shared/strava.ts";
@@ -112,6 +113,11 @@ serve(async (req) => {
       if (activities.length === 0) break;
 
       for (const activity of activities) {
+        if (!shouldImportActivity(activity)) {
+          skipped++;
+          continue;
+        }
+
         const workout = activityToWorkout(activity, conn.profile_id);
 
         // Check if already imported

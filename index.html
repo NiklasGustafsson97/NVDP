@@ -844,6 +844,17 @@
   </div>
 </div>
 
+<!-- ═══ MEMBER PROFILE MODAL ═══ -->
+<div id="member-profile-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeMemberProfile()">
+  <div class="modal-box" style="max-width:480px;">
+    <div class="modal-header">
+      <h3 id="mp-title">Profil</h3>
+      <button class="btn-close" onclick="closeMemberProfile()">&times;</button>
+    </div>
+    <div id="mp-body"></div>
+  </div>
+</div>
+
 <script src="js/config.js?v=25"></script>
 <script src="js/app.js?v=30"></script>
 <script>

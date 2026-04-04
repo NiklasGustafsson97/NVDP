@@ -559,6 +559,8 @@ input.code-input {
   display: flex; align-items: center; gap: 12px; padding: 10px 0;
   border-bottom: 1px solid rgba(255,255,255,0.03);
 }
+.lb-row.clickable { cursor: pointer; border-radius: var(--radius-sm); padding: 10px 8px; margin: 0 -8px; transition: background 0.15s; }
+.lb-row.clickable:hover { background: var(--bg-card-hover); }
 .lb-rank { width: 28px; font-weight: 800; font-size: 1rem; color: var(--text-dim); text-align: center; }
 .lb-rank.gold { color: #F1C40F; }
 .lb-rank.silver { color: #BDC3C7; }
@@ -736,6 +738,8 @@ input.code-input {
 .grp-mw-header {
   display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
 }
+.grp-mw-header.clickable { cursor: pointer; border-radius: var(--radius-sm); padding: 6px 8px; margin: -6px -8px 8px -8px; transition: background 0.15s; }
+.grp-mw-header.clickable:hover { background: var(--bg-card-hover); }
 .grp-mw-avatar {
   width: 28px; height: 28px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
@@ -903,6 +907,30 @@ input.code-input {
   font-size: 0.8rem; margin-left: 8px;
 }
 .garmin-view-link:hover { color: #006aab; }
+
+/* ── Member Profile Modal ── */
+.mp-stats {
+  display: flex; gap: 8px; margin-bottom: 16px;
+}
+.mp-stat {
+  flex: 1; text-align: center; padding: 12px 8px;
+  background: var(--bg-card); border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.mp-stat-value { font-size: 1.3rem; font-weight: 700; color: var(--text); }
+.mp-stat-label { font-size: 0.65rem; color: var(--text-dim); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
+.mp-section-title {
+  font-size: 0.7rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 0.5px; margin: 16px 0 8px; padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.mp-type-bars { display: flex; flex-direction: column; gap: 6px; }
+.mp-type-row { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; }
+.mp-type-label { width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
+.mp-type-bar-bg { flex: 1; height: 8px; background: rgba(255,255,255,0.04); border-radius: 4px; overflow: hidden; }
+.mp-type-bar { height: 100%; border-radius: 4px; transition: width 0.3s; }
+.mp-type-count { font-weight: 600; font-size: 0.75rem; color: var(--text-muted); width: 24px; text-align: right; flex-shrink: 0; }
+.mp-recent { margin-top: 4px; }
 
 /* ── Workout Invitations ── */
 .shared-badge {

@@ -4,6 +4,7 @@ import {
   supabaseAdmin,
   refreshTokenIfNeeded,
   activityToWorkout,
+  shouldImportActivity,
   corsHeaders,
   type StravaActivity,
 } from "../_shared/strava.ts";
@@ -76,9 +77,9 @@ serve(async (req) => {
 
       const activity: StravaActivity = await actRes.json();
 
-      // Skip manual entries (they're already in our system if user logs them there)
-      // We only skip if it's a "manual" Strava entry AND the user also uses our app to log
-      // In practice, import everything from Strava -- duplicates are prevented by unique index
+      if (!shouldImportActivity(activity)) {
+        return new Response("ok", { status: 200 });
+      }
 
       const workout = activityToWorkout(activity, conn.profile_id);
 
