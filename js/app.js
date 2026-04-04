@@ -785,6 +785,7 @@ async function _loadDashboard() {
     : (isDeloadWeek(monday) ? 'Deload-vecka' : '');
   document.getElementById('compliance-target').textContent = phaseText;
 
+  await renderCalendarStrip(currentProfile, monday);
 }
 
 let _recentWorkouts = [];
@@ -1212,7 +1213,7 @@ async function _loadSchema() {
   const targetMonday = addDays(currentMonday, schemaWeekOffset * 7);
   const targetSunday = addDays(targetMonday, 6);
   const wk = weekNumber(targetMonday);
-  const todayBtn = document.getElementById('cal-strip-today-btn');
+  const todayBtn = document.getElementById('schema-today-btn');
   if (todayBtn) todayBtn.classList.toggle('hidden', schemaWeekOffset === 0);
 
   const workouts = await fetchWorkouts(profile?.id, isoDate(targetMonday), isoDate(targetSunday));
@@ -1232,8 +1233,6 @@ async function _loadSchema() {
   const isInActivePlan = _activePlan &&
     isoDate(targetMonday) >= _activePlan.start_date &&
     isoDate(targetSunday) <= _activePlan.end_date;
-
-  await renderCalendarStrip(profile, targetMonday);
 
   if (isOwnSchema && isInActivePlan) {
     // AI plan mode
@@ -1332,9 +1331,6 @@ async function renderCalendarStrip(profile, selectedMonday) {
 
   track.innerHTML = html;
 }
-
-function calStripScrollLeft() { schemaWeekPrev(); }
-function calStripScrollRight() { schemaWeekNext(); }
 
 function schemaWeekPrev() {
   const now = new Date();

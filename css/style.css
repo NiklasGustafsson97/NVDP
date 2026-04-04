@@ -478,6 +478,11 @@ select option { background: #1a1a2e; color: var(--text); }
   .cal-strip-arrow { width: 24px; }
 }
 
+.schema-week-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.schema-week-nav button { background: none; border: 1px solid var(--border); color: var(--text); border-radius: var(--radius-sm); padding: 6px 12px; cursor: pointer; font-size: 0.85rem; }
+.schema-week-nav button:hover { background: var(--bg-card); }
+.schema-nav-right { display: flex; gap: 8px; align-items: center; }
+.btn-today { background: var(--accent) !important; color: #fff !important; border-color: var(--accent) !important; font-weight: 600; font-size: 0.8rem !important; padding: 5px 12px !important; }
 .schema-week-label { font-weight: 600; font-size: 0.9rem; }
 
 /* ── Schema Cards ── */

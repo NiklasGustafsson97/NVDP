@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NVDP</title>
-  <link rel="stylesheet" href="css/style.css?v=33">
+  <link rel="stylesheet" href="css/style.css?v=34">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -246,6 +246,16 @@
         <p id="dash-date"></p>
       </div>
 
+      <!-- Calendar strip -->
+      <div class="cal-strip-wrapper">
+        <div class="cal-strip-header">
+          <span class="cal-strip-month" id="cal-strip-month"></span>
+        </div>
+        <div class="cal-strip-scroll-area">
+          <div class="cal-strip-track" id="cal-strip-track"></div>
+        </div>
+      </div>
+
       <div class="dash-today-row">
         <div class="card today-card dash-today-main">
           <div class="card-header"><span class="card-title">Dagens pass</span></div>
@@ -351,20 +361,15 @@
 
       <div class="schema-tabs" id="schema-person-tabs"></div>
 
-      <!-- Calendar strip -->
-      <div class="cal-strip-wrapper">
-        <div class="cal-strip-header">
-          <span class="cal-strip-month" id="cal-strip-month"></span>
-          <button class="cal-strip-today-btn hidden" id="cal-strip-today-btn" onclick="schemaWeekToday()">Idag</button>
-        </div>
-        <div class="cal-strip-scroll-area">
-          <button class="cal-strip-arrow cal-strip-arrow-left" onclick="calStripScrollLeft()" aria-label="Scrolla vänster">&#9664;</button>
-          <div class="cal-strip-track" id="cal-strip-track"></div>
-          <button class="cal-strip-arrow cal-strip-arrow-right" onclick="calStripScrollRight()" aria-label="Scrolla höger">&#9654;</button>
+      <div class="schema-week-nav">
+        <button onclick="schemaWeekPrev()">&#9664;</button>
+        <span class="schema-week-label" id="schema-week-label"></span>
+        <div class="schema-nav-right">
+          <button id="schema-today-btn" class="btn-today hidden" onclick="schemaWeekToday()">Idag</button>
+          <button onclick="schemaWeekNext()">&#9654;</button>
         </div>
       </div>
 
-      <span class="schema-week-label" id="schema-week-label" style="display:none"></span>
       <div id="schema-content"></div>
     </section>
 
@@ -870,7 +875,7 @@
 </div>
 
 <script src="js/config.js?v=25"></script>
-<script src="js/app.js?v=33"></script>
+<script src="js/app.js?v=34"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {
