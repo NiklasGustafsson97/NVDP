@@ -1280,16 +1280,15 @@ async function renderCalendarStrip(profile, selectedMonday) {
 
   const now = new Date();
   const todayStr = isoDate(now);
-  const currentMonday = mondayOfWeek(now);
-  const stripStart = addDays(selectedMonday, -14);
-  const stripEnd = addDays(selectedMonday, 27);
-  const stripStartStr = isoDate(stripStart);
-  const stripEndStr = isoDate(stripEnd);
+  const selectedSunday = addDays(selectedMonday, 6);
+  const startStr = isoDate(selectedMonday);
+  const endStr = isoDate(selectedSunday);
+  const wk = weekNumber(selectedMonday);
 
   if (!_calStripWorkouts || !_calStripRange ||
-      _calStripRange.start !== stripStartStr || _calStripRange.end !== stripEndStr) {
-    _calStripWorkouts = await fetchWorkouts(profile?.id, stripStartStr, stripEndStr);
-    _calStripRange = { start: stripStartStr, end: stripEndStr };
+      _calStripRange.start !== startStr || _calStripRange.end !== endStr) {
+    _calStripWorkouts = await fetchWorkouts(profile?.id, startStr, endStr);
+    _calStripRange = { start: startStr, end: endStr };
   }
 
   const workoutDates = new Set(_calStripWorkouts.map(w => w.workout_date));
@@ -1297,92 +1296,45 @@ async function renderCalendarStrip(profile, selectedMonday) {
   let planDates = new Set();
   if (_activePlan) {
     try {
-      const pw = await fetchPlanWorkoutsByDate(_activePlan.id, stripStartStr, stripEndStr);
+      const pw = await fetchPlanWorkoutsByDate(_activePlan.id, startStr, endStr);
       pw.forEach(p => { if (!p.is_rest) planDates.add(p.workout_date); });
     } catch (e) { /* ignore */ }
   }
 
-  const selectedMondayStr = isoDate(selectedMonday);
-  const selectedSundayStr = isoDate(addDays(selectedMonday, 6));
-
-  const midDate = addDays(selectedMonday, 3);
   if (monthLabel) {
-    monthLabel.textContent = midDate.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' });
+    const midDate = addDays(selectedMonday, 3);
+    monthLabel.textContent = `V${wk} \u2014 ${midDate.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' })}`;
   }
 
   let html = '';
-  let weekDay = new Date(stripStart);
+  for (let d = 0; d < 7; d++) {
+    const cellDate = addDays(selectedMonday, d);
+    const cellStr = isoDate(cellDate);
+    const isToday = cellStr === todayStr;
+    const isPast = cellDate < now && !isToday;
+    const hasDone = workoutDates.has(cellStr);
+    const hasPlanned = planDates.has(cellStr);
 
-  while (isoDate(weekDay) <= stripEndStr) {
-    const weekMonday = mondayOfWeek(weekDay);
-    const weekMondayStr = isoDate(weekMonday);
-    const isSelectedWeek = weekMondayStr === selectedMondayStr;
-    html += `<div class="cal-week-group${isSelectedWeek ? ' cal-week-selected' : ''}">`;
+    let dotClass = 'cal-dot-none';
+    if (hasDone) dotClass = 'cal-dot-done';
+    else if (isPast && hasPlanned) dotClass = 'cal-dot-missed';
+    else if (hasPlanned) dotClass = 'cal-dot-planned';
 
-    for (let d = 0; d < 7; d++) {
-      const cellDate = addDays(weekMonday, d);
-      const cellStr = isoDate(cellDate);
-      if (cellStr < stripStartStr || cellStr > stripEndStr) {
-        html += `<div class="cal-cell" style="opacity:0;pointer-events:none"><div class="cal-cell-day">&nbsp;</div><div class="cal-cell-num">&nbsp;</div><div class="cal-cell-dot cal-dot-none"></div></div>`;
-        continue;
-      }
+    const classes = ['cal-cell'];
+    if (isToday) classes.push('cal-today');
 
-      const isToday = cellStr === todayStr;
-      const isPast = cellDate < now && !isToday;
-      const hasDone = workoutDates.has(cellStr);
-      const hasPlanned = planDates.has(cellStr);
-
-      let dotClass = 'cal-dot-none';
-      if (hasDone) dotClass = 'cal-dot-done';
-      else if (isPast && hasPlanned) dotClass = 'cal-dot-missed';
-      else if (hasPlanned) dotClass = 'cal-dot-planned';
-
-      const classes = ['cal-cell'];
-      if (isToday) classes.push('cal-today');
-
-      html += `<div class="${classes.join(' ')}" onclick="calCellTap('${cellStr}')">
-        <div class="cal-cell-day">${CAL_DAY_LETTERS[d]}</div>
-        <div class="cal-cell-num">${cellDate.getDate()}</div>
-        <div class="cal-cell-dot ${dotClass}"></div>
-      </div>`;
-    }
-
-    html += '</div>';
-    weekDay = addDays(weekMonday, 7);
+    html += `<div class="${classes.join(' ')}">
+      <div class="cal-cell-day">${CAL_DAY_LETTERS[d]}</div>
+      <div class="cal-cell-num">${cellDate.getDate()}</div>
+      <div class="cal-cell-dot ${dotClass}"></div>
+    </div>`;
   }
 
   track.innerHTML = html;
-
-  requestAnimationFrame(() => {
-    const selectedGroup = track.querySelector('.cal-week-selected');
-    if (selectedGroup) {
-      selectedGroup.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'instant' });
-    }
-  });
 }
 
-function calCellTap(dateStr) {
-  const cellDate = new Date(dateStr + 'T12:00:00');
-  const cellMonday = mondayOfWeek(cellDate);
-  const now = new Date();
-  const currentMonday = mondayOfWeek(now);
-  const diffMs = cellMonday.getTime() - currentMonday.getTime();
-  const diffWeeks = Math.round(diffMs / (7 * 86400000));
-  if (diffWeeks !== schemaWeekOffset) {
-    schemaWeekOffset = diffWeeks;
-    _calStripWorkouts = null;
-    loadSchema();
-  }
-}
-
-function calStripScrollLeft() {
-  const track = document.getElementById('cal-strip-track');
-  if (track) track.scrollBy({ left: -200, behavior: 'smooth' });
-}
-function calStripScrollRight() {
-  const track = document.getElementById('cal-strip-track');
-  if (track) track.scrollBy({ left: 200, behavior: 'smooth' });
-}
+function calStripScrollLeft() { schemaWeekPrev(); }
+function calStripScrollRight() { schemaWeekNext(); }
 
 function schemaWeekPrev() {
   const now = new Date();
