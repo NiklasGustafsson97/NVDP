@@ -96,3 +96,8 @@ const PHASE_LABELS = {
 const STRAVA_CLIENT_ID = '217664';
 const SUPABASE_FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
 const STRAVA_REDIRECT_URI = SUPABASE_FUNCTIONS_URL + '/strava-auth';
+
+// ── Garmin Integration ──
+const GARMIN_CLIENT_ID = ''; // Set after Garmin Developer Program approval
+const GARMIN_REDIRECT_URI = SUPABASE_FUNCTIONS_URL + '/garmin-auth';
+const GARMIN_AUTH_URL = 'https://connect.garmin.com/oauthConfirm';

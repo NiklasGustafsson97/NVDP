@@ -234,8 +234,16 @@ select option { background: #1a1a2e; color: var(--text); }
 .sm-toggle-btn.active { background: var(--accent); color: #fff; }
 .sm-toggle-btn:not(.active):hover { background: var(--bg-card-hover); color: var(--text-muted); }
 
-/* ── Feed More Button ── */
+/* ── Show More Buttons ── */
 .feed-more-btn { display: block; width: 100%; margin-top: 12px; text-align: center; }
+.btn-show-more {
+  display: block; width: 100%; margin-top: 8px; padding: 10px;
+  text-align: center; font-size: 0.8rem; font-weight: 600;
+  color: var(--accent); background: transparent;
+  border: 1px solid rgba(214,99,158,0.2); border-radius: var(--radius-sm);
+  cursor: pointer; font-family: var(--font); transition: all 0.2s;
+}
+.btn-show-more:hover { background: rgba(214,99,158,0.06); border-color: rgba(214,99,158,0.4); }
 
 /* ── Bottom Nav ── */
 .bottom-nav {

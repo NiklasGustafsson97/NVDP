@@ -771,30 +771,58 @@ async function _loadDashboard() {
   // Weekly summary (shows for completed weeks or on Sunday)
   renderWeeklySummary(weekWorkouts, weekPlanItems, monday, currentProfile);
 
-  // Recent workouts
+  // Recent workouts (paginated, 10 at a time)
   const { data: recent } = await sb.from('workouts').select('*')
     .eq('profile_id', currentProfile?.id)
-    .order('workout_date', { ascending: false }).limit(10);
+    .order('workout_date', { ascending: false });
 
   const recentEl = document.getElementById('recent-workouts');
   if (!recent || recent.length === 0) {
     recentEl.innerHTML = '<div class="empty-state"><div class="icon">&#127939;</div><p>Inga pass loggade ännu</p></div>';
   } else {
-    recentEl.innerHTML = recent.map(w => {
-      const distStr = w.distance_km ? ` | ${w.distance_km} km` : '';
-      const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
-      return `
-      <div class="workout-item clickable" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
-        <div class="workout-icon" style="background:${ACTIVITY_COLORS[w.activity_type] || '#555'}22;">
-          ${activityEmoji(w.activity_type)}
-        </div>
-        <div class="workout-info">
-          <div class="name">${w.activity_type}${intBadge}</div>
-          <div class="meta">${formatDate(w.workout_date)}${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? ' — ' + w.notes : ''}</div>
-        </div>
-        <div class="workout-info duration">${w.duration_minutes} min${distStr}</div>
-      </div>`;
-    }).join('');
+    _recentWorkouts = recent;
+    _recentShown = 0;
+    recentEl.innerHTML = '';
+    showMoreRecent();
+  }
+}
+
+let _recentWorkouts = [];
+let _recentShown = 0;
+const RECENT_PAGE = 10;
+
+function showMoreRecent() {
+  const el = document.getElementById('recent-workouts');
+  if (!el || !_recentWorkouts.length) return;
+  const batch = _recentWorkouts.slice(_recentShown, _recentShown + RECENT_PAGE);
+  const html = batch.map(w => {
+    const distStr = w.distance_km ? ` | ${w.distance_km} km` : '';
+    const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
+    return `
+    <div class="workout-item clickable" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
+      <div class="workout-icon" style="background:${ACTIVITY_COLORS[w.activity_type] || '#555'}22;">
+        ${activityEmoji(w.activity_type)}
+      </div>
+      <div class="workout-info">
+        <div class="name">${w.activity_type}${intBadge}</div>
+        <div class="meta">${formatDate(w.workout_date)}${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? ' — ' + w.notes : ''}</div>
+      </div>
+      <div class="workout-info duration">${w.duration_minutes} min${distStr}</div>
+    </div>`;
+  }).join('');
+  _recentShown += batch.length;
+
+  // Remove old "show more" button if present
+  const oldBtn = el.querySelector('.recent-more-btn');
+  if (oldBtn) oldBtn.remove();
+
+  el.insertAdjacentHTML('beforeend', html);
+
+  if (_recentShown < _recentWorkouts.length) {
+    const remaining = _recentWorkouts.length - _recentShown;
+    el.insertAdjacentHTML('beforeend',
+      `<button class="recent-more-btn btn-show-more" onclick="showMoreRecent()">Visa fler (${remaining} kvar)</button>`
+    );
   }
 }
 
