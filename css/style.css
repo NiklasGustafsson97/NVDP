@@ -837,9 +837,11 @@ input.code-input {
 
 /* ── View Loading Overlay ── */
 .view-loading {
+  position: absolute; top: 0; left: 0; right: 0;
   display: flex; align-items: center; justify-content: center;
-  min-height: 200px;
+  padding-top: 120px; z-index: 10; pointer-events: none;
 }
+.view { position: relative; }
 
 /* ── Nudge Bell ── */
 .nudge-bell {
