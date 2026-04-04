@@ -4394,6 +4394,36 @@ async function removeFriend(friendId) {
   }
 }
 
+function buildSocialStatsRow(w) {
+  const parts = [];
+  if (w.avg_hr) parts.push(`<span class="sf-stat">&#9829; ${w.avg_hr} bpm</span>`);
+  if (w.elevation_gain_m) parts.push(`<span class="sf-stat">&#9650; ${Math.round(w.elevation_gain_m)} m</span>`);
+  if (w.avg_speed_kmh && w.activity_type === 'Löpning') {
+    const pace = 60 / w.avg_speed_kmh;
+    const pMin = Math.floor(pace);
+    const pSec = String(Math.round((pace - pMin) * 60)).padStart(2, '0');
+    parts.push(`<span class="sf-stat">${pMin}:${pSec}/km</span>`);
+  }
+  if (w.calories) parts.push(`<span class="sf-stat">${w.calories} kcal</span>`);
+  return parts.length ? `<div class="sf-stats-row">${parts.join('')}</div>` : '';
+}
+
+function initSocialFeedMaps() {
+  if (typeof L === 'undefined') return;
+  document.querySelectorAll('.sf-map[data-polyline]').forEach(el => {
+    if (el.dataset.init) return;
+    el.dataset.init = '1';
+    try {
+      const coords = decodePolyline(el.dataset.polyline);
+      if (coords.length < 2) { el.style.display = 'none'; return; }
+      const map = L.map(el, { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false });
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 18 }).addTo(map);
+      const line = L.polyline(coords, { color: '#2E86C1', weight: 3, opacity: 0.8 }).addTo(map);
+      map.fitBounds(line.getBounds(), { padding: [10, 10] });
+    } catch (e) { el.style.display = 'none'; }
+  });
+}
+
 async function renderSocialFeed(append) {
   const feedEl = document.getElementById('social-feed');
   const moreBtn = document.getElementById('social-feed-more');
@@ -4457,16 +4487,21 @@ async function renderSocialFeed(append) {
       </div>`;
     }).join('');
 
+    const statsHtml = buildSocialStatsRow(w);
+    const mapHtml = w.map_polyline ? `<div class="sf-map" id="sf-map-${w.id}" data-polyline="${w.map_polyline}"></div>` : '';
+
     return `<div class="social-feed-item" data-workout-id="${w.id}">
       <div class="sf-header">
         <div class="sf-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1rem' : '0.75rem'};">${avatar}</div>
         <span class="sf-name">${name}</span>
         <span class="sf-date">${wDate}</span>
       </div>
-      <div class="sf-body">
+      <div class="sf-body sf-body-clickable" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
         <div class="sf-workout-label">${w.activity_type}${intBadge}</div>
         <div class="sf-workout-meta">${w.duration_minutes} min${distText}</div>
-        ${w.notes ? `<div class="sf-workout-notes">${w.notes}</div>` : ''}
+        ${statsHtml}
+        ${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? `<div class="sf-workout-notes">${w.notes}</div>` : ''}
+        ${mapHtml}
       </div>
       <div class="sf-actions">
         <button class="sf-action-btn${myLike ? ' liked' : ''}" onclick="toggleSocialLike('${w.id}', this)">
@@ -4493,6 +4528,7 @@ async function renderSocialFeed(append) {
   }
 
   moreBtn.classList.toggle('hidden', workouts.length < SOCIAL_FEED_PAGE_SIZE);
+  requestAnimationFrame(() => initSocialFeedMaps());
 }
 
 async function loadMoreSocialFeed() {
