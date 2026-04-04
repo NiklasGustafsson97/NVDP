@@ -1199,6 +1199,9 @@ async function loadSchema() {
   try { await _loadSchema(); } catch (e) { console.error('Schema error:', e); }
   hideViewLoading('view-schema');
 }
+let _calStripWorkouts = null;
+let _calStripRange = null;
+
 async function _loadSchema() {
   const tabsEl = document.getElementById('schema-person-tabs');
   tabsEl.innerHTML = '';
@@ -1209,7 +1212,7 @@ async function _loadSchema() {
   const targetMonday = addDays(currentMonday, schemaWeekOffset * 7);
   const targetSunday = addDays(targetMonday, 6);
   const wk = weekNumber(targetMonday);
-  const todayBtn = document.getElementById('schema-today-btn');
+  const todayBtn = document.getElementById('cal-strip-today-btn');
   if (todayBtn) todayBtn.classList.toggle('hidden', schemaWeekOffset === 0);
 
   const workouts = await fetchWorkouts(profile?.id, isoDate(targetMonday), isoDate(targetSunday));
@@ -1229,6 +1232,8 @@ async function _loadSchema() {
   const isInActivePlan = _activePlan &&
     isoDate(targetMonday) >= _activePlan.start_date &&
     isoDate(targetSunday) <= _activePlan.end_date;
+
+  await renderCalendarStrip(profile, targetMonday);
 
   if (isOwnSchema && isInActivePlan) {
     // AI plan mode
@@ -1265,6 +1270,120 @@ async function _loadSchema() {
   }
 }
 
+// ── Calendar Strip ──
+const CAL_DAY_LETTERS = ['M', 'T', 'O', 'T', 'F', 'L', 'S'];
+
+async function renderCalendarStrip(profile, selectedMonday) {
+  const track = document.getElementById('cal-strip-track');
+  const monthLabel = document.getElementById('cal-strip-month');
+  if (!track) return;
+
+  const now = new Date();
+  const todayStr = isoDate(now);
+  const currentMonday = mondayOfWeek(now);
+  const stripStart = addDays(selectedMonday, -14);
+  const stripEnd = addDays(selectedMonday, 27);
+  const stripStartStr = isoDate(stripStart);
+  const stripEndStr = isoDate(stripEnd);
+
+  if (!_calStripWorkouts || !_calStripRange ||
+      _calStripRange.start !== stripStartStr || _calStripRange.end !== stripEndStr) {
+    _calStripWorkouts = await fetchWorkouts(profile?.id, stripStartStr, stripEndStr);
+    _calStripRange = { start: stripStartStr, end: stripEndStr };
+  }
+
+  const workoutDates = new Set(_calStripWorkouts.map(w => w.workout_date));
+
+  let planDates = new Set();
+  if (_activePlan) {
+    try {
+      const pw = await fetchPlanWorkoutsByDate(_activePlan.id, stripStartStr, stripEndStr);
+      pw.forEach(p => { if (!p.is_rest) planDates.add(p.workout_date); });
+    } catch (e) { /* ignore */ }
+  }
+
+  const selectedMondayStr = isoDate(selectedMonday);
+  const selectedSundayStr = isoDate(addDays(selectedMonday, 6));
+
+  const midDate = addDays(selectedMonday, 3);
+  if (monthLabel) {
+    monthLabel.textContent = midDate.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' });
+  }
+
+  let html = '';
+  let weekDay = new Date(stripStart);
+
+  while (isoDate(weekDay) <= stripEndStr) {
+    const weekMonday = mondayOfWeek(weekDay);
+    const weekMondayStr = isoDate(weekMonday);
+    const isSelectedWeek = weekMondayStr === selectedMondayStr;
+    html += `<div class="cal-week-group${isSelectedWeek ? ' cal-week-selected' : ''}">`;
+
+    for (let d = 0; d < 7; d++) {
+      const cellDate = addDays(weekMonday, d);
+      const cellStr = isoDate(cellDate);
+      if (cellStr < stripStartStr || cellStr > stripEndStr) {
+        html += `<div class="cal-cell" style="opacity:0;pointer-events:none"><div class="cal-cell-day">&nbsp;</div><div class="cal-cell-num">&nbsp;</div><div class="cal-cell-dot cal-dot-none"></div></div>`;
+        continue;
+      }
+
+      const isToday = cellStr === todayStr;
+      const isPast = cellDate < now && !isToday;
+      const hasDone = workoutDates.has(cellStr);
+      const hasPlanned = planDates.has(cellStr);
+
+      let dotClass = 'cal-dot-none';
+      if (hasDone) dotClass = 'cal-dot-done';
+      else if (isPast && hasPlanned) dotClass = 'cal-dot-missed';
+      else if (hasPlanned) dotClass = 'cal-dot-planned';
+
+      const classes = ['cal-cell'];
+      if (isToday) classes.push('cal-today');
+
+      html += `<div class="${classes.join(' ')}" onclick="calCellTap('${cellStr}')">
+        <div class="cal-cell-day">${CAL_DAY_LETTERS[d]}</div>
+        <div class="cal-cell-num">${cellDate.getDate()}</div>
+        <div class="cal-cell-dot ${dotClass}"></div>
+      </div>`;
+    }
+
+    html += '</div>';
+    weekDay = addDays(weekMonday, 7);
+  }
+
+  track.innerHTML = html;
+
+  requestAnimationFrame(() => {
+    const selectedGroup = track.querySelector('.cal-week-selected');
+    if (selectedGroup) {
+      selectedGroup.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'instant' });
+    }
+  });
+}
+
+function calCellTap(dateStr) {
+  const cellDate = new Date(dateStr + 'T12:00:00');
+  const cellMonday = mondayOfWeek(cellDate);
+  const now = new Date();
+  const currentMonday = mondayOfWeek(now);
+  const diffMs = cellMonday.getTime() - currentMonday.getTime();
+  const diffWeeks = Math.round(diffMs / (7 * 86400000));
+  if (diffWeeks !== schemaWeekOffset) {
+    schemaWeekOffset = diffWeeks;
+    _calStripWorkouts = null;
+    loadSchema();
+  }
+}
+
+function calStripScrollLeft() {
+  const track = document.getElementById('cal-strip-track');
+  if (track) track.scrollBy({ left: -200, behavior: 'smooth' });
+}
+function calStripScrollRight() {
+  const track = document.getElementById('cal-strip-track');
+  if (track) track.scrollBy({ left: 200, behavior: 'smooth' });
+}
+
 function schemaWeekPrev() {
   const now = new Date();
   const currentMonday = mondayOfWeek(now);
@@ -1272,10 +1391,11 @@ function schemaWeekPrev() {
   const minMonday = new Date(P1_START);
   if (targetMonday < minMonday) return;
   schemaWeekOffset--;
+  _calStripWorkouts = null;
   loadSchema();
 }
-function schemaWeekNext() { schemaWeekOffset++; loadSchema(); }
-function schemaWeekToday() { schemaWeekOffset = 0; loadSchema(); }
+function schemaWeekNext() { schemaWeekOffset++; _calStripWorkouts = null; loadSchema(); }
+function schemaWeekToday() { schemaWeekOffset = 0; _calStripWorkouts = null; loadSchema(); }
 
 function getWeekIndexInPeriod(monday) {
   const p1Start = new Date(P1_START);
@@ -1340,6 +1460,28 @@ function stripProgressionText(desc) {
     .trim();
 }
 
+function buildWorkoutStatsRow(w) {
+  const parts = [];
+  if (w.duration_minutes) parts.push(`<span class="sr-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="11" height="11"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span class="sr-stat-val">${w.duration_minutes}'</span></span>`);
+  if (w.distance_km) parts.push(`<span class="sr-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="11" height="11"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/></svg><span class="sr-stat-val">${w.distance_km} km</span></span>`);
+  if (w.avg_hr) parts.push(`<span class="sr-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="11" height="11"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg><span class="sr-stat-val">${w.avg_hr} bpm</span></span>`);
+  if (w.elevation_gain_m) parts.push(`<span class="sr-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="11" height="11"><path d="M22 21L14.5 6 9 16 2 8"/></svg><span class="sr-stat-val">${Math.round(w.elevation_gain_m)} m</span></span>`);
+  if (w.avg_speed_kmh && w.activity_type === 'Löpning') {
+    const pace = 60 / w.avg_speed_kmh;
+    const pMin = Math.floor(pace);
+    const pSec = String(Math.round((pace - pMin) * 60)).padStart(2, '0');
+    parts.push(`<span class="sr-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="11" height="11"><polygon points="5 3 19 12 5 21 5 3"/></svg><span class="sr-stat-val">${pMin}:${pSec}/km</span></span>`);
+  }
+  if (w.calories) parts.push(`<span class="sr-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="11" height="11"><path d="M12 22c-4.97 0-9-2.69-9-6s4.03-6 9-11c4.97 5 9 2.69 9 11s-4.03 6-9 6z"/></svg><span class="sr-stat-val">${w.calories} kcal</span></span>`);
+  return parts.length ? `<div class="sr-stats-row">${parts.join('')}</div>` : '';
+}
+
+function activityIcon(type) {
+  const c = ACTIVITY_COLORS[type] || 'var(--accent)';
+  const letter = (type || '?')[0].toUpperCase();
+  return `<div class="sr-activity-icon" style="background:${c}22;color:${c}">${letter}</div>`;
+}
+
 function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchema, profile) {
   invitations = invitations || [];
   const container = document.getElementById('schema-content');
@@ -1356,7 +1498,6 @@ function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchem
     const dayWorkouts = workouts.filter(w => w.workout_date === dayStr);
     const isToday = dayStr === todayStr;
     const isFuture = dayDate > new Date();
-    const totalMins = dayWorkouts.reduce((s, w) => s + w.duration_minutes, 0);
 
     const dayInvs = invitations.filter(inv => inv.workout_date === dayStr);
     const acceptedInv = dayInvs.find(inv => inv.status === 'accepted');
@@ -1395,15 +1536,23 @@ function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchem
         : ' <span class="invite-pending-badge">Inbjudan mottagen</span>';
     }
 
-    let rightContent = '';
+    let mainContent = '';
     if (dayWorkouts.length > 0) {
-      const wList = dayWorkouts.map(w => {
+      mainContent = dayWorkouts.map(w => {
         const intB = w.intensity ? ` <span class="intensity-badge">${w.intensity}</span>` : '';
         const distB = w.distance_km ? ` <span class="sr-km-badge">${w.distance_km} km</span>` : '';
-        return `<span class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>${w.duration_minutes}'${distB}${intB}</span>`;
-      }).join(' ');
-      rightContent = `<div class="sr-done-info">${wList}</div>`;
-    } else if (statusClass === 'missed') {
+        const stats = buildWorkoutStatsRow(w);
+        return `<div class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
+          <div class="sr-plan-label">${activityIcon(w.activity_type)} ${w.activity_type}${distB}${intB}</div>
+          ${stats}
+        </div>`;
+      }).join('');
+    } else {
+      mainContent = `<div class="sr-plan-text">${planText}</div>`;
+    }
+
+    let rightContent = '';
+    if (statusClass === 'missed') {
       rightContent = '<div class="sr-missed-mark">Missat</div>';
     }
 
@@ -1416,7 +1565,7 @@ function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchem
         <div class="sr-date">${dayDate.getDate()}/${dayDate.getMonth() + 1}</div>
       </div>
       <div class="sr-main">
-        <div class="sr-plan-text">${planText}</div>
+        ${mainContent}
       </div>
       <div class="sr-right-status">${rightContent}</div>
     </div>`;
@@ -1441,7 +1590,6 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
     const planWo = planWorkouts.find(pw => pw.day_of_week === i);
     const isToday = dayStr === todayStr;
     const isFuture = dayDate > new Date();
-    const totalMins = dayWorkouts.reduce((s, w) => s + w.duration_minutes, 0);
 
     const dayInvs = invitations.filter(inv => inv.workout_date === dayStr);
     const acceptedInv = dayInvs.find(inv => inv.status === 'accepted');
@@ -1467,9 +1615,7 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
         : '';
       const lbl = planWo.label || planWo.activity_type;
       const desc = stripProgressionText(planWo.description || '');
-      const distKm = planWo.target_distance_km ? `<span class="sr-km-badge">${planWo.target_distance_km} km</span>` : '';
       const durStr = planWo.target_duration_minutes > 0 ? `${planWo.target_duration_minutes} min` : '';
-      const metaParts = [durStr, distKm ? planWo.target_distance_km + ' km' : ''].filter(Boolean);
       const meta = (planWo.target_duration_minutes > 0 || planWo.target_distance_km)
         ? `<span class="sr-target">${durStr}${planWo.target_distance_km ? (durStr ? ' · ' : '') + planWo.target_distance_km + ' km' : ''}</span>`
         : '';
@@ -1484,15 +1630,23 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
         : ' <span class="invite-pending-badge">Inbjudan mottagen</span>';
     }
 
-    let rightContent = '';
+    let mainContent = '';
     if (dayWorkouts.length > 0) {
-      const wList = dayWorkouts.map(w => {
+      mainContent = dayWorkouts.map(w => {
         const intB = w.intensity ? ` <span class="intensity-badge">${w.intensity}</span>` : '';
         const distB = w.distance_km ? ` <span class="sr-km-badge">${w.distance_km} km</span>` : '';
-        return `<span class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>${w.duration_minutes}'${distB}${intB}</span>`;
-      }).join(' ');
-      rightContent = `<div class="sr-done-info">${wList}</div>`;
-    } else if (statusClass === 'missed') {
+        const stats = buildWorkoutStatsRow(w);
+        return `<div class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
+          <div class="sr-plan-label">${activityIcon(w.activity_type)} ${w.activity_type}${distB}${intB}</div>
+          ${stats}
+        </div>`;
+      }).join('');
+    } else {
+      mainContent = `<div class="sr-plan-text">${planText}</div>`;
+    }
+
+    let rightContent = '';
+    if (statusClass === 'missed') {
       rightContent = '<div class="sr-missed-mark">Missat</div>';
     }
 
@@ -1506,7 +1660,7 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
         <div class="sr-date">${dayDate.getDate()}/${dayDate.getMonth() + 1}</div>
       </div>
       <div class="sr-main">
-        <div class="sr-plan-text">${planText}</div>
+        ${mainContent}
       </div>
       <div class="sr-right-status">${rightContent}</div>
     </div>`;
@@ -3494,7 +3648,8 @@ function renderGenerateButton() {
   if (!container) return;
   if (!PLAN_GENERATION_ENABLED) { container.innerHTML = ''; return; }
 
-  const isOwn = (allProfiles[schemaPersonIdx] || currentProfile)?.id === currentProfile?.id;
+  const viewedProfile = allProfiles[schemaPersonIdx] || currentProfile;
+  const isOwn = !viewedProfile || viewedProfile.id === currentProfile?.id;
   if (!isOwn) { container.innerHTML = ''; return; }
 
   if (_activePlan) {
