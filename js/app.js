@@ -3648,9 +3648,7 @@ function renderGenerateButton() {
   if (!container) return;
   if (!PLAN_GENERATION_ENABLED) { container.innerHTML = ''; return; }
 
-  const viewedProfile = allProfiles[schemaPersonIdx] || currentProfile;
-  const isOwn = !viewedProfile || viewedProfile.id === currentProfile?.id;
-  if (!isOwn) { container.innerHTML = ''; return; }
+  if (!currentProfile) { container.innerHTML = ''; return; }
 
   if (_activePlan) {
     const planName = _activePlan.name || _activePlan.goal_text || 'Träningsplan';
