@@ -1,3 +1,4 @@
 # Applied migrations -- managed by GitHub Actions
 # Do not edit manually
 20260329_test_migration.sql
+20260330_fix_rls_security.sql
