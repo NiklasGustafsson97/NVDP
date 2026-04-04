@@ -143,7 +143,7 @@ select option { background: #1a1a2e; color: var(--text); }
 }
 .side-menu {
   position: fixed; top: 0; right: -300px; width: 280px; height: 100%;
-  background: rgba(11,13,23,0.82); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  background: rgba(11,13,23,0.72); backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
   border-left: 1px solid var(--border);
   z-index: 201; transition: right 0.25s ease;
   display: flex; flex-direction: column; overflow-y: auto;
@@ -200,6 +200,10 @@ select option { background: #1a1a2e; color: var(--text); }
 .ws-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 4px 0; }
 .ws-stat { text-align: center; }
 .ws-val { display: block; font-size: 1.1rem; font-weight: 700; color: var(--text); }
+.ws-delta { display: block; font-size: 0.7rem; font-weight: 600; margin-top: 1px; }
+.ws-delta.up { color: var(--green); }
+.ws-delta.down { color: var(--red); }
+.ws-delta.flat { color: var(--text-dim); }
 .ws-label { display: block; font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.3px; margin-top: 2px; }
 
 /* ── Challenges ── */
@@ -249,8 +253,7 @@ select option { background: #1a1a2e; color: var(--text); }
 .nav-item svg { width: 22px; height: 22px; }
 .nav-item.active { color: var(--accent); }
 .nav-item:hover { color: var(--text-muted); }
-.nav-item.log-btn { color: var(--accent); }
-.nav-item.log-btn svg { width: 28px; height: 28px; }
+/* log button styled like other nav items (no CTA) */
 
 /* ── Content Area ── */
 .content { flex: 1; padding: 20px 16px calc(var(--nav-h) + 20px); max-width: 1200px; margin: 0 auto; width: 100%; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
@@ -391,6 +394,7 @@ select option { background: #1a1a2e; color: var(--text); }
 .sr-plan-text { font-size: 0.85rem; color: var(--text); }
 .sr-target { font-size: 0.7rem; color: var(--text-dim); font-weight: 400; }
 .sr-rest-label { font-style: italic; color: var(--text-dim); }
+.sr-km-badge { font-size: 0.7rem; font-weight: 600; color: var(--accent); background: rgba(214,99,158,0.1); padding: 1px 8px; border-radius: 10px; }
 
 .sr-right-status { flex-shrink: 0; text-align: right; min-width: 50px; }
 .sr-done-info { font-size: 0.8rem; color: var(--text-dim); font-weight: 500; }
@@ -500,6 +504,7 @@ select option { background: #1a1a2e; color: var(--text); }
 .dash-sched-row.is-today .sched-label { color: var(--text); }
 .dash-sched-row .sched-label.rest { font-style: italic; }
 .dash-sched-row .sched-desc { color: var(--text-dim); font-size: 0.7rem; font-weight: 400; }
+.dash-sched-row .sched-meta { font-size: 0.72rem; color: var(--text-dim); min-width: 48px; text-align: right; flex-shrink: 0; }
 .sched-status { flex-shrink: 0; font-size: 0.75rem; font-weight: 600; min-width: 42px; text-align: right; }
 .sched-status.done { color: var(--green); }
 .sched-status.missed { color: var(--red); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.3px; }
@@ -1043,6 +1048,30 @@ input.code-input {
 
 /* ── Schema Plan Target Duration ── */
 .sr-target { font-size: 0.7rem; color: var(--text-dim); margin-top: 2px; }
+
+/* ── Season Totals ── */
+.season-totals-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 8px;
+}
+.season-stat { text-align: center; padding: 10px 0; }
+.season-stat-val { font-size: 1.3rem; font-weight: 800; color: var(--text); display: block; }
+.season-stat-delta {
+  font-size: 0.7rem; font-weight: 600; margin-top: 2px; display: block;
+}
+.season-stat-delta.up { color: var(--green); }
+.season-stat-delta.down { color: var(--red); }
+.season-stat-delta.flat { color: var(--text-dim); }
+.season-stat-label { font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.3px; margin-top: 4px; display: block; }
+
+.season-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.season-bar-label { width: 80px; font-size: 0.8rem; color: var(--text-muted); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.season-bar-track { flex: 1; height: 22px; background: rgba(255,255,255,0.04); border-radius: 4px; overflow: hidden; position: relative; }
+.season-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; font-size: 0.7rem; font-weight: 600; color: #fff; min-width: 30px; }
+
+/* ── Effort ── */
+.effort-legend { display: flex; gap: 16px; justify-content: center; margin-top: 8px; flex-wrap: wrap; }
+.effort-legend-item { display: flex; align-items: center; gap: 4px; font-size: 0.7rem; color: var(--text-dim); }
+.effort-legend-dot { width: 8px; height: 8px; border-radius: 50%; }
 
 /* ── Utility ── */
 .mt-8 { margin-top: 8px; }

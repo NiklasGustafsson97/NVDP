@@ -43,7 +43,7 @@ const PRINCIPLES = [
   'Panga 4 gympass per vecka – MAX 1 med ben',
 ];
 
-const P1_START = '2026-03-03';
+const P1_START = '2026-03-02';
 const P1_END = '2026-05-31';
 const P2_START = '2026-06-02';
 const P2_END = '2026-08-31';

@@ -219,29 +219,7 @@ function updateSideMenuContent() {
   }
   if (currentUser) smEmail.textContent = currentUser.email;
 
-  const groupSection = document.getElementById('sm-group-section');
-  const groupInfo = document.getElementById('sm-group-info');
-  if (currentProfile?.group_id) {
-    groupSection.style.display = '';
-    const code = _cachedGroupCode || '------';
-    const memberEls = _cachedGroupMembers || [];
-    const memberList = memberEls.map(m => {
-      const isMe = m.id === currentProfile.id;
-      return `<div class="sm-member">${m.name}${isMe ? ' (du)' : ''}</div>`;
-    }).join('');
-    groupInfo.innerHTML = `
-      <div class="sm-code-row">
-        <span class="sm-code">${code}</span>
-        <button class="btn btn-sm btn-ghost" onclick="copyGroupCode()">Kopiera</button>
-      </div>
-      <div class="sm-members">${memberList}</div>
-      <button class="sm-item sm-leave" onclick="closeSideMenu();leaveGroup()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        Lämna grupp
-      </button>`;
-  } else {
-    groupSection.style.display = 'none';
-  }
+  updateGroupSettingsCard();
 
   updateStravaUI();
 }
@@ -316,6 +294,7 @@ function showAuth() {
   if (!gateOpen()) return;
   document.getElementById('auth-view').style.display = 'flex';
   document.getElementById('app').classList.remove('active');
+  document.body.style.overflow = 'hidden';
   currentUser = null;
   currentProfile = null;
 }
@@ -330,6 +309,7 @@ async function initApp(user, accessToken) {
     currentUser = user;
     document.getElementById('auth-view').style.display = 'none';
     document.getElementById('app').classList.add('active');
+    document.body.style.overflow = '';
 
     let profiles = [];
     try {
@@ -411,6 +391,7 @@ function navigate(view) {
   else if (view === 'schema') loadSchema();
   else if (view === 'trends') loadTrends();
   else if (view === 'group') loadGroup();
+  // 'social' view is static placeholder for now
 }
 
 // ═══════════════════════
@@ -711,7 +692,6 @@ async function _loadDashboard() {
   }
 
   const schedEl = document.getElementById('dash-week-schedule');
-  let doneCount = 0;
   let schedHTML = '<div class="dash-schedule">';
   for (let i = 0; i < 7; i++) {
     const plan = weekPlanItems.find(p => p.day_of_week === i);
@@ -723,38 +703,41 @@ async function _loadDashboard() {
     const mins = dayWorkouts.reduce((s, w) => s + w.duration_minutes, 0);
 
     let statusClass = 'future';
-    if (dayWorkouts.length > 0) { statusClass = 'done'; doneCount++; }
+    if (dayWorkouts.length > 0) { statusClass = 'done'; }
     else if (plan?.is_rest && !isFuture) { statusClass = 'rest'; }
     else if (!isFuture && !plan?.is_rest) { statusClass = 'missed'; }
 
-    const shortLabel = plan ? (plan.is_rest ? 'Vila' : plan.label) : '—';
-    const desc = plan?.description ? ` — ${plan.description}` : '';
-    const restClass = plan?.is_rest ? ' rest' : '';
+    if (plan?.is_rest) {
+      schedHTML += `<div class="dash-sched-row${isTodayRow ? ' is-today' : ''} sched-${statusClass}">
+        <span class="sched-day">${DAY_NAMES[i]}</span>
+        <span class="sched-label rest">Vila</span>
+        <span class="sched-status rest-ok">—</span>
+      </div>`;
+    } else {
+      const label = plan ? plan.label : '—';
+      const actMatch = plan?.description?.match(/\b(löpning|cykel|stakmaskin|längdskidor|gym|hyrox)\b/i);
+      const activity = actMatch ? actMatch[1] : (plan?.label?.match(/cykel/i) ? 'Cykel' : 'Löpning');
+      const zoneMatch = plan?.description?.match(/\b(Z[1-5]|VO2max|tröskel|tempo|fartlek)/i);
+      const passType = zoneMatch ? zoneMatch[1] : '';
+      const kmMatch = plan?.description?.match(/(\d+(?:[–\-]\d+)?)\s*km/);
+      const kmStr = kmMatch ? kmMatch[1] + ' km' : '';
+      const minMatch = plan?.description?.match(/(\d+(?:[–\-]\d+)?)\s*min/);
+      const durStr = minMatch ? minMatch[1] + "'" : '';
 
-    let statusHTML = '';
-    if (statusClass === 'done') {
-      statusHTML = `<span class="sched-status done">${mins}'</span>`;
-    } else if (statusClass === 'missed') {
-      statusHTML = `<span class="sched-status missed">Missat</span>`;
-    } else if (statusClass === 'rest' && !isFuture) {
-      statusHTML = `<span class="sched-status rest-ok">—</span>`;
+      let statusHTML = '';
+      if (statusClass === 'done') statusHTML = `<span class="sched-status done">${mins}'</span>`;
+      else if (statusClass === 'missed') statusHTML = `<span class="sched-status missed">Missat</span>`;
+
+      schedHTML += `<div class="dash-sched-row${isTodayRow ? ' is-today' : ''} sched-${statusClass}">
+        <span class="sched-day">${DAY_NAMES[i]}</span>
+        <span class="sched-label">${label}</span>
+        <span class="sched-meta">${kmStr}</span>
+        ${statusHTML}
+      </div>`;
     }
-
-    schedHTML += `<div class="dash-sched-row${isTodayRow ? ' is-today' : ''} sched-${statusClass}">
-      <span class="sched-day">${DAY_NAMES[i]}</span>
-      <span class="sched-label${restClass}">${shortLabel}<span class="sched-desc">${desc}</span></span>
-      ${statusHTML}
-    </div>`;
   }
   schedHTML += '</div>';
   schedEl.innerHTML = schedHTML;
-
-  const targetDays = weekPlanItems.length > 0 ? weekPlanItems.filter(p => !p.is_rest).length : 5;
-  const pct = Math.round((doneCount / targetDays) * 100);
-  document.getElementById('compliance-fill').style.width = Math.min(pct, 100) + '%';
-  document.getElementById('compliance-fill').style.background = pct >= 80 ? 'var(--green)' : pct >= 50 ? 'var(--amber)' : 'var(--red)';
-  document.getElementById('compliance-pct').textContent = pct + '%';
-  document.getElementById('compliance-text').textContent = `${doneCount} av ${targetDays} träningsdagar`;
 
   const phaseText = useAiPlan
     ? (() => {
@@ -806,7 +789,7 @@ function isRestDay(dayIdx, plans) {
   return plan.is_rest;
 }
 
-function renderWeeklySummary(weekWorkouts, plans, monday, profile) {
+async function renderWeeklySummary(weekWorkouts, plans, monday, profile) {
   const card = document.getElementById('weekly-summary-card');
   const el = document.getElementById('weekly-summary');
   if (!card || !el) return;
@@ -821,27 +804,33 @@ function renderWeeklySummary(weekWorkouts, plans, monday, profile) {
   const totalMins = weekWorkouts.reduce((s, w) => s + w.duration_minutes, 0);
   const totalHours = (totalMins / 60).toFixed(1);
   const sessionCount = weekWorkouts.length;
-  const types = {};
-  weekWorkouts.forEach(w => { types[w.activity_type] = (types[w.activity_type] || 0) + 1; });
-  const topType = Object.entries(types).sort((a, b) => b[1] - a[1])[0];
-
-  const longest = weekWorkouts.reduce((max, w) => w.duration_minutes > (max?.duration_minutes || 0) ? w : max, null);
   const totalDist = weekWorkouts.reduce((s, w) => s + (w.distance_km || 0), 0);
-
-  let plannedSessions = 0;
-  if (plans) plans.forEach(p => { if (!p.is_rest) plannedSessions++; });
-  const compliance = plannedSessions > 0 ? Math.round((sessionCount / plannedSessions) * 100) : 0;
+  const longest = weekWorkouts.reduce((max, w) => w.duration_minutes > (max?.duration_minutes || 0) ? w : max, null);
 
   const prevMonday = addDays(monday, -7);
   const prevSunday = addDays(prevMonday, 6);
+  const { data: prevWorkouts } = await sb.from('workouts').select('*')
+    .eq('profile_id', profile?.id)
+    .gte('workout_date', isoDate(prevMonday))
+    .lte('workout_date', isoDate(prevSunday));
+  const prevMins = (prevWorkouts || []).reduce((s, w) => s + w.duration_minutes, 0);
+  const prevSessions = (prevWorkouts || []).length;
+  const prevDist = (prevWorkouts || []).reduce((s, w) => s + (w.distance_km || 0), 0);
+
+  function deltaHTML(cur, prev, unit) {
+    if (prev === 0) return '';
+    const diff = cur - prev;
+    const pct = Math.round((diff / prev) * 100);
+    const sign = diff > 0 ? '+' : '';
+    const cls = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
+    return `<span class="ws-delta ${cls}">${sign}${pct}%</span>`;
+  }
 
   let items = [];
-  items.push(`<div class="ws-stat"><span class="ws-val">${totalHours}h</span><span class="ws-label">total tid</span></div>`);
-  items.push(`<div class="ws-stat"><span class="ws-val">${sessionCount}</span><span class="ws-label">pass</span></div>`);
-  if (topType) items.push(`<div class="ws-stat"><span class="ws-val">${topType[0]}</span><span class="ws-label">mest ${topType[1]}x</span></div>`);
-  if (totalDist > 0) items.push(`<div class="ws-stat"><span class="ws-val">${totalDist.toFixed(1)}km</span><span class="ws-label">distans</span></div>`);
+  items.push(`<div class="ws-stat"><span class="ws-val">${totalHours}h</span>${deltaHTML(totalMins, prevMins, 'h')}<span class="ws-label">total tid</span></div>`);
+  items.push(`<div class="ws-stat"><span class="ws-val">${sessionCount}</span>${deltaHTML(sessionCount, prevSessions, '')}<span class="ws-label">pass</span></div>`);
+  if (totalDist > 0) items.push(`<div class="ws-stat"><span class="ws-val">${totalDist.toFixed(1)}km</span>${deltaHTML(totalDist, prevDist, 'km')}<span class="ws-label">distans</span></div>`);
   if (longest) items.push(`<div class="ws-stat"><span class="ws-val">${longest.duration_minutes}'</span><span class="ws-label">längsta</span></div>`);
-  if (plannedSessions > 0) items.push(`<div class="ws-stat"><span class="ws-val">${compliance}%</span><span class="ws-label">efterlevnad</span></div>`);
 
   el.innerHTML = `<div class="ws-grid">${items.join('')}</div>`;
   card.classList.remove('hidden');
@@ -1288,8 +1277,10 @@ function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchem
     } else if (plan) {
       const lbl = plan.label || '';
       const desc = plan.description || '';
+      const kmMatch = desc.match(/(\d+(?:[–\-]\d+)?)\s*km/);
+      const kmStr = kmMatch ? kmMatch[1] + ' km' : '';
       if (lbl && desc) {
-        planText = `<div class="sr-plan-label">${lbl}</div><div class="sr-plan-desc">${desc}</div>`;
+        planText = `<div class="sr-plan-label">${lbl}${kmStr ? `<span class="sr-km-badge">${kmStr}</span>` : ''}</div><div class="sr-plan-desc">${desc}</div>`;
       } else {
         planText = desc || lbl;
       }
@@ -1832,66 +1823,190 @@ async function _loadTrends() {
     streakEl.innerHTML = `<span class="streak-badge">${streak} veckor i rad</span>`;
   }
 
-  // Season totals pie chart
-  const pieCanvas = document.getElementById('chart-season-pie');
-  if (pieCanvas) {
-    if (window._chartSeasonPie) window._chartSeasonPie.destroy();
-    const byType = {};
-    myWorkouts.forEach(w => { byType[w.activity_type] = (byType[w.activity_type] || 0) + w.duration_minutes; });
-    const totalAll = myWorkouts.reduce((s, w) => s + w.duration_minutes, 0);
-    const types = Object.keys(byType).sort();
-    window._chartSeasonPie = new Chart(pieCanvas.getContext('2d'), {
-      type: 'doughnut',
-      data: {
-        labels: types,
-        datasets: [{ data: types.map(t => +(byType[t] / 60).toFixed(1)), backgroundColor: types.map(t => ACTIVITY_COLORS[t] || '#555'), borderWidth: 0 }]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        cutout: '55%',
-        plugins: {
-          legend: {
-            position: 'bottom',
-            labels: {
-              color: () => getComputedStyle(document.body).getPropertyValue('--text').trim() || '#fff',
-              padding: 12, usePointStyle: true, pointStyle: 'circle', font: { size: 11 },
-              generateLabels: (chart) => {
-                const ds = chart.data.datasets[0];
-                const c = getComputedStyle(document.body).getPropertyValue('--text').trim() || '#fff';
-                return chart.data.labels.map((l, i) => ({
-                  text: `${l}  ${ds.data[i]}h`,
-                  fillStyle: ds.backgroundColor[i],
-                  fontColor: c,
-                  pointStyle: 'circle',
-                  hidden: false, index: i
-                }));
-              }
-            }
-          },
-          tooltip: {
-            z: 9999,
-            callbacks: { label: c => {
-              const pct = totalAll > 0 ? Math.round((byType[c.label] / totalAll) * 100) : 0;
-              return ` ${c.label}: ${c.parsed}h (${pct}%)`;
-            }}
+  // Season totals: summary card + horizontal bar charts
+  renderSeasonTotals(myWorkouts);
+
+  // Effort per week chart
+  renderEffortChart(myWorkouts);
+}
+
+// ── Effort normalization ──
+// Based on training stress science: combines activity load factor and intensity multiplier.
+// Running carries higher musculoskeletal load than cycling per unit time.
+// Higher intensity zones generate disproportionately more physiological stress (exponential relationship).
+const EFFORT_ACTIVITY_FACTOR = {
+  'Löpning': 1.0,
+  'Hyrox': 1.1,
+  'Gym': 0.8,
+  'Längdskidor': 0.85,
+  'Stakmaskin': 0.75,
+  'Cykel': 0.55,
+  'Annat': 0.7,
+  'Vila': 0,
+};
+const EFFORT_INTENSITY_MULT = {
+  'Z1': 0.55,
+  'Z2': 0.75,
+  'Kvalitet': 1.4,
+  'Z3': 1.1,
+  'Z4': 1.35,
+  'Z5': 1.7,
+};
+
+function calcWorkoutEffort(w) {
+  const actFactor = EFFORT_ACTIVITY_FACTOR[w.activity_type] ?? 0.7;
+  const intMult = w.intensity ? (EFFORT_INTENSITY_MULT[w.intensity] ?? 1.0) : 0.8;
+  return (w.duration_minutes / 60) * actFactor * intMult;
+}
+
+let _seasonBarMode = 'hours';
+function setSeasonBarMode(mode) {
+  _seasonBarMode = mode;
+  document.getElementById('season-toggle-hours')?.classList.toggle('active', mode === 'hours');
+  document.getElementById('season-toggle-km')?.classList.toggle('active', mode === 'km');
+  if (window._lastSeasonWorkouts) renderSeasonActivityBars(window._lastSeasonWorkouts, mode);
+}
+
+function renderSeasonTotals(workouts) {
+  window._lastSeasonWorkouts = workouts;
+  const totalMins = workouts.reduce((s, w) => s + w.duration_minutes, 0);
+  const totalHours = (totalMins / 60).toFixed(1);
+  const totalSessions = workouts.length;
+  const totalDist = workouts.reduce((s, w) => s + (w.distance_km || 0), 0);
+  const totalEffort = workouts.reduce((s, w) => s + calcWorkoutEffort(w), 0);
+
+  const now = new Date();
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+  const dayOfYear = Math.floor((now - yearStart) / 86400000) + 1;
+  const prevYearStart = new Date(now.getFullYear() - 1, 0, 1);
+  const prevYearSameDay = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+
+  function yoyDelta(cur, prev) {
+    if (!prev || prev === 0) return '<span class="season-stat-delta flat">—</span>';
+    const pct = Math.round(((cur - prev) / prev) * 100);
+    const sign = pct > 0 ? '+' : '';
+    const cls = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
+    return `<span class="season-stat-delta ${cls}">${sign}${pct}% vs förra året</span>`;
+  }
+
+  const summaryEl = document.getElementById('season-totals-summary');
+  if (summaryEl) {
+    summaryEl.innerHTML = `<div class="season-totals-grid">
+      <div class="season-stat"><span class="season-stat-val">${totalSessions}</span><span class="season-stat-label">Pass</span></div>
+      <div class="season-stat"><span class="season-stat-val">${totalHours}h</span><span class="season-stat-label">Timmar</span></div>
+      <div class="season-stat"><span class="season-stat-val">${totalDist.toFixed(0)}km</span><span class="season-stat-label">Distans</span></div>
+    </div>`;
+  }
+
+  renderSeasonActivityBars(workouts, _seasonBarMode);
+}
+
+function renderSeasonActivityBars(workouts, mode) {
+  const byType = {};
+  workouts.forEach(w => {
+    if (!byType[w.activity_type]) byType[w.activity_type] = { hours: 0, km: 0 };
+    byType[w.activity_type].hours += w.duration_minutes / 60;
+    byType[w.activity_type].km += (w.distance_km || 0);
+  });
+
+  const types = Object.keys(byType).sort((a, b) => byType[b][mode === 'km' ? 'km' : 'hours'] - byType[a][mode === 'km' ? 'km' : 'hours']);
+  const maxVal = Math.max(...types.map(t => byType[t][mode === 'km' ? 'km' : 'hours']), 1);
+
+  const barsEl = document.getElementById('season-activity-bars');
+  if (!barsEl) return;
+
+  barsEl.innerHTML = types.map(t => {
+    const val = mode === 'km' ? byType[t].km : byType[t].hours;
+    const pct = Math.round((val / maxVal) * 100);
+    const label = mode === 'km' ? val.toFixed(1) + ' km' : val.toFixed(1) + 'h';
+    const color = ACTIVITY_COLORS[t] || '#555';
+    return `<div class="season-bar-row">
+      <span class="season-bar-label">${t}</span>
+      <div class="season-bar-track">
+        <div class="season-bar-fill" style="width:${pct}%;background:${color};">${label}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderEffortChart(workouts) {
+  const effortCanvas = document.getElementById('chart-effort');
+  if (!effortCanvas) return;
+  if (window._chartEffort) window._chartEffort.destroy();
+
+  const weekMap = {};
+  workouts.forEach(w => {
+    const d = new Date(w.workout_date);
+    const mon = mondayOfWeek(d);
+    const key = isoDate(mon);
+    if (!weekMap[key]) weekMap[key] = { effort: 0, hours: 0 };
+    weekMap[key].effort += calcWorkoutEffort(w);
+    weekMap[key].hours += w.duration_minutes / 60;
+  });
+
+  const weeks = Object.keys(weekMap).sort();
+  const effortData = weeks.map(w => +weekMap[w].effort.toFixed(2));
+  const hoursData = weeks.map(w => +weekMap[w].hours.toFixed(1));
+  const labels = weeks.map(w => {
+    const d = new Date(w);
+    return `${d.getDate()}/${d.getMonth() + 1}`;
+  });
+
+  const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
+
+  window._chartEffort = new Chart(effortCanvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Effort (normaliserat)',
+          data: effortData,
+          backgroundColor: 'rgba(214,99,158,0.5)',
+          borderColor: 'rgba(214,99,158,0.8)',
+          borderWidth: 1,
+          borderRadius: 3,
+          order: 1,
+        },
+        {
+          label: 'Timmar (rå)',
+          data: hoursData,
+          type: 'line',
+          borderColor: 'rgba(46,134,193,0.7)',
+          backgroundColor: 'rgba(46,134,193,0.1)',
+          borderWidth: 2,
+          pointRadius: 3,
+          fill: false,
+          order: 0,
+          yAxisID: 'y1',
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, boxWidth: 12 } },
+        tooltip: {
+          callbacks: {
+            label: c => c.dataset.label === 'Effort (normaliserat)'
+              ? `Effort: ${c.parsed.y.toFixed(1)}`
+              : `Timmar: ${c.parsed.y.toFixed(1)}h`
           }
         }
       },
-      plugins: [{
-        id: 'centerTotal',
-        afterDraw(chart) {
-          const { ctx, width, height } = chart;
-          const x = chart.chartArea.left + (chart.chartArea.right - chart.chartArea.left) / 2;
-          const y = chart.chartArea.top + (chart.chartArea.bottom - chart.chartArea.top) / 2;
-          ctx.save();
-          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.font = '700 1.1rem ' + getComputedStyle(document.body).fontFamily;
-          ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--text').trim() || '#fff';
-          ctx.fillText((totalAll / 60).toFixed(1) + 'h', x, y);
-          ctx.restore();
-        }
-      }]
-    });
+      scales: {
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor }, title: { display: true, text: 'Effort', color: textColor } },
+        y1: { beginAtZero: true, position: 'right', grid: { display: false }, ticks: { color: textColor, callback: v => v + 'h' }, title: { display: true, text: 'Timmar', color: textColor } },
+        x: { grid: { display: false }, ticks: { color: textColor } }
+      }
+    }
+  });
+
+  const legendEl = document.getElementById('effort-legend');
+  if (legendEl) {
+    legendEl.innerHTML = `
+      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> Effort = timmar × aktivitetsfaktor × intensitetsfaktor</div>
+    `;
   }
 }
 
@@ -1992,6 +2107,7 @@ async function _loadGroup() {
   const allWorkouts = await fetchAllWorkouts();
   _cachedGroupWorkouts = allWorkouts;
   _cachedGroupMembers = members;
+  updateGroupSettingsCard();
 
   const weekHours = members.map(m => {
     const mw = allWorkouts.filter(w => w.profile_id === m.id && w.workout_date >= isoDate(monday) && w.workout_date <= isoDate(sunday));
@@ -2163,12 +2279,39 @@ async function leaveGroup() {
 
 function copyGroupCode() {
   navigator.clipboard.writeText(_cachedGroupCode).then(() => {
-    const btn = document.querySelector('.sm-code-row .btn');
+    const btn = document.querySelector('#group-settings-info .btn');
     if (!btn) return;
     const orig = btn.textContent;
     btn.textContent = 'Kopierad!';
     setTimeout(() => btn.textContent = orig, 1500);
   });
+}
+
+function updateGroupSettingsCard() {
+  const card = document.getElementById('group-settings-card');
+  const info = document.getElementById('group-settings-info');
+  if (!card || !info) return;
+  if (!currentProfile?.group_id) {
+    if (card) card.classList.add('hidden');
+    return;
+  }
+  card.classList.remove('hidden');
+  const code = _cachedGroupCode || '------';
+  const memberEls = _cachedGroupMembers || [];
+  const memberList = memberEls.map(m => {
+    const isMe = m.id === currentProfile.id;
+    return `<div class="sm-member">${m.name}${isMe ? ' (du)' : ''}</div>`;
+  }).join('');
+  info.innerHTML = `
+    <div class="sm-code-row">
+      <span class="sm-code">${code}</span>
+      <button class="btn btn-sm btn-ghost" onclick="copyGroupCode()">Kopiera</button>
+    </div>
+    <div class="sm-members">${memberList}</div>
+    <button class="sm-item sm-leave" onclick="leaveGroup()" style="margin-top:12px;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      Lämna grupp
+    </button>`;
 }
 
 // ═══════════════════════
