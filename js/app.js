@@ -97,9 +97,9 @@ document.getElementById('auth-form').addEventListener('submit', async (e) => {
   if (authMode === 'register') {
     const firstName = document.getElementById('auth-firstname').value.trim();
     const lastName = document.getElementById('auth-lastname').value.trim();
-    if (!firstName || !lastName) {
+    if (!firstName || !lastName || firstName.length < 2 || lastName.length < 2) {
       errEl.style.color = 'var(--red)';
-      errEl.textContent = 'Ange både förnamn och efternamn.';
+      errEl.textContent = 'Ange både förnamn och efternamn (minst 2 tecken vardera).';
       errEl.classList.remove('hidden');
       btn.disabled = false;
       btn.textContent = 'Skapa konto';
