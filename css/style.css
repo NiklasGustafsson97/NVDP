@@ -136,6 +136,45 @@ select option { background: #1a1a2e; color: var(--text); }
 .topbar .avatar { cursor: pointer; transition: box-shadow 0.15s; }
 .topbar .avatar:hover { box-shadow: 0 0 0 2px var(--accent); }
 
+/* ── Topbar Search ── */
+.topbar-icon-btn {
+  position: relative; background: none; border: none; color: var(--text-muted);
+  cursor: pointer; padding: 4px; display: flex; align-items: center; justify-content: center;
+}
+.topbar-icon-btn:hover { color: var(--text); }
+.topbar-search-panel {
+  position: fixed; top: 56px; left: 0; right: 0; z-index: 150;
+  background: rgba(11,13,23,0.95); backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border); padding: 12px 16px;
+  animation: fadeIn 0.15s ease;
+}
+[data-theme="light"] .topbar-search-panel { background: rgba(244,245,247,0.97); }
+.topbar-search-inner { display: flex; align-items: center; gap: 8px; }
+.topbar-search-input {
+  flex: 1; padding: 10px 14px; background: var(--bg-input);
+  border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); font-size: 0.9rem; outline: none;
+  font-family: var(--font); transition: border-color 0.2s;
+}
+.topbar-search-input:focus { border-color: var(--accent); }
+.topbar-search-results {
+  margin-top: 8px; max-height: 320px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.topbar-search-result {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--bg-card); cursor: pointer; transition: background 0.15s;
+}
+.topbar-search-result:hover { background: var(--bg-card-hover); }
+.tsr-avatar {
+  width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; font-weight: 700; font-size: 0.8rem; color: #fff; flex-shrink: 0;
+}
+.tsr-info { flex: 1; min-width: 0; }
+.tsr-name { font-weight: 600; font-size: 0.85rem; }
+.tsr-status { font-size: 0.72rem; color: var(--text-dim); }
+
 /* ── Side Menu ── */
 .side-menu-overlay {
   position: fixed; inset: 0; z-index: 200;

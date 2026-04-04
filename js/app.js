@@ -3862,6 +3862,89 @@ async function _loadSocial() {
   await renderSocialFeed(false);
 }
 
+// ── Topbar global user search ──
+
+function toggleTopbarSearch() {
+  const panel = document.getElementById('topbar-search-panel');
+  panel.classList.toggle('hidden');
+  if (!panel.classList.contains('hidden')) {
+    document.getElementById('topbar-search-input').value = '';
+    document.getElementById('topbar-search-results').innerHTML = '';
+    document.getElementById('topbar-search-input').focus();
+  }
+}
+
+async function topbarSearchUsers() {
+  const q = document.getElementById('topbar-search-input').value.trim().toLowerCase();
+  const resultsEl = document.getElementById('topbar-search-results');
+  if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+
+  const matches = allProfiles.filter(p =>
+    p.id !== currentProfile.id &&
+    p.name.toLowerCase().includes(q)
+  );
+
+  const { data: friendships } = await sb.from('friendships')
+    .select('*')
+    .or(`requester_id.eq.${currentProfile.id},receiver_id.eq.${currentProfile.id}`);
+
+  const friendMap = {};
+  (friendships || []).forEach(f => {
+    const otherId = f.requester_id === currentProfile.id ? f.receiver_id : f.requester_id;
+    friendMap[otherId] = f.status;
+  });
+
+  if (matches.length === 0) {
+    resultsEl.innerHTML = '<div style="padding:12px;color:var(--text-dim);font-size:0.82rem;text-align:center;">Inga resultat</div>';
+    return;
+  }
+
+  resultsEl.innerHTML = matches.slice(0, 10).map(p => {
+    const avatar = p.avatar || p.name[0].toUpperCase();
+    const color = p.color || '#2E86C1';
+    const isEmoji = p.avatar && p.avatar.length <= 2;
+    const status = friendMap[p.id];
+    let actionHtml = '';
+    if (status === 'accepted') {
+      actionHtml = '<span style="font-size:0.72rem;color:var(--green);font-weight:600;">Vän</span>';
+    } else if (status === 'pending') {
+      actionHtml = '<span style="font-size:0.72rem;color:var(--text-dim);">Väntande</span>';
+    } else {
+      actionHtml = `<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();topbarAddFriend('${p.id}',this)">Lägg till</button>`;
+    }
+    return `<div class="topbar-search-result" onclick="topbarViewProfile('${p.id}')">
+      <div class="tsr-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1.2rem' : '0.8rem'};">${avatar}</div>
+      <div class="tsr-info">
+        <div class="tsr-name">${p.name}</div>
+        <div class="tsr-status">${status === 'accepted' ? 'Vän' : ''}</div>
+      </div>
+      ${actionHtml}
+    </div>`;
+  }).join('');
+}
+
+async function topbarAddFriend(profileId, btn) {
+  try {
+    await sb.from('friendships').insert({
+      requester_id: currentProfile.id,
+      receiver_id: profileId,
+      status: 'pending',
+    });
+    btn.outerHTML = '<span style="font-size:0.72rem;color:var(--green);font-weight:600;">Skickad</span>';
+  } catch (e) {
+    console.error('Add friend error:', e);
+    btn.textContent = 'Fel';
+    btn.disabled = true;
+  }
+}
+
+function topbarViewProfile(profileId) {
+  toggleTopbarSearch();
+  if (typeof openMemberProfile === 'function') {
+    openMemberProfile(profileId);
+  }
+}
+
 function toggleFriendSearch() {
   const row = document.getElementById('friend-search-row');
   row.classList.toggle('hidden');
