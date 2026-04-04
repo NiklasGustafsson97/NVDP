@@ -41,7 +41,7 @@ serve(async (req) => {
       });
     }
 
-    const { profile_id } = await req.json();
+    const { profile_id, since } = await req.json();
     if (!profile_id) {
       return new Response(JSON.stringify({ error: "Missing profile_id" }), {
         status: 400,
@@ -66,13 +66,17 @@ serve(async (req) => {
 
     const accessToken = await refreshTokenIfNeeded(conn);
 
-    // Always look back at least 7 days to catch missed activities
-    const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
-    const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
-    const lastSyncTs = conn.last_sync_at
-      ? Math.floor(new Date(conn.last_sync_at).getTime() / 1000)
-      : 0;
-    const after = Math.min(lastSyncTs || thirtyDaysAgo, sevenDaysAgo);
+    let after: number;
+    if (since) {
+      after = Math.floor(new Date(since).getTime() / 1000);
+    } else {
+      const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
+      const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
+      const lastSyncTs = conn.last_sync_at
+        ? Math.floor(new Date(conn.last_sync_at).getTime() / 1000)
+        : 0;
+      after = Math.min(lastSyncTs || thirtyDaysAgo, sevenDaysAgo);
+    }
 
     let page = 1;
     let imported = 0;
@@ -96,7 +100,8 @@ serve(async (req) => {
     debug.athlete_id = athlete.id;
     debug.token_scope = conn.access_token ? "present" : "missing";
 
-    while (page <= 5) {
+    const maxPages = since ? 10 : 5;
+    while (page <= maxPages) {
       const url = `https://www.strava.com/api/v3/athlete/activities?after=${after}&per_page=50&page=${page}`;
       const activitiesRes = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` },

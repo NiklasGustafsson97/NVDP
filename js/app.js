@@ -2999,6 +2999,10 @@ function updateStravaUI() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
             Synka nu
           </button>
+          <button class="strava-sync-btn" id="strava-resync-btn" onclick="fullResyncStrava()" style="background:var(--accent2,#f59e0b)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            Hämta all data
+          </button>
           <button class="strava-disconnect-btn" onclick="disconnectStrava()">Koppla från</button>
         </div>
         <div class="strava-powered-by">
@@ -3077,6 +3081,41 @@ async function syncStrava() {
   }
 
   if (btn) { btn.classList.remove('syncing'); btn.textContent = 'Synka nu'; }
+}
+
+async function fullResyncStrava() {
+  if (!_stravaConnection || !currentProfile) return;
+  const btn = document.getElementById('strava-resync-btn');
+  if (btn) { btn.classList.add('syncing'); btn.textContent = 'Hämtar...'; }
+
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/strava-sync', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ profile_id: currentProfile.id, since: '2026-03-02' }),
+    });
+
+    const result = await res.json();
+    if (res.ok) {
+      _stravaConnection.last_sync_at = result.last_sync_at;
+      updateStravaUI();
+      const errInfo = result.debug?.firstError ? `\nFel: ${result.debug.firstError}` : '';
+      const debugInfo = result.debug ? `\nHämtade ${result.totalFetched}, importerade ${result.imported}, skippade ${result.skipped}${errInfo}` : '';
+      await showAlertModal('Full synk klar', `${result.imported} pass uppdaterade.${debugInfo}`);
+      navigate(currentView);
+    } else {
+      await showAlertModal('Synk-fel', result.error || 'Okänt fel');
+    }
+  } catch (e) {
+    console.error('Strava full resync error:', e);
+    await showAlertModal('Synk-fel', 'Nätverksfel vid synkning');
+  }
+
+  if (btn) { btn.classList.remove('syncing'); btn.textContent = 'Hämta all data'; }
 }
 
 function handleStravaRedirect() {
