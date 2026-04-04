@@ -391,7 +391,7 @@ function navigate(view) {
   else if (view === 'schema') loadSchema();
   else if (view === 'trends') loadTrends();
   else if (view === 'group') loadGroup();
-  // 'social' view is static placeholder for now
+  else if (view === 'social') loadSocial();
 }
 
 // ═══════════════════════
@@ -3067,15 +3067,28 @@ function renderGenerateButton() {
   if (!isOwn) { container.innerHTML = ''; return; }
 
   if (_activePlan) {
-    container.innerHTML = `<button class="schema-generate-btn" onclick="openPlanWizard()" style="border-style:solid;border-color:var(--border);background:var(--bg-card);">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-      Skapa nytt schema
-    </button>`;
+    const planName = _activePlan.name || _activePlan.goal_text || 'Träningsplan';
+    container.innerHTML = `
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <button class="schema-generate-btn" onclick="openPlanManager()" style="flex:1;border-style:solid;border-color:var(--border);background:var(--bg-card);margin-bottom:0;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+          ${planName}
+        </button>
+        <button class="schema-generate-btn" onclick="openPlanWizard()" style="flex:0 0 auto;border-style:solid;border-color:var(--border);background:var(--bg-card);margin-bottom:0;padding:14px 16px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+      </div>`;
   } else {
-    container.innerHTML = `<button class="schema-generate-btn" onclick="openPlanWizard()">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-      Skapa AI-träningsschema
-    </button>`;
+    container.innerHTML = `
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <button class="schema-generate-btn" onclick="openPlanWizard()" style="flex:1;margin-bottom:0;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          Skapa AI-träningsschema
+        </button>
+        <button class="schema-generate-btn" onclick="openPlanManager()" style="flex:0 0 auto;border-style:solid;border-color:var(--border);background:var(--bg-card);margin-bottom:0;padding:14px 16px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
+      </div>`;
   }
 }
 
@@ -3333,5 +3346,470 @@ async function submitPlanWizard() {
     _wizardStep = 3;
     updateWizardUI();
     await showAlertModal('Fel', 'Kunde inte generera schema: ' + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  PLAN MANAGER — list, switch, rename, delete saved plans
+// ═══════════════════════════════════════════════════════════════════
+
+async function fetchAllPlansForProfile(profileId) {
+  if (!profileId) return [];
+  try {
+    const { data } = await sb.from('training_plans')
+      .select('*')
+      .eq('profile_id', profileId)
+      .order('created_at', { ascending: false });
+    return data || [];
+  } catch (e) {
+    console.error('Fetch all plans error:', e);
+    return [];
+  }
+}
+
+async function openPlanManager() {
+  const plans = await fetchAllPlansForProfile(currentProfile?.id);
+  const listEl = document.getElementById('plan-manager-list');
+
+  if (plans.length === 0) {
+    listEl.innerHTML = '<div class="sf-empty">Inga sparade scheman. Skapa ett nytt.</div>';
+  } else {
+    listEl.innerHTML = plans.map(p => {
+      const isActive = p.status === 'active';
+      const name = p.name || p.goal_text || 'Träningsplan';
+      const dateRange = `${p.start_date} — ${p.end_date}`;
+      const goalIcon = GOAL_TYPES.find(g => g.id === p.goal_type)?.icon || '📋';
+      return `<div class="plan-manager-item${isActive ? ' active' : ''}" onclick="${isActive ? '' : `activatePlan('${p.id}')`}">
+        <span style="font-size:1.2rem;">${goalIcon}</span>
+        <div class="pm-info">
+          <div class="pm-name">${name}</div>
+          <div class="pm-meta">${dateRange}</div>
+        </div>
+        <span class="pm-status-badge ${p.status}">${isActive ? 'Aktiv' : 'Arkiverad'}</span>
+        <div class="pm-actions">
+          <button class="pm-action-btn" onclick="event.stopPropagation();renamePlan('${p.id}','${name.replace(/'/g, "\\'")}')" title="Byt namn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          </button>
+          <button class="pm-action-btn danger" onclick="event.stopPropagation();deletePlan('${p.id}')" title="Ta bort">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  document.getElementById('plan-manager').classList.remove('hidden');
+}
+
+function closePlanManager() {
+  document.getElementById('plan-manager').classList.add('hidden');
+}
+
+async function activatePlan(planId) {
+  const ok = await showConfirmModal('Byt schema', 'Vill du aktivera detta schema? Det nuvarande schemat arkiveras.', 'Aktivera');
+  if (!ok) return;
+  try {
+    await sb.from('training_plans')
+      .update({ status: 'archived' })
+      .eq('profile_id', currentProfile.id)
+      .eq('status', 'active');
+
+    await sb.from('training_plans')
+      .update({ status: 'active' })
+      .eq('id', planId);
+
+    _activePlan = null;
+    _activePlanWeeks = [];
+    _activePlanWorkouts = [];
+    closePlanManager();
+    navigate('schema');
+  } catch (e) {
+    console.error('Activate plan error:', e);
+    await showAlertModal('Fel', 'Kunde inte byta schema: ' + e.message);
+  }
+}
+
+async function renamePlan(planId, currentName) {
+  const newName = prompt('Nytt namn:', currentName);
+  if (!newName || newName.trim() === currentName) return;
+  try {
+    await sb.from('training_plans')
+      .update({ name: newName.trim() })
+      .eq('id', planId);
+
+    if (_activePlan && _activePlan.id === planId) _activePlan.name = newName.trim();
+    openPlanManager();
+  } catch (e) {
+    console.error('Rename plan error:', e);
+  }
+}
+
+async function deletePlan(planId) {
+  const ok = await showConfirmModal('Ta bort schema', 'Är du säker? All plandata raderas permanent.', 'Ta bort', true);
+  if (!ok) return;
+  try {
+    await sb.from('training_plans').delete().eq('id', planId);
+    if (_activePlan && _activePlan.id === planId) {
+      _activePlan = null;
+      _activePlanWeeks = [];
+      _activePlanWorkouts = [];
+    }
+    openPlanManager();
+  } catch (e) {
+    console.error('Delete plan error:', e);
+    await showAlertModal('Fel', 'Kunde inte ta bort schema: ' + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  SOCIAL — friends, feed, likes, comments
+// ═══════════════════════════════════════════════════════════════════
+
+let _socialFeedPage = 0;
+const SOCIAL_FEED_PAGE_SIZE = 15;
+
+async function loadSocial() {
+  showViewLoading('view-social');
+  try { await _loadSocial(); } catch (e) { console.error('Social error:', e); }
+  hideViewLoading('view-social');
+}
+
+async function _loadSocial() {
+  await renderFriendRequests();
+  await renderFriendList();
+  _socialFeedPage = 0;
+  await renderSocialFeed(false);
+}
+
+function toggleFriendSearch() {
+  const row = document.getElementById('friend-search-row');
+  row.classList.toggle('hidden');
+  if (!row.classList.contains('hidden')) {
+    document.getElementById('friend-search-input').value = '';
+    document.getElementById('friend-search-results').innerHTML = '';
+    document.getElementById('friend-search-input').focus();
+  }
+}
+
+async function searchFriends() {
+  const q = document.getElementById('friend-search-input').value.trim().toLowerCase();
+  const resultsEl = document.getElementById('friend-search-results');
+  if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+
+  const matches = allProfiles.filter(p =>
+    p.id !== currentProfile.id &&
+    p.name.toLowerCase().includes(q)
+  );
+
+  const { data: existing } = await sb.from('friendships')
+    .select('*')
+    .or(`requester_id.eq.${currentProfile.id},receiver_id.eq.${currentProfile.id}`);
+  const existingIds = new Set();
+  (existing || []).forEach(f => {
+    if (f.status !== 'declined') {
+      existingIds.add(f.requester_id === currentProfile.id ? f.receiver_id : f.requester_id);
+    }
+  });
+
+  if (matches.length === 0) {
+    resultsEl.innerHTML = '<div style="padding:8px;color:var(--text-dim);font-size:0.82rem;">Inga resultat</div>';
+    return;
+  }
+
+  resultsEl.innerHTML = matches.slice(0, 8).map(p => {
+    const isFriend = existingIds.has(p.id);
+    return `<div class="friend-search-item">
+      <span class="friend-search-item-name">${p.name}</span>
+      ${isFriend
+        ? '<span style="font-size:0.75rem;color:var(--text-dim);">Redan tillagd</span>'
+        : `<button class="btn btn-sm btn-primary" onclick="sendFriendRequest('${p.id}')">Lägg till</button>`
+      }
+    </div>`;
+  }).join('');
+}
+
+async function sendFriendRequest(receiverId) {
+  try {
+    await sb.from('friendships').insert({
+      requester_id: currentProfile.id,
+      receiver_id: receiverId,
+      status: 'pending',
+    });
+    searchFriends();
+    await showAlertModal('Skickat', 'Vänförfrågan skickad.');
+  } catch (e) {
+    console.error('Send friend request error:', e);
+    await showAlertModal('Fel', 'Kunde inte skicka förfrågan. Du kanske redan har skickat en.');
+  }
+}
+
+async function renderFriendRequests() {
+  const el = document.getElementById('friend-requests');
+  const { data } = await sb.from('friendships')
+    .select('*')
+    .eq('receiver_id', currentProfile.id)
+    .eq('status', 'pending');
+
+  if (!data || data.length === 0) { el.innerHTML = ''; return; }
+
+  el.innerHTML = '<div style="font-size:0.75rem;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:6px;">Väntande förfrågningar</div>' +
+    data.map(f => {
+      const sender = allProfiles.find(p => p.id === f.requester_id);
+      const name = sender?.name || 'Okänd';
+      return `<div class="friend-request-item">
+        <span class="friend-request-name">${name}</span>
+        <div class="friend-request-actions">
+          <button class="invite-accept-btn" onclick="respondFriendRequest('${f.id}','accepted')">Acceptera</button>
+          <button class="invite-decline-btn" onclick="respondFriendRequest('${f.id}','declined')">Avböj</button>
+        </div>
+      </div>`;
+    }).join('');
+}
+
+async function respondFriendRequest(friendshipId, status) {
+  try {
+    await sb.from('friendships')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', friendshipId);
+    await renderFriendRequests();
+    await renderFriendList();
+    if (status === 'accepted') await renderSocialFeed(false);
+  } catch (e) {
+    console.error('Respond friend request error:', e);
+  }
+}
+
+async function getAcceptedFriends() {
+  const { data } = await sb.from('friendships')
+    .select('*')
+    .eq('status', 'accepted')
+    .or(`requester_id.eq.${currentProfile.id},receiver_id.eq.${currentProfile.id}`);
+
+  if (!data) return [];
+  return data.map(f =>
+    f.requester_id === currentProfile.id ? f.receiver_id : f.requester_id
+  );
+}
+
+async function renderFriendList() {
+  const el = document.getElementById('friend-list');
+  const friendIds = await getAcceptedFriends();
+
+  if (friendIds.length === 0) {
+    el.innerHTML = '<div style="padding:12px 0;color:var(--text-dim);font-size:0.82rem;text-align:center;">Inga vänner ännu. Lägg till vänner ovan.</div>';
+    return;
+  }
+
+  el.innerHTML = friendIds.map(fid => {
+    const p = allProfiles.find(pr => pr.id === fid);
+    if (!p) return '';
+    const avatar = p.avatar || p.name[0].toUpperCase();
+    const color = p.color || '#2E86C1';
+    const isEmoji = p.avatar && p.avatar.length <= 2;
+    return `<div class="friend-item">
+      <div class="friend-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1.2rem' : '0.8rem'};">${avatar}</div>
+      <span class="friend-name">${p.name}</span>
+      <button class="friend-remove-btn" onclick="removeFriend('${fid}')">Ta bort</button>
+    </div>`;
+  }).join('');
+}
+
+async function removeFriend(friendId) {
+  const ok = await showConfirmModal('Ta bort vän', 'Vill du ta bort denna vän?', 'Ta bort', true);
+  if (!ok) return;
+  try {
+    await sb.from('friendships')
+      .delete()
+      .or(`and(requester_id.eq.${currentProfile.id},receiver_id.eq.${friendId}),and(requester_id.eq.${friendId},receiver_id.eq.${currentProfile.id})`);
+    await renderFriendList();
+    await renderSocialFeed(false);
+  } catch (e) {
+    console.error('Remove friend error:', e);
+  }
+}
+
+async function renderSocialFeed(append) {
+  const feedEl = document.getElementById('social-feed');
+  const moreBtn = document.getElementById('social-feed-more');
+
+  const friendIds = await getAcceptedFriends();
+
+  if (friendIds.length === 0) {
+    feedEl.innerHTML = '<div class="sf-empty">Lägg till vänner för att se deras aktiviteter i flödet.</div>';
+    moreBtn.classList.add('hidden');
+    return;
+  }
+
+  const offset = _socialFeedPage * SOCIAL_FEED_PAGE_SIZE;
+  const { data: workouts } = await sb.from('workouts')
+    .select('*')
+    .in('profile_id', friendIds)
+    .order('workout_date', { ascending: false })
+    .range(offset, offset + SOCIAL_FEED_PAGE_SIZE - 1);
+
+  if (!workouts || workouts.length === 0) {
+    if (!append) feedEl.innerHTML = '<div class="sf-empty">Inga pass att visa. Dina vänner har inte loggat något ännu.</div>';
+    moreBtn.classList.add('hidden');
+    return;
+  }
+
+  const workoutIds = workouts.map(w => w.id);
+  const { data: likes } = await sb.from('workout_likes').select('*').in('workout_id', workoutIds);
+  const comments = await fetchCommentsBulk(workoutIds);
+
+  const likesByWorkout = {};
+  (likes || []).forEach(l => {
+    if (!likesByWorkout[l.workout_id]) likesByWorkout[l.workout_id] = [];
+    likesByWorkout[l.workout_id].push(l);
+  });
+
+  const commentsByWorkout = {};
+  (comments || []).forEach(c => {
+    if (!commentsByWorkout[c.workout_id]) commentsByWorkout[c.workout_id] = [];
+    commentsByWorkout[c.workout_id].push(c);
+  });
+
+  const html = workouts.map(w => {
+    const p = allProfiles.find(pr => pr.id === w.profile_id);
+    const name = p?.name || 'Okänd';
+    const avatar = p?.avatar || name[0].toUpperCase();
+    const color = p?.color || '#2E86C1';
+    const isEmoji = p?.avatar && p.avatar.length <= 2;
+    const wDate = new Date(w.workout_date).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' });
+    const intBadge = w.intensity ? ` <span class="intensity-badge">${w.intensity}</span>` : '';
+    const distText = w.distance_km ? ` · ${w.distance_km} km` : '';
+    const wLikes = likesByWorkout[w.id] || [];
+    const myLike = wLikes.find(l => l.profile_id === currentProfile.id);
+    const wComments = commentsByWorkout[w.id] || [];
+
+    const commentsHtml = wComments.slice(-3).map(c => {
+      const cp = allProfiles.find(pr => pr.id === c.profile_id);
+      return `<div class="sf-comment">
+        <span class="sf-comment-name">${cp?.name || 'Okänd'}</span>
+        <span class="sf-comment-text">${c.text}</span>
+      </div>`;
+    }).join('');
+
+    return `<div class="social-feed-item" data-workout-id="${w.id}">
+      <div class="sf-header">
+        <div class="sf-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1rem' : '0.75rem'};">${avatar}</div>
+        <span class="sf-name">${name}</span>
+        <span class="sf-date">${wDate}</span>
+      </div>
+      <div class="sf-body">
+        <div class="sf-workout-label">${w.activity_type}${intBadge}</div>
+        <div class="sf-workout-meta">${w.duration_minutes} min${distText}</div>
+        ${w.notes ? `<div class="sf-workout-notes">${w.notes}</div>` : ''}
+      </div>
+      <div class="sf-actions">
+        <button class="sf-action-btn${myLike ? ' liked' : ''}" onclick="toggleSocialLike('${w.id}', this)">
+          <svg viewBox="0 0 24 24" fill="${myLike ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          ${wLikes.length > 0 ? wLikes.length : ''}
+        </button>
+        <button class="sf-action-btn" onclick="toggleSocialComments('${w.id}')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          ${wComments.length > 0 ? wComments.length : ''}
+        </button>
+      </div>
+      <div class="sf-comments hidden" id="sf-comments-${w.id}">${commentsHtml}</div>
+      <div class="sf-comment-form hidden" id="sf-comment-form-${w.id}">
+        <input type="text" placeholder="Skriv en kommentar..." onkeydown="if(event.key==='Enter')submitSocialComment('${w.id}',this)">
+        <button onclick="submitSocialComment('${w.id}',this.previousElementSibling)">Skicka</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  if (append) {
+    feedEl.innerHTML += html;
+  } else {
+    feedEl.innerHTML = html;
+  }
+
+  moreBtn.classList.toggle('hidden', workouts.length < SOCIAL_FEED_PAGE_SIZE);
+}
+
+async function loadMoreSocialFeed() {
+  _socialFeedPage++;
+  await renderSocialFeed(true);
+}
+
+async function toggleSocialLike(workoutId, btn) {
+  try {
+    const { data: existing } = await sb.from('workout_likes')
+      .select('*')
+      .eq('workout_id', workoutId)
+      .eq('profile_id', currentProfile.id)
+      .maybeSingle();
+
+    if (existing) {
+      await sb.from('workout_likes').delete().eq('id', existing.id);
+    } else {
+      await sb.from('workout_likes').insert({
+        workout_id: workoutId,
+        profile_id: currentProfile.id,
+      });
+    }
+
+    const { data: allLikes } = await sb.from('workout_likes')
+      .select('*')
+      .eq('workout_id', workoutId);
+    const myLikeNow = (allLikes || []).find(l => l.profile_id === currentProfile.id);
+    const count = (allLikes || []).length;
+
+    btn.classList.toggle('liked', !!myLikeNow);
+    const svg = btn.querySelector('svg');
+    svg.setAttribute('fill', myLikeNow ? 'currentColor' : 'none');
+    btn.innerHTML = '';
+    btn.appendChild(svg);
+    if (count > 0) btn.append(' ' + count);
+  } catch (e) {
+    console.error('Toggle like error:', e);
+  }
+}
+
+function toggleSocialComments(workoutId) {
+  const commentsEl = document.getElementById('sf-comments-' + workoutId);
+  const formEl = document.getElementById('sf-comment-form-' + workoutId);
+  const isHidden = commentsEl.classList.contains('hidden');
+  commentsEl.classList.toggle('hidden', !isHidden);
+  formEl.classList.toggle('hidden', !isHidden);
+  if (!isHidden) return;
+  formEl.querySelector('input').focus();
+}
+
+async function submitSocialComment(workoutId, input) {
+  const text = input.value.trim();
+  if (!text) return;
+  try {
+    await sb.from('workout_comments').insert({
+      workout_id: workoutId,
+      profile_id: currentProfile.id,
+      text: text,
+    });
+    input.value = '';
+
+    const { data: comments } = await sb.from('workout_comments')
+      .select('*')
+      .eq('workout_id', workoutId)
+      .order('created_at', { ascending: true });
+
+    const commentsEl = document.getElementById('sf-comments-' + workoutId);
+    commentsEl.innerHTML = (comments || []).slice(-5).map(c => {
+      const cp = allProfiles.find(pr => pr.id === c.profile_id);
+      return `<div class="sf-comment">
+        <span class="sf-comment-name">${cp?.name || 'Okänd'}</span>
+        <span class="sf-comment-text">${c.text}</span>
+      </div>`;
+    }).join('');
+
+    const commentBtn = commentsEl.closest('.social-feed-item').querySelector('.sf-action-btn:nth-child(2)');
+    if (commentBtn) {
+      const svg = commentBtn.querySelector('svg');
+      commentBtn.innerHTML = '';
+      commentBtn.appendChild(svg);
+      commentBtn.append(' ' + (comments || []).length);
+    }
+  } catch (e) {
+    console.error('Submit comment error:', e);
   }
 }

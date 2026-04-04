@@ -439,6 +439,7 @@ serve(async (req) => {
     // 7. Insert training_plan
     const { data: tpData, error: tpErr } = await db.from("training_plans").insert({
       profile_id,
+      name: plan.plan_name || body.goal_text || "Träningsplan",
       goal_type: body.goal_type,
       goal_text: body.goal_text,
       goal_date: body.goal_date || null,
