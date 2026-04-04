@@ -1836,26 +1836,27 @@ async function _loadTrends() {
 // Higher intensity zones generate disproportionately more physiological stress (exponential relationship).
 const EFFORT_ACTIVITY_FACTOR = {
   'Löpning': 1.0,
-  'Hyrox': 1.1,
-  'Gym': 0.8,
-  'Längdskidor': 0.85,
-  'Stakmaskin': 0.75,
-  'Cykel': 0.55,
-  'Annat': 0.7,
+  'Hyrox': 1.05,
+  'Längdskidor': 0.90,
+  'Annat': 0.75,
+  'Stakmaskin': 0.70,
+  'Cykel': 0.65,
+  'Gym': 0.60,
   'Vila': 0,
 };
 const EFFORT_INTENSITY_MULT = {
-  'Z1': 0.55,
-  'Z2': 0.75,
-  'Kvalitet': 1.4,
-  'Z3': 1.1,
-  'Z4': 1.35,
-  'Z5': 1.7,
+  'Z1': 0.65,
+  'Z2': 1.00,
+  'mixed': 1.25,
+  'Z3': 1.30,
+  'Kvalitet': 1.50,
+  'Z4': 1.60,
+  'Z5': 1.85,
 };
 
 function calcWorkoutEffort(w) {
-  const actFactor = EFFORT_ACTIVITY_FACTOR[w.activity_type] ?? 0.7;
-  const intMult = w.intensity ? (EFFORT_INTENSITY_MULT[w.intensity] ?? 1.0) : 0.8;
+  const actFactor = EFFORT_ACTIVITY_FACTOR[w.activity_type] ?? 0.75;
+  const intMult = w.intensity ? (EFFORT_INTENSITY_MULT[w.intensity] ?? 1.0) : 0.85;
   return (w.duration_minutes / 60) * actFactor * intMult;
 }
 
@@ -2005,7 +2006,7 @@ function renderEffortChart(workouts) {
   const legendEl = document.getElementById('effort-legend');
   if (legendEl) {
     legendEl.innerHTML = `
-      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> Effort = timmar × aktivitetsfaktor × intensitetsfaktor</div>
+      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> Effort = timmar × aktivitet (löpn 1.0, cykel 0.65, gym 0.60) × intensitet (Z2 1.0, Z4 1.6, Z5 1.85)</div>
     `;
   }
 }
