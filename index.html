@@ -4,9 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NVDP</title>
-  <link rel="stylesheet" href="css/style.css?v=30">
+  <link rel="stylesheet" href="css/style.css?v=31">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
   <style>
     #gate {
@@ -186,32 +188,32 @@
     <div class="sm-section">
       <div class="sm-section-title">Inställningar</div>
       <div class="sm-setting-row">
-        <span class="sm-setting-label">Utseende</span>
-        <div class="sm-toggle-group" id="theme-toggle">
-          <button class="sm-toggle-btn active" data-val="dark" onclick="setTheme('dark')">Mörkt</button>
-          <button class="sm-toggle-btn" data-val="light" onclick="setTheme('light')">Ljust</button>
-        </div>
+        <span class="sm-setting-label">Ljust tema</span>
+        <label class="ios-switch" id="theme-toggle">
+          <input type="checkbox" onchange="setTheme(this.checked?'light':'dark')">
+          <span class="ios-slider"></span>
+        </label>
       </div>
       <div class="sm-setting-row">
-        <span class="sm-setting-label">Enhet distans</span>
-        <div class="sm-toggle-group" id="unit-toggle">
-          <button class="sm-toggle-btn active" data-val="km" onclick="setUnit('km')">km</button>
-          <button class="sm-toggle-btn" data-val="mi" onclick="setUnit('mi')">mi</button>
-        </div>
+        <span class="sm-setting-label">Miles (mi)</span>
+        <label class="ios-switch" id="unit-toggle">
+          <input type="checkbox" onchange="setUnit(this.checked?'mi':'km')">
+          <span class="ios-slider"></span>
+        </label>
       </div>
       <div class="sm-setting-row">
-        <span class="sm-setting-label">Veckostart</span>
-        <div class="sm-toggle-group" id="weekstart-toggle">
-          <button class="sm-toggle-btn active" data-val="mon" onclick="setWeekStart('mon')">Måndag</button>
-          <button class="sm-toggle-btn" data-val="sun" onclick="setWeekStart('sun')">Söndag</button>
-        </div>
+        <span class="sm-setting-label">Veckostart söndag</span>
+        <label class="ios-switch" id="weekstart-toggle">
+          <input type="checkbox" onchange="setWeekStart(this.checked?'sun':'mon')">
+          <span class="ios-slider"></span>
+        </label>
       </div>
       <div class="sm-setting-row">
         <span class="sm-setting-label">Mailnotiser</span>
-        <div class="sm-toggle-group" id="email-notif-toggle">
-          <button class="sm-toggle-btn active" data-val="on" onclick="setEmailNotif(true)">På</button>
-          <button class="sm-toggle-btn" data-val="off" onclick="setEmailNotif(false)">Av</button>
-        </div>
+        <label class="ios-switch" id="email-notif-toggle">
+          <input type="checkbox" checked onchange="setEmailNotif(this.checked)">
+          <span class="ios-slider"></span>
+        </label>
       </div>
     </div>
     <div class="sm-divider"></div>
@@ -263,15 +265,6 @@
         <div id="dash-week-schedule"></div>
       </div>
 
-      <div id="weekly-summary-card" class="card hidden">
-        <div class="card-header"><span class="card-title">Veckosummering</span></div>
-        <div id="weekly-summary"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-header"><span class="card-title">Senaste pass</span></div>
-        <div id="recent-workouts"></div>
-      </div>
     </section>
 
     <!-- ── LOG WORKOUT ── -->
@@ -377,13 +370,21 @@
         <p>Dina personliga trender och statistik</p>
       </div>
 
-      <div class="toggle-row">
-        <button class="toggle-btn active" id="toggle-cardio" onclick="setTrendMode('cardio')">Bara Cardio</button>
-        <button class="toggle-btn" id="toggle-total" onclick="setTrendMode('total')">Cardio + Gym</button>
+      <div class="ios-toggle-row">
+        <span class="ios-toggle-label">Cardio</span>
+        <label class="ios-switch" id="trend-mode-toggle">
+          <input type="checkbox" onchange="setTrendMode(this.checked?'total':'cardio')">
+          <span class="ios-slider"></span>
+        </label>
+        <span class="ios-toggle-label">+ Gym</span>
       </div>
-      <div class="toggle-row">
-        <button class="toggle-btn active" id="toggle-abs" onclick="setEffortMode('absolute')">Absolut (h)</button>
-        <button class="toggle-btn" id="toggle-norm" onclick="setEffortMode('normalized')">Normaliserad</button>
+      <div class="ios-toggle-row">
+        <span class="ios-toggle-label">Absolut (h)</span>
+        <label class="ios-switch" id="effort-mode-toggle">
+          <input type="checkbox" onchange="setEffortMode(this.checked?'normalized':'absolute')">
+          <span class="ios-slider"></span>
+        </label>
+        <span class="ios-toggle-label">Normaliserad</span>
       </div>
 
       <div id="volume-delta"></div>
@@ -411,9 +412,13 @@
       <div class="card" id="season-activity-card">
         <div class="card-header">
           <span class="card-title">Per aktivitet</span>
-          <div class="toggle-row" style="margin:0;">
-            <button class="toggle-btn active" id="season-toggle-hours" onclick="setSeasonBarMode('hours')">Timmar</button>
-            <button class="toggle-btn" id="season-toggle-km" onclick="setSeasonBarMode('km')">Distans</button>
+          <div class="ios-toggle-row" style="margin:0;gap:6px;">
+            <span class="ios-toggle-label" style="font-size:0.75rem;">h</span>
+            <label class="ios-switch ios-switch-sm" id="season-bar-toggle">
+              <input type="checkbox" onchange="setSeasonBarMode(this.checked?'km':'hours')">
+              <span class="ios-slider"></span>
+            </label>
+            <span class="ios-toggle-label" style="font-size:0.75rem;">km</span>
           </div>
         </div>
         <div id="season-activity-bars"></div>
@@ -425,6 +430,16 @@
         </div>
         <div class="chart-container"><canvas id="chart-effort"></canvas></div>
         <div class="effort-legend" id="effort-legend"></div>
+      </div>
+
+      <div id="weekly-summary-card" class="card hidden">
+        <div class="card-header"><span class="card-title">Veckosummering</span></div>
+        <div id="weekly-summary"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">Senaste pass</span></div>
+        <div id="recent-workouts"></div>
       </div>
     </section>
 
@@ -490,14 +505,6 @@
       <div id="group-has-group" class="hidden">
         <div class="card">
           <div class="card-header">
-            <span class="card-title">Utmaningar</span>
-            <button class="btn btn-sm btn-ghost" onclick="openCreateChallenge()">+ Ny</button>
-          </div>
-          <div id="group-challenges"></div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
             <span class="card-title">Veckans leaderboard</span>
           </div>
           <div id="group-leaderboard" class="group-leaderboard"></div>
@@ -513,14 +520,22 @@
         <div class="card">
           <div class="card-header">
             <span class="card-title" id="grp-chart-title">Timmar per vecka</span>
-            <div class="toggle-row" style="margin:0;">
-              <button class="toggle-btn active" id="grp-toggle-cardio" onclick="setGrpChartMode('cardio')">Cardio</button>
-              <button class="toggle-btn" id="grp-toggle-total" onclick="setGrpChartMode('total')">Cardio + Gym</button>
-            </div>
+          <div class="ios-toggle-row" style="margin:0;gap:6px;">
+            <span class="ios-toggle-label" style="font-size:0.75rem;">Cardio</span>
+            <label class="ios-switch ios-switch-sm" id="grp-chart-toggle">
+              <input type="checkbox" onchange="setGrpChartMode(this.checked?'total':'cardio')">
+              <span class="ios-slider"></span>
+            </label>
+            <span class="ios-toggle-label" style="font-size:0.75rem;">+ Gym</span>
           </div>
-          <div class="toggle-row" style="margin:0 0 8px;">
-            <button class="toggle-btn active" id="grp-toggle-abs" onclick="setGrpEffortMode('absolute')">Absolut (h)</button>
-            <button class="toggle-btn" id="grp-toggle-norm" onclick="setGrpEffortMode('normalized')">Normaliserad</button>
+        </div>
+          <div class="ios-toggle-row" style="margin:0 0 8px;gap:6px;">
+            <span class="ios-toggle-label" style="font-size:0.75rem;">Absolut</span>
+            <label class="ios-switch ios-switch-sm" id="grp-effort-toggle">
+              <input type="checkbox" onchange="setGrpEffortMode(this.checked?'normalized':'absolute')">
+              <span class="ios-slider"></span>
+            </label>
+            <span class="ios-toggle-label" style="font-size:0.75rem;">Norm.</span>
           </div>
           <div class="chart-container"><canvas id="chart-group-weekly"></canvas></div>
         </div>
@@ -643,35 +658,17 @@
   </div>
 </div>
 
-<!-- ═══ CREATE CHALLENGE MODAL ═══ -->
-<div id="challenge-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeChallengeModal()">
-  <div class="modal-box" style="max-width:400px">
+<!-- ═══ PLAN EDIT CHAT MODAL ═══ -->
+<div id="plan-edit-modal" class="modal-overlay hidden" onclick="if(event.target===this)closePlanEditModal()">
+  <div class="modal-box" style="max-width:480px;">
     <div class="modal-header">
-      <h3>Ny utmaning</h3>
-      <button class="btn-close" onclick="closeChallengeModal()">&times;</button>
+      <h3>Redigera schema med AI</h3>
+      <button class="btn-close" onclick="closePlanEditModal()">&times;</button>
     </div>
-    <div style="display:flex;flex-direction:column;gap:16px;margin-top:16px">
-      <div class="form-group">
-        <label>Namn</label>
-        <input type="text" id="ch-title" placeholder="t.ex. Maratonveckan">
-      </div>
-      <div class="form-group">
-        <label>Mätvärde</label>
-        <div class="ch-metric-pills">
-          <button class="intensity-pill active" data-metric="hours" onclick="pickChallengeMetric(this)">Timmar</button>
-          <button class="intensity-pill" data-metric="sessions" onclick="pickChallengeMetric(this)">Antal pass</button>
-          <button class="intensity-pill" data-metric="km" onclick="pickChallengeMetric(this)">Kilometer</button>
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Längd</label>
-        <div class="ch-metric-pills">
-          <button class="intensity-pill" data-days="7" onclick="pickChallengeDays(this)">1 vecka</button>
-          <button class="intensity-pill active" data-days="14" onclick="pickChallengeDays(this)">2 veckor</button>
-          <button class="intensity-pill" data-days="30" onclick="pickChallengeDays(this)">1 månad</button>
-        </div>
-      </div>
-      <button class="btn btn-primary" onclick="submitChallenge()" style="margin-top:4px">Skapa utmaning</button>
+    <div id="plan-edit-chat" class="plan-edit-chat"></div>
+    <div class="plan-edit-input-row">
+      <input type="text" id="plan-edit-input" class="form-input" placeholder="t.ex. Byt torsdagens pass mot tempo..." onkeydown="if(event.key==='Enter')submitPlanEdit()">
+      <button class="btn btn-primary btn-sm" onclick="submitPlanEdit()" id="plan-edit-send">Skicka</button>
     </div>
   </div>
 </div>
@@ -868,7 +865,7 @@
 </div>
 
 <script src="js/config.js?v=25"></script>
-<script src="js/app.js?v=30"></script>
+<script src="js/app.js?v=31"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {

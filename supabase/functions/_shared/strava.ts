@@ -118,8 +118,18 @@ export interface StravaActivity {
   name: string;
   start_date_local: string;
   moving_time: number;
+  elapsed_time?: number;
   distance: number;
+  total_elevation_gain?: number;
+  average_speed?: number;
+  max_speed?: number;
   average_heartrate?: number;
+  max_heartrate?: number;
+  suffer_score?: number;
+  calories?: number;
+  average_cadence?: number;
+  gear?: { name?: string };
+  map?: { summary_polyline?: string };
 }
 
 export function activityToWorkout(
@@ -133,7 +143,7 @@ export function activityToWorkout(
   const distKm = activity.distance > 0 ? +(activity.distance / 1000).toFixed(2) : null;
   const intensity = guessIntensity(activity.average_heartrate || null);
 
-  return {
+  const result: Record<string, unknown> = {
     profile_id: profileId,
     workout_date: dateStr,
     workout_time: timeStr || null,
@@ -145,6 +155,18 @@ export function activityToWorkout(
     source: "strava",
     strava_activity_id: activity.id,
   };
+
+  if (activity.elapsed_time) result.elapsed_time_minutes = Math.round(activity.elapsed_time / 60);
+  if (activity.total_elevation_gain) result.elevation_gain_m = +activity.total_elevation_gain.toFixed(1);
+  if (activity.average_speed) result.avg_speed_kmh = +(activity.average_speed * 3.6).toFixed(2);
+  if (activity.max_speed) result.max_speed_kmh = +(activity.max_speed * 3.6).toFixed(2);
+  if (activity.average_heartrate) result.avg_hr = Math.round(activity.average_heartrate);
+  if (activity.max_heartrate) result.max_hr = Math.round(activity.max_heartrate);
+  if (activity.calories) result.calories = Math.round(activity.calories);
+  if (activity.average_cadence) result.avg_cadence = +activity.average_cadence.toFixed(1);
+  if (activity.map?.summary_polyline) result.map_polyline = activity.map.summary_polyline;
+
+  return result;
 }
 
 export function corsHeaders() {

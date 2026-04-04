@@ -389,7 +389,7 @@ serve(async (req) => {
     }
 
     // 2. Parse input
-    const body: PlanRequest & { profile_id: string } = await req.json();
+    const body: (PlanRequest & { profile_id: string; mode?: string; plan_id?: string; instruction?: string; current_plan?: unknown }) = await req.json();
     const { profile_id } = body;
     if (!profile_id) {
       return new Response(JSON.stringify({ error: "Missing profile_id" }), {
@@ -399,6 +399,89 @@ serve(async (req) => {
     }
 
     const db = supabaseAdmin();
+
+    // ── EDIT MODE: modify existing plan via AI chat ──
+    if (body.mode === "edit" && body.plan_id && body.instruction) {
+      const editPrompt = `You have an existing training plan (JSON below). The user wants to modify it.
+
+USER INSTRUCTION: "${body.instruction}"
+
+CURRENT PLAN:
+${JSON.stringify(body.current_plan, null, 2)}
+
+Apply the user's instruction to the plan. Return the COMPLETE modified plan in the same JSON format. Keep everything the user didn't ask to change. Respond ONLY with valid JSON.`;
+
+      const editedPlan = await generatePlan(editPrompt);
+
+      // Delete old workouts and weeks for this plan
+      const { data: oldWeeks } = await db.from("plan_weeks").select("id").eq("plan_id", body.plan_id);
+      if (oldWeeks) {
+        for (const w of oldWeeks) {
+          await db.from("plan_workouts").delete().eq("plan_week_id", w.id);
+        }
+        await db.from("plan_weeks").delete().eq("plan_id", body.plan_id);
+      }
+
+      // Get plan start date
+      const { data: planData } = await db.from("training_plans").select("start_date").eq("id", body.plan_id).single();
+      const editStartDate = planData?.start_date || new Date().toISOString().split("T")[0];
+
+      // Update plan name if changed
+      const numWeeks = editedPlan.weeks.length;
+      const editEndDate = new Date(editStartDate);
+      editEndDate.setDate(editEndDate.getDate() + numWeeks * 7 - 1);
+      await db.from("training_plans").update({
+        name: editedPlan.plan_name,
+        end_date: editEndDate.toISOString().split("T")[0],
+      }).eq("id", body.plan_id);
+
+      // Re-insert weeks and workouts
+      for (const week of editedPlan.weeks) {
+        const { data: weekData, error: weekErr } = await db.from("plan_weeks").insert({
+          plan_id: body.plan_id,
+          week_number: week.week_number,
+          phase: week.phase,
+          target_hours: week.target_hours,
+          target_sessions: week.target_sessions,
+          notes: week.notes,
+        }).select("id").single();
+
+        if (weekErr) continue;
+
+        const weekStartDate = new Date(editStartDate);
+        weekStartDate.setDate(weekStartDate.getDate() + (week.week_number - 1) * 7);
+
+        const workoutRows = week.workouts.map((w: LLMPlan["weeks"][0]["workouts"][0], idx: number) => {
+          const wDate = new Date(weekStartDate);
+          wDate.setDate(wDate.getDate() + w.day_of_week);
+          return {
+            plan_week_id: weekData.id,
+            workout_date: wDate.toISOString().split("T")[0],
+            day_of_week: w.day_of_week,
+            activity_type: w.activity_type,
+            label: w.label,
+            description: w.description,
+            target_duration_minutes: w.target_duration_minutes || 0,
+            target_distance_km: w.target_distance_km || null,
+            intensity_zone: w.intensity_zone || null,
+            is_rest: w.is_rest,
+            sort_order: idx,
+          };
+        });
+
+        await db.from("plan_workouts").insert(workoutRows);
+      }
+
+      return new Response(
+        JSON.stringify({
+          plan_id: body.plan_id,
+          plan_name: editedPlan.plan_name,
+          summary: editedPlan.summary,
+          weeks: numWeeks,
+        }),
+        { status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+      );
+    }
 
     // 3. Archive existing active plan
     await db.from("training_plans")
