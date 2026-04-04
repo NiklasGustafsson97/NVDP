@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NVDP</title>
-  <link rel="stylesheet" href="css/style.css?v=28">
+  <link rel="stylesheet" href="css/style.css?v=29">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
@@ -166,6 +166,11 @@
       <div id="sm-strava-info"></div>
     </div>
     <div class="sm-divider"></div>
+    <div class="sm-section" id="sm-garmin-section">
+      <div class="sm-section-title">Garmin</div>
+      <div id="sm-garmin-info"></div>
+    </div>
+    <div class="sm-divider"></div>
     <div class="sm-section">
       <div class="sm-section-title">Inställningar</div>
       <div class="sm-setting-row">
@@ -187,6 +192,13 @@
         <div class="sm-toggle-group" id="weekstart-toggle">
           <button class="sm-toggle-btn active" data-val="mon" onclick="setWeekStart('mon')">Måndag</button>
           <button class="sm-toggle-btn" data-val="sun" onclick="setWeekStart('sun')">Söndag</button>
+        </div>
+      </div>
+      <div class="sm-setting-row">
+        <span class="sm-setting-label">Mailnotiser</span>
+        <div class="sm-toggle-group" id="email-notif-toggle">
+          <button class="sm-toggle-btn active" data-val="on" onclick="setEmailNotif(true)">På</button>
+          <button class="sm-toggle-btn" data-val="off" onclick="setEmailNotif(false)">Av</button>
         </div>
       </div>
     </div>
@@ -357,6 +369,10 @@
         <button class="toggle-btn active" id="toggle-cardio" onclick="setTrendMode('cardio')">Bara Cardio</button>
         <button class="toggle-btn" id="toggle-total" onclick="setTrendMode('total')">Cardio + Gym</button>
       </div>
+      <div class="toggle-row">
+        <button class="toggle-btn active" id="toggle-abs" onclick="setEffortMode('absolute')">Absolut (h)</button>
+        <button class="toggle-btn" id="toggle-norm" onclick="setEffortMode('normalized')">Normaliserad</button>
+      </div>
 
       <div id="volume-delta"></div>
 
@@ -484,11 +500,15 @@
 
         <div class="card">
           <div class="card-header">
-            <span class="card-title">Timmar per vecka</span>
+            <span class="card-title" id="grp-chart-title">Timmar per vecka</span>
             <div class="toggle-row" style="margin:0;">
               <button class="toggle-btn active" id="grp-toggle-cardio" onclick="setGrpChartMode('cardio')">Cardio</button>
               <button class="toggle-btn" id="grp-toggle-total" onclick="setGrpChartMode('total')">Cardio + Gym</button>
             </div>
+          </div>
+          <div class="toggle-row" style="margin:0 0 8px;">
+            <button class="toggle-btn active" id="grp-toggle-abs" onclick="setGrpEffortMode('absolute')">Absolut (h)</button>
+            <button class="toggle-btn" id="grp-toggle-norm" onclick="setGrpEffortMode('normalized')">Normaliserad</button>
           </div>
           <div class="chart-container"><canvas id="chart-group-weekly"></canvas></div>
         </div>
@@ -825,7 +845,7 @@
 </div>
 
 <script src="js/config.js?v=25"></script>
-<script src="js/app.js?v=29"></script>
+<script src="js/app.js?v=30"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {

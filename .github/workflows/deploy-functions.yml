@@ -32,5 +32,17 @@ jobs:
       - name: Deploy strava-sync
         run: supabase functions deploy strava-sync --no-verify-jwt
 
+      - name: Deploy garmin-auth
+        run: supabase functions deploy garmin-auth --no-verify-jwt
+
+      - name: Deploy garmin-webhook
+        run: supabase functions deploy garmin-webhook --no-verify-jwt
+
+      - name: Deploy garmin-sync
+        run: supabase functions deploy garmin-sync --no-verify-jwt
+
       - name: Deploy generate-plan
         run: supabase functions deploy generate-plan --no-verify-jwt
+
+      - name: Deploy send-nudge-email
+        run: supabase functions deploy send-nudge-email --no-verify-jwt

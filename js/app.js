@@ -199,6 +199,13 @@ function setWeekStart(ws) {
   document.querySelectorAll('#weekstart-toggle .sm-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.val === ws));
 }
 
+async function setEmailNotif(on) {
+  document.querySelectorAll('#email-notif-toggle .sm-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.val === (on ? 'on' : 'off')));
+  if (currentProfile) {
+    await sb.from('profiles').update({ email_notifications: on }).eq('id', currentProfile.id);
+  }
+}
+
 function restoreSettings() {
   const theme = localStorage.getItem('nvdp-theme') || 'dark';
   const unit = localStorage.getItem('nvdp-unit') || 'km';
@@ -207,6 +214,12 @@ function restoreSettings() {
   document.querySelectorAll('#theme-toggle .sm-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.val === theme));
   document.querySelectorAll('#unit-toggle .sm-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.val === unit));
   document.querySelectorAll('#weekstart-toggle .sm-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.val === ws));
+}
+
+function restoreEmailNotifToggle() {
+  if (!currentProfile) return;
+  const on = currentProfile.email_notifications !== false;
+  document.querySelectorAll('#email-notif-toggle .sm-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.val === (on ? 'on' : 'off')));
 }
 
 function updateSideMenuContent() {
@@ -222,6 +235,7 @@ function updateSideMenuContent() {
   updateGroupSettingsCard();
 
   updateStravaUI();
+  restoreEmailNotifToggle();
 }
 
 const AVATAR_OPTIONS = ['🏃','🚴','💪','🧘','⛷️','🏊','🎯','🔥','⚡','🌟','🏔️','🦁','🐺','🦅','🐻','🎸'];
@@ -363,6 +377,8 @@ async function initApp(user, accessToken) {
     registerPushSubscription();
     checkStravaConnection();
     handleStravaRedirect();
+    checkGarminConnection();
+    handleGarminRedirect();
   } catch (err) {
     console.error('initApp error:', err);
     document.getElementById('app').classList.add('active');
@@ -827,10 +843,10 @@ async function renderWeeklySummary(weekWorkouts, plans, monday, profile) {
   }
 
   let items = [];
-  items.push(`<div class="ws-stat"><span class="ws-val">${totalHours}h</span>${deltaHTML(totalMins, prevMins, 'h')}<span class="ws-label">total tid</span></div>`);
-  items.push(`<div class="ws-stat"><span class="ws-val">${sessionCount}</span>${deltaHTML(sessionCount, prevSessions, '')}<span class="ws-label">pass</span></div>`);
-  if (totalDist > 0) items.push(`<div class="ws-stat"><span class="ws-val">${totalDist.toFixed(1)}km</span>${deltaHTML(totalDist, prevDist, 'km')}<span class="ws-label">distans</span></div>`);
-  if (longest) items.push(`<div class="ws-stat"><span class="ws-val">${longest.duration_minutes}'</span><span class="ws-label">längsta</span></div>`);
+  items.push(`<div class="ws-stat"><span class="ws-val">${totalHours}h</span><span class="ws-label">total tid</span>${deltaHTML(totalMins, prevMins, 'h')}</div>`);
+  items.push(`<div class="ws-stat"><span class="ws-val">${sessionCount}</span><span class="ws-label">pass</span>${deltaHTML(sessionCount, prevSessions, '')}</div>`);
+  items.push(`<div class="ws-stat"><span class="ws-val">${totalDist > 0 ? totalDist.toFixed(1) : '0'}km</span><span class="ws-label">distans</span>${deltaHTML(totalDist, prevDist, 'km')}</div>`);
+  items.push(`<div class="ws-stat"><span class="ws-val">${longest ? longest.duration_minutes + "'" : '—'}</span><span class="ws-label">längsta</span></div>`);
 
   el.innerHTML = `<div class="ws-grid">${items.join('')}</div>`;
   card.classList.remove('hidden');
@@ -855,13 +871,24 @@ async function openWorkoutModal(w) {
 
   const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
   let body = '';
-  body += `<div class="modal-detail-row"><span class="mdr-label">Aktivitet</span><span class="mdr-value">${w.activity_type} ${intBadge}${stravaSourceBadge(w)}</span></div>`;
+  body += `<div class="modal-detail-row"><span class="mdr-label">Aktivitet</span><span class="mdr-value">${w.activity_type} ${intBadge}${sourceBadge(w)}</span></div>`;
   body += `<div class="modal-detail-row"><span class="mdr-label">Datum</span><span class="mdr-value">${w.workout_date}</span></div>`;
   body += `<div class="modal-detail-row"><span class="mdr-label">Tid</span><span class="mdr-value">${w.duration_minutes} min</span></div>`;
   if (w.distance_km) body += `<div class="modal-detail-row"><span class="mdr-label">Distans</span><span class="mdr-value">${w.distance_km} km</span></div>`;
   if (w.workout_time) body += `<div class="modal-detail-row"><span class="mdr-label">Klockslag</span><span class="mdr-value">${w.workout_time}</span></div>`;
   if (w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]')) body += `<div class="modal-detail-row"><span class="mdr-label">Anteckning</span><span class="mdr-value">${w.notes}</span></div>`;
-  if (w.source === 'strava') body += `<div class="modal-detail-row"><span class="mdr-label">Källa</span><span class="mdr-value" style="color:#FC4C02;">Strava auto-import</span></div>`;
+  if (w.source === 'strava') {
+    const stravaLink = w.strava_activity_id
+      ? `<a href="https://www.strava.com/activities/${w.strava_activity_id}" target="_blank" rel="noopener" class="strava-view-link">View on Strava</a>`
+      : '';
+    body += `<div class="modal-detail-row"><span class="mdr-label">Källa</span><span class="mdr-value" style="color:#FC4C02;">Strava auto-import ${stravaLink}</span></div>`;
+  }
+  if (w.source === 'garmin') {
+    const garminLink = w.garmin_activity_id
+      ? `<a href="https://connect.garmin.com/modern/activity/${w.garmin_activity_id}" target="_blank" rel="noopener" class="garmin-view-link">View on Garmin</a>`
+      : '';
+    body += `<div class="modal-detail-row"><span class="mdr-label">Källa</span><span class="mdr-value" style="color:#007CC3;">Garmin auto-import ${garminLink}</span></div>`;
+  }
 
   body += `<div id="wm-reactions" class="wm-reactions"><span class="text-dim">Laddar...</span></div>`;
   body += `<div id="wm-comments" class="wm-comments"><span class="text-dim">Laddar...</span></div>`;
@@ -1100,18 +1127,8 @@ async function loadSchema() {
 async function _loadSchema() {
   const tabsEl = document.getElementById('schema-person-tabs');
   tabsEl.innerHTML = '';
-  if (allProfiles.length > 0) {
-    if (schemaPersonIdx >= allProfiles.length) schemaPersonIdx = 0;
-    allProfiles.forEach((p, i) => {
-      const btn = document.createElement('button');
-      btn.className = 'schema-tab' + (i === schemaPersonIdx ? ' active' : '');
-      btn.textContent = p.name;
-      btn.onclick = () => { schemaPersonIdx = i; loadSchema(); };
-      tabsEl.appendChild(btn);
-    });
-  }
 
-  const profile = allProfiles[schemaPersonIdx] || currentProfile;
+  const profile = currentProfile;
   const now = new Date();
   const currentMonday = mondayOfWeek(now);
   const targetMonday = addDays(currentMonday, schemaWeekOffset * 7);
@@ -1238,6 +1255,16 @@ function dedupPlanText(label, desc) {
   return { label, desc };
 }
 
+function stripProgressionText(desc) {
+  if (!desc) return desc;
+  return desc
+    .split(/(?<=[.!])\s+/)
+    .filter(s => !/öka\s|per vecka|kommande|nästa vecka|progressi|bygg\s+upp|varje vecka/i.test(s))
+    .join(' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchema, profile) {
   invitations = invitations || [];
   const container = document.getElementById('schema-content');
@@ -1276,7 +1303,7 @@ function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchem
       planText = '<span class="sr-rest-label">Vila</span>';
     } else if (plan) {
       const lbl = plan.label || '';
-      const desc = plan.description || '';
+      const desc = stripProgressionText(plan.description || '');
       const kmMatch = desc.match(/(\d+(?:[–\-]\d+)?)\s*km/);
       const kmStr = kmMatch ? kmMatch[1] + ' km' : '';
       if (lbl && desc) {
@@ -1363,7 +1390,7 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
         ? ` <span class="zone-badge zone-${planWo.intensity_zone.toLowerCase()}">${planWo.intensity_zone}</span>`
         : '';
       const lbl = planWo.label || planWo.activity_type;
-      const desc = planWo.description || '';
+      const desc = stripProgressionText(planWo.description || '');
       const meta = planWo.target_duration_minutes > 0
         ? `<span class="sr-target">${planWo.target_duration_minutes} min${planWo.target_distance_km ? ' · ' + planWo.target_distance_km + ' km' : ''}</span>`
         : '';
@@ -1466,13 +1493,19 @@ function closePlanModal() {
 }
 
 function openInvitePicker() {
-  closePlanModal();
-  _inviteSelectedUser = null;
-  document.getElementById('invite-form').classList.add('hidden');
-  document.getElementById('invite-search').value = '';
-  renderInviteUserList('');
-  document.getElementById('invite-picker').classList.remove('hidden');
-  setTimeout(() => document.getElementById('invite-search').focus(), 100);
+  try {
+    closePlanModal();
+    _inviteSelectedUser = null;
+    document.getElementById('invite-form').classList.add('hidden');
+    document.getElementById('invite-search').value = '';
+    document.getElementById('invite-search').classList.remove('hidden');
+    renderInviteUserList('');
+    document.getElementById('invite-picker').classList.remove('hidden');
+    setTimeout(() => document.getElementById('invite-search').focus(), 100);
+  } catch (e) {
+    console.error('openInvitePicker error:', e);
+    showAlertModal('Fel', 'Kunde inte öppna inbjudan. Försök igen.');
+  }
 }
 
 function closeInvitePicker() {
@@ -1634,11 +1667,19 @@ async function respondToInvitation(invitationId, accept) {
 //  TRENDS (Personal)
 // ═══════════════════════
 let chartMixPersonal = null;
+let effortMode = 'absolute';
 
 function setTrendMode(mode) {
   trendMode = mode;
   document.getElementById('toggle-cardio').classList.toggle('active', mode === 'cardio');
   document.getElementById('toggle-total').classList.toggle('active', mode === 'total');
+  loadTrends();
+}
+
+function setEffortMode(mode) {
+  effortMode = mode;
+  document.getElementById('toggle-abs').classList.toggle('active', mode === 'absolute');
+  document.getElementById('toggle-norm').classList.toggle('active', mode === 'normalized');
   loadTrends();
 }
 
@@ -1656,11 +1697,14 @@ async function _loadTrends() {
   }
 
   const weekData = {};
+  const weekWorkouts = {};
   myWorkouts.forEach(w => {
     const mon = mondayOfWeek(new Date(w.workout_date));
     const key = isoDate(mon);
     if (!weekData[key]) weekData[key] = {};
+    if (!weekWorkouts[key]) weekWorkouts[key] = [];
     weekData[key][w.activity_type] = (weekData[key][w.activity_type] || 0) + w.duration_minutes;
+    weekWorkouts[key].push(w);
   });
 
   const weeks = Object.keys(weekData).sort();
@@ -1669,9 +1713,14 @@ async function _loadTrends() {
     const wn = weekNumber(mon);
     return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
   });
+  const isNorm = effortMode === 'normalized';
+  const yUnit = isNorm ? '' : 'h';
   const myData = weeks.map(w => {
-    const d = weekData[w];
     const types = trendMode === 'cardio' ? CARDIO_TYPES : [...CARDIO_TYPES, 'Gym'];
+    if (isNorm) {
+      return weekWorkouts[w].filter(wo => types.includes(wo.activity_type)).reduce((s, wo) => s + calcWorkoutEffort(wo), 0);
+    }
+    const d = weekData[w];
     return types.reduce((s, t) => s + (d[t] || 0), 0) / 60;
   });
 
@@ -1703,11 +1752,11 @@ async function _loadTrends() {
         tooltip: { callbacks: { label: c => {
           const d = wowDeltas[c.dataIndex];
           const pct = d !== null ? ` (${d >= 0 ? '+' : ''}${Math.round(d)}%)` : '';
-          return `${c.parsed.y.toFixed(1)} h${pct}`;
+          return `${c.parsed.y.toFixed(1)} ${yUnit}${pct}`;
         }}},
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: () => getComputedStyle(document.body).getPropertyValue('--border').trim() }, ticks: { color: () => getComputedStyle(document.body).getPropertyValue('--text-muted').trim(), callback: v => v.toFixed(1) + 'h' } },
+        y: { beginAtZero: true, grid: { color: () => getComputedStyle(document.body).getPropertyValue('--border').trim() }, ticks: { color: () => getComputedStyle(document.body).getPropertyValue('--text-muted').trim(), callback: v => v.toFixed(1) + yUnit } },
         x: { grid: { display: false }, ticks: { color: () => getComputedStyle(document.body).getPropertyValue('--text-muted').trim() } }
       }
     },
@@ -1745,13 +1794,16 @@ async function _loadTrends() {
     const types = trendMode === 'cardio' ? CARDIO_TYPES : [...CARDIO_TYPES, 'Gym'];
 
     const accumTo = (mondayStr, maxDow) => {
-      return myWorkouts.filter(w => {
+      const filtered = myWorkouts.filter(w => {
         const wMon = isoDate(mondayOfWeek(new Date(w.workout_date)));
         if (wMon !== mondayStr) return false;
         if (!types.includes(w.activity_type)) return false;
         const wDow = (new Date(w.workout_date).getDay() + 6) % 7;
         return wDow <= maxDow;
-      }).reduce((s, w) => s + w.duration_minutes, 0) / 60;
+      });
+      return isNorm
+        ? filtered.reduce((s, w) => s + calcWorkoutEffort(w), 0)
+        : filtered.reduce((s, w) => s + w.duration_minutes, 0) / 60;
     };
 
     const curr = accumTo(thisMonday, todayDow);
@@ -1781,7 +1833,7 @@ async function _loadTrends() {
       <div class="vd-compact ${colorClass}">
         <span class="vd-pct">${sign}${Math.round(pctChange)}%</span>
         <span class="vd-detail">vs ${labels[labels.length - 2]} (mån–${dayLabel})</span>
-        <span class="vd-val">${curr.toFixed(1)}h / ${prev.toFixed(1)}h</span>
+        <span class="vd-val">${curr.toFixed(1)}${yUnit} / ${prev.toFixed(1)}${yUnit}</span>
         <span class="vd-msg">${msg}</span>
       </div>`;
   } else if (deltaEl) {
@@ -1793,9 +1845,20 @@ async function _loadTrends() {
   if (mixCanvas) {
     if (chartMixPersonal) chartMixPersonal.destroy();
     const types = ['Löpning', 'Cykel', 'Gym', 'Annat', 'Hyrox', 'Stakmaskin', 'Längdskidor'];
-    const datasets = types.filter(t => weeks.some(w => (weekData[w][t] || 0) > 0)).map(t => ({
+
+    const weekEffortByType = {};
+    if (isNorm) {
+      weeks.forEach(w => {
+        weekEffortByType[w] = {};
+        (weekWorkouts[w] || []).forEach(wo => {
+          weekEffortByType[w][wo.activity_type] = (weekEffortByType[w][wo.activity_type] || 0) + calcWorkoutEffort(wo);
+        });
+      });
+    }
+
+    const datasets = types.filter(t => weeks.some(w => isNorm ? (weekEffortByType[w]?.[t] || 0) > 0 : (weekData[w][t] || 0) > 0)).map(t => ({
       label: t,
-      data: weeks.map(w => (weekData[w][t] || 0) / 60),
+      data: weeks.map(w => isNorm ? +(weekEffortByType[w]?.[t] || 0).toFixed(2) : (weekData[w][t] || 0) / 60),
       backgroundColor: ACTIVITY_COLORS[t] || '#555',
       borderRadius: 4
     }));
@@ -1806,10 +1869,10 @@ async function _loadTrends() {
         responsive: true, maintainAspectRatio: false,
         plugins: {
           legend: { position: 'bottom', labels: { color: '#aaa', usePointStyle: true, boxWidth: 12 } },
-          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)} h` } }
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)} ${yUnit}` } }
         },
         scales: {
-          y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + 'h' } },
+          y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + yUnit } },
           x: { stacked: true, grid: { display: false }, ticks: { color: '#888' } }
         }
       }
@@ -2044,6 +2107,7 @@ function calcStreak(workouts, profileId) {
 //  GROUP
 // ═══════════════════════
 let grpChartMode = 'cardio';
+let grpEffortMode = 'absolute';
 let chartGroupWeekly = null;
 let _cachedGroupWorkouts = [];
 let _cachedGroupMembers = [];
@@ -2160,8 +2224,21 @@ function setGrpChartMode(mode) {
   }
 }
 
+function setGrpEffortMode(mode) {
+  grpEffortMode = mode;
+  document.getElementById('grp-toggle-abs').classList.toggle('active', mode === 'absolute');
+  document.getElementById('grp-toggle-norm').classList.toggle('active', mode === 'normalized');
+  if (_cachedGroupWorkouts.length > 0 && _cachedGroupMembers.length > 0) {
+    renderGroupChart(_cachedGroupWorkouts, _cachedGroupMembers);
+  } else {
+    loadGroup();
+  }
+}
+
 function renderGroupChart(allWorkouts, members) {
   const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
+  const isGrpNorm = grpEffortMode === 'normalized';
+  const gUnit = isGrpNorm ? '' : 'h';
   const weekData = {};
   allWorkouts.forEach(w => {
     const mon = mondayOfWeek(new Date(w.workout_date));
@@ -2169,7 +2246,8 @@ function renderGroupChart(allWorkouts, members) {
     if (!weekData[key]) weekData[key] = {};
     const types = grpChartMode === 'cardio' ? CARDIO_TYPES : [...CARDIO_TYPES, 'Gym'];
     if (!types.includes(w.activity_type)) return;
-    weekData[key][w.profile_id] = (weekData[key][w.profile_id] || 0) + w.duration_minutes;
+    const val = isGrpNorm ? calcWorkoutEffort(w) : w.duration_minutes;
+    weekData[key][w.profile_id] = (weekData[key][w.profile_id] || 0) + val;
   });
 
   const weeks = Object.keys(weekData).sort();
@@ -2179,9 +2257,12 @@ function renderGroupChart(allWorkouts, members) {
   const canvas = document.getElementById('chart-group-weekly');
   if (!canvas) return;
 
+  const titleEl = document.getElementById('grp-chart-title');
+  if (titleEl) titleEl.textContent = isGrpNorm ? 'Effort per vecka' : 'Timmar per vecka';
+
   const datasets = members.map((m, i) => ({
     label: m.name.split(' ')[0],
-    data: weeks.map(w => (weekData[w]?.[m.id] || 0) / 60),
+    data: weeks.map(w => isGrpNorm ? +(weekData[w]?.[m.id] || 0).toFixed(2) : (weekData[w]?.[m.id] || 0) / 60),
     borderColor: colors[i % colors.length],
     backgroundColor: colors[i % colors.length] + '18',
     tension: 0.35, fill: true, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2.5
@@ -2195,10 +2276,10 @@ function renderGroupChart(allWorkouts, members) {
       interaction: { intersect: false, mode: 'index' },
       plugins: {
         legend: { position: 'bottom', labels: { color: '#aaa', usePointStyle: true, padding: 16 } },
-        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)} h` } }
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)} ${gUnit}` } }
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + 'h' } },
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + gUnit } },
         x: { grid: { display: false }, ticks: { color: '#888' } }
       }
     }
@@ -2434,6 +2515,8 @@ async function submitChallenge() {
 // ═══════════════════════
 let _sentNudges = new Set();
 
+const GWD_DEFAULT_SHOW = 3;
+
 function renderGroupWeekDetail(allWorkouts, members, plans) {
   const el = document.getElementById('group-week-detail');
   if (!el) return;
@@ -2444,7 +2527,7 @@ function renderGroupWeekDetail(allWorkouts, members, plans) {
   const todayDow = (now.getDay() + 6) % 7;
   const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
 
-  el.innerHTML = members.map((m, mi) => {
+  const cards = members.map((m, mi) => {
     const isMe = m.id === currentProfile.id;
     let totalMins = 0;
     let missedCount = 0;
@@ -2485,7 +2568,26 @@ function renderGroupWeekDetail(allWorkouts, members, plans) {
       <div class="grp-mw-days">${daysHTML}</div>
       ${nudgeHTML}
     </div>`;
-  }).join('');
+  });
+
+  const showAll = members.length <= GWD_DEFAULT_SHOW;
+  const visibleCards = showAll ? cards : cards.slice(0, GWD_DEFAULT_SHOW);
+  const hiddenCards = showAll ? [] : cards.slice(GWD_DEFAULT_SHOW);
+  const toggleBtn = hiddenCards.length > 0
+    ? `<button class="btn btn-ghost btn-sm gwd-toggle" onclick="toggleGroupWeekExpand(this)">Visa alla (${members.length})</button>`
+    : '';
+
+  el.innerHTML = visibleCards.join('') +
+    (hiddenCards.length ? `<div class="gwd-hidden-cards" style="display:none;">${hiddenCards.join('')}</div>` : '') +
+    toggleBtn;
+}
+
+function toggleGroupWeekExpand(btn) {
+  const hidden = btn.previousElementSibling;
+  if (!hidden) return;
+  const expanded = hidden.style.display !== 'none';
+  hidden.style.display = expanded ? 'none' : 'block';
+  btn.textContent = expanded ? `Visa alla (${hidden.children.length + GWD_DEFAULT_SHOW})` : 'Visa färre';
 }
 
 let _feedReactionsCache = null;
@@ -2630,8 +2732,26 @@ async function sendNudge(receiverId, receiverName, btnEl) {
     btnEl.disabled = true;
     btnEl.innerHTML = '✓ Puff skickad';
 
-    // Trigger push notification if possible
     sendPushToUser(receiverId);
+
+    // Send email notification
+    try {
+      const { data: { session } } = await sb.auth.getSession();
+      fetch(SUPABASE_FUNCTIONS_URL + '/send-nudge-email', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + session.access_token,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          receiver_id: receiverId,
+          sender_name: currentProfile.name,
+          message: `${currentProfile.name} gav dig en puff! Dags att träna! 💪`
+        })
+      });
+    } catch (emailErr) {
+      console.error('Nudge email error:', emailErr);
+    }
   } catch (e) {
     console.error('Nudge error:', e);
     showAlertModal('Fel', 'Kunde inte skicka puff. Försök igen.');
@@ -2842,12 +2962,16 @@ function updateStravaUI() {
           </button>
           <button class="strava-disconnect-btn" onclick="disconnectStrava()">Koppla från</button>
         </div>
+        <div class="strava-powered-by">
+          <svg viewBox="0 0 24 24" width="10" height="10" fill="#FC4C02"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.599h4.172L10.463 0l-7 13.828h4.169"/></svg>
+          Powered by Strava
+        </div>
       </div>`;
   } else {
     el.innerHTML = `
       <button class="strava-connect-btn" onclick="connectStrava()">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.599h4.172L10.463 0l-7 13.828h4.169"/></svg>
-        Koppla Strava
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="#fff"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.599h4.172L10.463 0l-7 13.828h4.169"/></svg>
+        Connect with Strava
       </button>`;
   }
 }
@@ -2931,6 +3055,146 @@ function handleStravaRedirect() {
 function stravaSourceBadge(workout) {
   if (workout.source !== 'strava') return '';
   return `<span class="strava-badge"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.599h4.172L10.463 0l-7 13.828h4.169"/></svg>Strava</span>`;
+}
+
+// ═══════════════════════
+//  GARMIN INTEGRATION
+// ═══════════════════════
+let _garminConnection = null;
+
+async function checkGarminConnection() {
+  if (!currentProfile) return;
+  try {
+    const { data, error } = await sb.from('garmin_connections')
+      .select('*')
+      .eq('profile_id', currentProfile.id)
+      .maybeSingle();
+    _garminConnection = error ? null : data;
+  } catch (e) {
+    _garminConnection = null;
+  }
+  updateGarminUI();
+}
+
+function updateGarminUI() {
+  const el = document.getElementById('sm-garmin-info');
+  if (!el) return;
+
+  if (!GARMIN_CLIENT_ID) {
+    el.innerHTML = '<div class="garmin-sync-info">Garmin Client ID ej konfigurerat</div>';
+    return;
+  }
+
+  if (_garminConnection) {
+    const syncText = _garminConnection.last_sync_at
+      ? `Senast synkad: ${new Date(_garminConnection.last_sync_at).toLocaleString('sv-SE', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+      : 'Ej synkad ännu';
+    el.innerHTML = `
+      <div class="garmin-status">
+        <div class="garmin-connected-row">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>
+          Garmin kopplad
+        </div>
+        <div class="garmin-sync-info">${syncText}</div>
+        <div class="garmin-actions">
+          <button class="garmin-sync-btn" id="garmin-sync-btn" onclick="syncGarmin()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            Synka nu
+          </button>
+          <button class="garmin-disconnect-btn" onclick="disconnectGarmin()">Koppla från</button>
+        </div>
+      </div>`;
+  } else {
+    el.innerHTML = `
+      <button class="garmin-connect-btn" onclick="connectGarmin()">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="#fff"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+        Connect with Garmin
+      </button>`;
+  }
+}
+
+function connectGarmin() {
+  if (!GARMIN_CLIENT_ID || !currentProfile) return;
+  const state = currentProfile.id;
+  const url = `${GARMIN_AUTH_URL}?client_id=${GARMIN_CLIENT_ID}&redirect_uri=${encodeURIComponent(GARMIN_REDIRECT_URI)}&response_type=code&scope=activity:read&state=${state}`;
+  window.location.href = url;
+}
+
+async function disconnectGarmin() {
+  if (!_garminConnection) return;
+  const confirmed = await showConfirmModal(
+    'Koppla från Garmin',
+    'Dina manuella pass påverkas inte. Automatisk import stoppas.',
+    'Koppla från',
+    true
+  );
+  if (!confirmed) return;
+
+  const { error } = await sb.from('garmin_connections')
+    .delete()
+    .eq('id', _garminConnection.id);
+  if (error) {
+    await showAlertModal('Fel', 'Kunde inte koppla från: ' + error.message);
+    return;
+  }
+  _garminConnection = null;
+  updateGarminUI();
+}
+
+async function syncGarmin() {
+  if (!_garminConnection || !currentProfile) return;
+  const btn = document.getElementById('garmin-sync-btn');
+  if (btn) { btn.classList.add('syncing'); btn.textContent = 'Synkar...'; }
+
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/garmin-sync', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ profile_id: currentProfile.id }),
+    });
+
+    const result = await res.json();
+    if (res.ok) {
+      _garminConnection.last_sync_at = result.last_sync_at;
+      updateGarminUI();
+      const errInfo = result.debug?.firstError ? `\nFel: ${result.debug.firstError}` : '';
+      const debugInfo = result.debug ? `\nHämtade ${result.totalFetched}, importerade ${result.imported}, skippade ${result.skipped}${errInfo}` : '';
+      await showAlertModal('Synk klar', `${result.imported} pass importerade.${debugInfo}`);
+      navigate(currentView);
+    } else {
+      await showAlertModal('Synk-fel', result.error || 'Okänt fel');
+    }
+  } catch (e) {
+    console.error('Garmin sync error:', e);
+    await showAlertModal('Synk-fel', 'Nätverksfel vid synkning');
+  }
+
+  if (btn) { btn.classList.remove('syncing'); btn.textContent = 'Synka nu'; }
+}
+
+function handleGarminRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('garmin_connected')) {
+    history.replaceState(null, '', window.location.pathname);
+    setTimeout(() => showAlertModal('Garmin kopplad!', 'Ditt Garmin-konto är nu anslutet. Dina pass synkas automatiskt.'), 500);
+  } else if (params.has('garmin_error')) {
+    const err = params.get('garmin_error');
+    history.replaceState(null, '', window.location.pathname);
+    setTimeout(() => showAlertModal('Garmin-fel', 'Kunde inte koppla Garmin: ' + err), 500);
+  }
+}
+
+function garminSourceBadge(workout) {
+  if (workout.source !== 'garmin') return '';
+  return `<span class="garmin-badge"><svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>Garmin</span>`;
+}
+
+function sourceBadge(workout) {
+  return stravaSourceBadge(workout) + garminSourceBadge(workout);
 }
 
 // ═══════════════════════

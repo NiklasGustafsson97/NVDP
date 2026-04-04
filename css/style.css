@@ -197,7 +197,7 @@ select option { background: #1a1a2e; color: var(--text); }
 }
 
 /* ── Weekly Summary ── */
-.ws-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 4px 0; }
+.ws-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 4px 0; }
 .ws-stat { text-align: center; }
 .ws-val { display: block; font-size: 1.1rem; font-weight: 700; color: var(--text); }
 .ws-delta { display: block; font-size: 0.7rem; font-weight: 600; margin-top: 1px; }
@@ -390,7 +390,7 @@ select option { background: #1a1a2e; color: var(--text); }
 
 .sr-main { flex: 1; min-width: 0; }
 .sr-plan-label { font-size: 0.85rem; font-weight: 700; color: var(--text); margin-bottom: 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.sr-plan-desc { font-size: 0.78rem; color: var(--text-dim); line-height: 1.45; margin-top: 2px; }
+.sr-plan-desc { font-size: 0.78rem; color: var(--text-dim); line-height: 1.45; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .sr-plan-text { font-size: 0.85rem; color: var(--text); }
 .sr-target { font-size: 0.7rem; color: var(--text-dim); font-weight: 400; }
 .sr-rest-label { font-style: italic; color: var(--text-dim); }
@@ -828,6 +828,73 @@ input.code-input {
   margin-left: 4px; vertical-align: middle;
 }
 .strava-badge svg { width: 10px; height: 10px; }
+.strava-powered-by {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 0.65rem; color: var(--text-dim); margin-top: 6px;
+  letter-spacing: 0.3px;
+}
+.strava-view-link {
+  display: inline-flex; align-items: center; gap: 3px;
+  color: #FC4C02; text-decoration: underline; font-weight: 600;
+  font-size: 0.8rem; margin-left: 8px;
+}
+.strava-view-link:hover { color: #e04400; }
+
+/* ── Garmin Integration ── */
+.garmin-connect-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 10px 14px; border-radius: var(--radius-sm);
+  background: #007CC3; color: #fff; border: none;
+  font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  font-family: var(--font); transition: all 0.2s;
+}
+.garmin-connect-btn:hover { background: #006aab; transform: translateY(-1px); }
+.garmin-connect-btn svg { flex-shrink: 0; }
+.garmin-status {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.garmin-connected-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 0.8rem; color: var(--green);
+}
+.garmin-connected-row svg { flex-shrink: 0; }
+.garmin-sync-info {
+  font-size: 0.7rem; color: var(--text-dim);
+}
+.garmin-actions {
+  display: flex; gap: 6px; margin-top: 4px;
+}
+.garmin-sync-btn {
+  display: flex; align-items: center; gap: 4px;
+  padding: 5px 12px; border-radius: 14px; font-size: 0.75rem; font-weight: 600;
+  cursor: pointer; border: 1px solid var(--border);
+  color: var(--text-muted); background: transparent;
+  transition: all 0.2s; font-family: var(--font);
+}
+.garmin-sync-btn:hover { background: var(--bg-card-hover); color: var(--text); }
+.garmin-sync-btn.syncing { opacity: 0.5; cursor: wait; }
+.garmin-disconnect-btn {
+  display: flex; align-items: center; gap: 4px;
+  padding: 5px 12px; border-radius: 14px; font-size: 0.75rem; font-weight: 600;
+  cursor: pointer; border: 1px solid rgba(231,76,60,0.2);
+  color: var(--red); background: transparent;
+  transition: all 0.2s; font-family: var(--font);
+}
+.garmin-disconnect-btn:hover { background: rgba(231,76,60,0.08); }
+.garmin-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 6px; border-radius: 8px;
+  font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
+  background: rgba(0,124,195,0.12); color: #007CC3;
+  margin-left: 4px; vertical-align: middle;
+}
+.garmin-badge svg { width: 10px; height: 10px; }
+.garmin-view-link {
+  display: inline-flex; align-items: center; gap: 3px;
+  color: #007CC3; text-decoration: underline; font-weight: 600;
+  font-size: 0.8rem; margin-left: 8px;
+}
+.garmin-view-link:hover { color: #006aab; }
 
 /* ── Workout Invitations ── */
 .shared-badge {
