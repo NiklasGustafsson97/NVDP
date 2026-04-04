@@ -419,7 +419,11 @@ function navigate(view) {
     _activePlanWeeks = [];
     _activePlanWorkouts = [];
   }
-  if (view === 'dashboard') loadDashboard();
+  if (view === 'dashboard') {
+    _dashWeekOffset = 0;
+    _dashSelectedDate = null;
+    loadDashboard();
+  }
   else if (view === 'log') resetLogForm();
   else if (view === 'schema') loadSchema();
   else if (view === 'trends') loadTrends();
@@ -624,168 +628,215 @@ async function loadDashboard() {
   try { await _loadDashboard(); } catch (e) { console.error('Dashboard error:', e); }
   hideViewLoading('view-dashboard');
 }
+let _dashWeekOffset = 0;
+let _dashSelectedDate = null;
+let _dashPlanWorkouts = [];
+let _dashWeekWorkouts = [];
+
 async function _loadDashboard() {
   const now = new Date();
-  const dayOfWeek = (now.getDay() + 6) % 7; // 0=Mon
   const name = currentProfile?.name || 'du';
   const firstName = name.split(' ')[0];
 
   document.getElementById('dash-greeting').textContent = `Hej ${firstName}!`;
   document.getElementById('dash-date').textContent = now.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'long' });
 
-  const todayEl = document.getElementById('today-content');
-  const tomorrowEl = document.getElementById('tomorrow-content');
+  if (!_dashSelectedDate) _dashSelectedDate = isoDate(now);
+
+  if (PLAN_GENERATION_ENABLED && !_activePlan) {
+    _activePlan = await fetchActivePlan(currentProfile?.id);
+    if (_activePlan) _activePlanWeeks = await fetchPlanWeeks(_activePlan.id);
+  }
+
+  const monday = addDays(mondayOfWeek(now), _dashWeekOffset * 7);
+  await _renderDashCalendar(monday);
+  await _renderDashDayCard(_dashSelectedDate);
+}
+
+async function _renderDashCalendar(monday) {
+  const track = document.getElementById('cal-strip-track');
+  const monthLabel = document.getElementById('cal-strip-month');
+  if (!track) return;
+
+  const now = new Date();
   const todayStr = isoDate(now);
-  const tomorrowDate = addDays(now, 1);
-  const tomorrowStr = isoDate(tomorrowDate);
-  const tomorrowDow = (dayOfWeek + 1) % 7;
-
-  // Check for AI plan first
-  let useAiPlan = false;
-  let todayPlan = null;
-  let tomorrowPlan = null;
-  let allPlans = [];
-
-  if (PLAN_GENERATION_ENABLED) {
-    if (!_activePlan) {
-      _activePlan = await fetchActivePlan(currentProfile?.id);
-      if (_activePlan) _activePlanWeeks = await fetchPlanWeeks(_activePlan.id);
-    }
-    if (_activePlan && todayStr >= _activePlan.start_date && todayStr <= _activePlan.end_date) {
-      useAiPlan = true;
-      const monday = mondayOfWeek(now);
-      const sunday = addDays(monday, 6);
-      const planWorkouts = await fetchPlanWorkoutsByDate(_activePlan.id, isoDate(monday), isoDate(sunday));
-      todayPlan = planWorkouts.find(pw => pw.workout_date === todayStr);
-      tomorrowPlan = planWorkouts.find(pw => pw.workout_date === tomorrowStr);
-    }
-  }
-
-  if (!useAiPlan) {
-    const periods = await fetchPeriods();
-    const period = periods.find(p => todayStr >= p.start_date && todayStr <= p.end_date);
-    if (period) allPlans = await fetchPlans(period.id);
-    todayPlan = allPlans.find(p => p.day_of_week === dayOfWeek);
-    tomorrowPlan = allPlans.find(p => p.day_of_week === tomorrowDow);
-  }
-
-  const hasPlan = useAiPlan || allPlans.length > 0;
-
-  if (hasPlan) {
-    if (todayPlan && todayPlan.is_rest) {
-      todayEl.innerHTML = `<div class="today-rest">Vilodag</div>`;
-    } else if (todayPlan) {
-      const label = useAiPlan ? (todayPlan.label || todayPlan.activity_type) : stripDayPrefix(todayPlan.label);
-      const desc = todayPlan.description || '';
-      const zoneBadge = (useAiPlan && todayPlan.intensity_zone)
-        ? ` <span class="zone-badge zone-${todayPlan.intensity_zone.toLowerCase()}">${todayPlan.intensity_zone}</span>`
-        : '';
-      todayEl.innerHTML = `<div class="today-workout">${label}${zoneBadge}</div>
-        <div class="today-desc">${desc}</div>`;
-    } else {
-      todayEl.innerHTML = `<div class="today-rest">Ingen planerad träning</div>`;
-    }
-
-    if (tomorrowPlan && tomorrowPlan.is_rest) {
-      tomorrowEl.innerHTML = `<div class="tomorrow-rest">Vila</div>`;
-    } else if (tomorrowPlan) {
-      const label = useAiPlan ? (tomorrowPlan.label || tomorrowPlan.activity_type) : stripDayPrefix(tomorrowPlan.label);
-      tomorrowEl.innerHTML = `<div class="tomorrow-workout">${label}</div>
-        <div class="tomorrow-desc">${tomorrowPlan.description || ''}</div>`;
-    } else {
-      tomorrowEl.innerHTML = `<div class="tomorrow-rest">—</div>`;
-    }
-  } else {
-    todayEl.innerHTML = `<div class="today-rest">Utanför aktiv period</div>`;
-    tomorrowEl.innerHTML = '';
-  }
-
-  // Combined weekly plan + compliance card
-  const monday = mondayOfWeek(now);
   const sunday = addDays(monday, 6);
-  const weekWorkouts = await fetchWorkouts(currentProfile?.id, isoDate(monday), isoDate(sunday));
+  const startStr = isoDate(monday);
+  const endStr = isoDate(sunday);
+  const wk = weekNumber(monday);
 
-  // Get plan data for weekly schedule (AI plan or legacy)
-  let weekPlanItems = [];
-  if (useAiPlan) {
-    const pw = await fetchPlanWorkoutsByDate(_activePlan.id, isoDate(monday), isoDate(sunday));
-    weekPlanItems = pw.map(p => ({
-      day_of_week: p.day_of_week,
-      label: p.label || p.activity_type,
-      description: p.description,
-      is_rest: p.is_rest,
-    }));
-  } else {
-    weekPlanItems = allPlans.map(p => ({
-      day_of_week: p.day_of_week,
-      label: stripDayPrefix(p.label),
-      description: p.description,
-      is_rest: p.is_rest,
-    }));
+  _dashWeekWorkouts = await fetchWorkouts(currentProfile?.id, startStr, endStr);
+  _calStripWorkouts = _dashWeekWorkouts;
+  _calStripRange = { start: startStr, end: endStr };
+
+  const workoutDates = new Set(_dashWeekWorkouts.map(w => w.workout_date));
+
+  let planDates = new Set();
+  _dashPlanWorkouts = [];
+  if (_activePlan) {
+    try {
+      const pw = await fetchPlanWorkoutsByDate(_activePlan.id, startStr, endStr);
+      _dashPlanWorkouts = pw;
+      pw.forEach(p => { if (!p.is_rest) planDates.add(p.workout_date); });
+    } catch (e) { /* ignore */ }
   }
 
-  const schedEl = document.getElementById('dash-week-schedule');
-  let schedHTML = '<div class="dash-schedule">';
-  for (let i = 0; i < 7; i++) {
-    const plan = weekPlanItems.find(p => p.day_of_week === i);
-    const dayDate = addDays(monday, i);
-    const dayStr = isoDate(dayDate);
-    const isTodayRow = dayStr === todayStr;
-    const dayWorkouts = weekWorkouts.filter(w => w.workout_date === dayStr);
-    const isFuture = dayDate > now;
-    const mins = dayWorkouts.reduce((s, w) => s + w.duration_minutes, 0);
+  if (monthLabel) {
+    const midDate = addDays(monday, 3);
+    monthLabel.textContent = `V${wk} \u2014 ${midDate.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' })}`;
+  }
 
-    let statusClass = 'future';
-    if (dayWorkouts.length > 0) { statusClass = 'done'; }
-    else if (plan?.is_rest && !isFuture) { statusClass = 'rest'; }
-    else if (!isFuture && !plan?.is_rest) { statusClass = 'missed'; }
+  let html = '';
+  for (let d = 0; d < 7; d++) {
+    const cellDate = addDays(monday, d);
+    const cellStr = isoDate(cellDate);
+    const isToday = cellStr === todayStr;
+    const isSelected = cellStr === _dashSelectedDate;
+    const isPast = cellDate < now && !isToday;
+    const hasDone = workoutDates.has(cellStr);
+    const hasPlanned = planDates.has(cellStr);
 
-    if (plan?.is_rest) {
-      schedHTML += `<div class="dash-sched-row${isTodayRow ? ' is-today' : ''} sched-${statusClass}">
-        <span class="sched-day">${DAY_NAMES[i]}</span>
-        <span class="sched-label rest">Vila</span>
-        <span class="sched-status rest-ok">—</span>
-      </div>`;
-    } else {
-      const label = plan ? plan.label : '—';
-      const actMatch = plan?.description?.match(/\b(löpning|cykel|stakmaskin|längdskidor|gym|hyrox)\b/i);
-      const activity = actMatch ? actMatch[1] : (plan?.label?.match(/cykel/i) ? 'Cykel' : 'Löpning');
-      const zoneMatch = plan?.description?.match(/\b(Z[1-5]|VO2max|tröskel|tempo|fartlek)/i);
-      const passType = zoneMatch ? zoneMatch[1] : '';
-      const kmMatch = plan?.description?.match(/(\d+(?:[–\-]\d+)?)\s*km/);
-      const kmStr = kmMatch ? kmMatch[1] + ' km' : '';
-      const minMatch = plan?.description?.match(/(\d+(?:[–\-]\d+)?)\s*min/);
-      const durStr = minMatch ? minMatch[1] + "'" : '';
+    let dotClass = 'cal-dot-none';
+    if (hasDone) dotClass = 'cal-dot-done';
+    else if (isPast && hasPlanned) dotClass = 'cal-dot-missed';
+    else if (hasPlanned) dotClass = 'cal-dot-planned';
 
-      let statusHTML = '';
-      if (statusClass === 'done') statusHTML = `<span class="sched-status done">${mins}'</span>`;
-      else if (statusClass === 'missed') statusHTML = `<span class="sched-status missed">Missat</span>`;
+    const classes = ['cal-cell'];
+    if (isToday) classes.push('cal-today');
+    if (isSelected && !isToday) classes.push('cal-selected');
 
-      schedHTML += `<div class="dash-sched-row${isTodayRow ? ' is-today' : ''} sched-${statusClass}">
-        <span class="sched-day">${DAY_NAMES[i]}</span>
-        <span class="sched-label">${label}</span>
-        <span class="sched-meta">${kmStr}</span>
-        ${statusHTML}
-      </div>`;
+    html += `<div class="${classes.join(' ')}" onclick="dashCalSelectDay('${cellStr}')">
+      <div class="cal-cell-day">${CAL_DAY_LETTERS[d]}</div>
+      <div class="cal-cell-num">${cellDate.getDate()}</div>
+      <div class="cal-cell-dot ${dotClass}"></div>
+    </div>`;
+  }
+  track.innerHTML = html;
+}
+
+async function _renderDashDayCard(dateStr) {
+  const el = document.getElementById('dash-day-content');
+  if (!el) return;
+
+  const date = new Date(dateStr + 'T12:00:00');
+  const dayOfWeek = (date.getDay() + 6) % 7;
+  const now = new Date();
+  const todayStr = isoDate(now);
+  const isToday = dateStr === todayStr;
+  const dayLabel = isToday ? 'Idag' : date.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'short' });
+
+  const dayWorkouts = _dashWeekWorkouts.filter(w => w.workout_date === dateStr);
+  const planWorkout = _dashPlanWorkouts.find(pw => pw.workout_date === dateStr);
+
+  let useAiPlan = !!(_activePlan && dateStr >= _activePlan.start_date && dateStr <= _activePlan.end_date);
+  let legacyPlan = null;
+  if (!useAiPlan) {
+    try {
+      const periods = await fetchPeriods();
+      const period = periods.find(p => dateStr >= p.start_date && dateStr <= p.end_date);
+      if (period) {
+        const plans = await fetchPlans(period.id);
+        legacyPlan = plans.find(p => p.day_of_week === dayOfWeek);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  const plan = planWorkout || legacyPlan;
+  const isPast = date < now && !isToday;
+
+  let html = `<div class="ddc-header"><span class="ddc-day-label">${dayLabel}</span>`;
+
+  if (plan && !plan.is_rest) {
+    const phase = useAiPlan ? _getPhaseForDate(dateStr) : null;
+    if (phase) html += `<span class="ddc-phase">${PHASE_LABELS[phase] || phase}</span>`;
+  }
+  html += '</div>';
+
+  if (plan && plan.is_rest) {
+    html += `<div class="ddc-rest">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <span>Vilodag</span>
+    </div>`;
+  } else if (plan) {
+    const label = useAiPlan ? (plan.label || plan.activity_type) : stripDayPrefix(plan.label);
+    const desc = plan.description || '';
+    const zone = (useAiPlan && plan.intensity_zone) ? plan.intensity_zone : null;
+    const actType = plan.activity_type || '';
+
+    html += '<div class="ddc-plan">';
+    html += `<div class="ddc-plan-title">`;
+    if (actType) html += `<span class="ddc-activity-icon">${activityEmoji(actType)}</span>`;
+    html += `<span>${label}</span>`;
+    if (zone) html += `<span class="zone-badge zone-${zone.toLowerCase()}">${zone}</span>`;
+    html += '</div>';
+
+    const kmMatch = desc.match(/(\d+(?:[–\-]\d+)?)\s*km/);
+    const minMatch = desc.match(/(\d+(?:[–\-]\d+)?)\s*min/);
+    if (kmMatch || minMatch) {
+      html += '<div class="ddc-plan-meta">';
+      if (kmMatch) html += `<span class="ddc-meta-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"/></svg>${kmMatch[1]} km</span>`;
+      if (minMatch) html += `<span class="ddc-meta-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${minMatch[1]} min</span>`;
+      html += '</div>';
     }
+    if (desc) html += `<div class="ddc-plan-desc">${desc}</div>`;
+    html += '</div>';
+  } else {
+    html += `<div class="ddc-rest"><span>Ingen planerad träning</span></div>`;
   }
-  schedHTML += '</div>';
-  schedEl.innerHTML = schedHTML;
 
-  const phaseText = useAiPlan
-    ? (() => {
-        const cw = _activePlanWeeks.find(w => {
-          const ws = new Date(_activePlan.start_date);
-          ws.setDate(ws.getDate() + (w.week_number - 1) * 7);
-          const we = addDays(ws, 6);
-          return todayStr >= isoDate(ws) && todayStr <= isoDate(we);
-        });
-        return cw ? PHASE_LABELS[cw.phase] || '' : '';
-      })()
-    : (isDeloadWeek(monday) ? 'Deload-vecka' : '');
-  document.getElementById('compliance-target').textContent = phaseText;
+  if (dayWorkouts.length > 0) {
+    html += '<div class="ddc-done-section">';
+    html += `<div class="ddc-done-label">${dayWorkouts.length > 1 ? dayWorkouts.length + ' genomförda pass' : 'Genomfört'}</div>`;
+    dayWorkouts.forEach(w => {
+      html += `<div class="ddc-done-item clickable" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
+        ${buildWorkoutBody(w)}
+      </div>`;
+    });
+    html += '</div>';
+  } else if (isPast && plan && !plan.is_rest) {
+    html += `<div class="ddc-missed">Missat</div>`;
+  }
 
-  await renderCalendarStrip(currentProfile, monday);
+  el.innerHTML = html;
+}
+
+function _getPhaseForDate(dateStr) {
+  if (!_activePlan || !_activePlanWeeks) return null;
+  for (const w of _activePlanWeeks) {
+    const ws = new Date(_activePlan.start_date);
+    ws.setDate(ws.getDate() + (w.week_number - 1) * 7);
+    const we = addDays(ws, 6);
+    if (dateStr >= isoDate(ws) && dateStr <= isoDate(we)) return w.phase;
+  }
+  return null;
+}
+
+function dashCalPrev() {
+  _dashWeekOffset--;
+  const now = new Date();
+  const monday = addDays(mondayOfWeek(now), _dashWeekOffset * 7);
+  _dashSelectedDate = isoDate(monday);
+  loadDashboard();
+}
+function dashCalNext() {
+  _dashWeekOffset++;
+  const now = new Date();
+  const monday = addDays(mondayOfWeek(now), _dashWeekOffset * 7);
+  _dashSelectedDate = isoDate(monday);
+  loadDashboard();
+}
+function dashCalSelectDay(dateStr) {
+  _dashSelectedDate = dateStr;
+  _renderDashDayCard(dateStr);
+  const cells = document.querySelectorAll('#cal-strip-track .cal-cell');
+  cells.forEach(c => {
+    c.classList.remove('cal-selected');
+    const num = c.querySelector('.cal-cell-num');
+    if (!num) return;
+    const day = parseInt(num.textContent);
+    const selDay = new Date(dateStr + 'T12:00:00').getDate();
+    if (day === selDay && !c.classList.contains('cal-today')) c.classList.add('cal-selected');
+  });
 }
 
 let _recentWorkouts = [];
@@ -1272,66 +1323,6 @@ async function _loadSchema() {
 // ── Calendar Strip ──
 const CAL_DAY_LETTERS = ['M', 'T', 'O', 'T', 'F', 'L', 'S'];
 
-async function renderCalendarStrip(profile, selectedMonday) {
-  const track = document.getElementById('cal-strip-track');
-  const monthLabel = document.getElementById('cal-strip-month');
-  if (!track) return;
-
-  const now = new Date();
-  const todayStr = isoDate(now);
-  const selectedSunday = addDays(selectedMonday, 6);
-  const startStr = isoDate(selectedMonday);
-  const endStr = isoDate(selectedSunday);
-  const wk = weekNumber(selectedMonday);
-
-  if (!_calStripWorkouts || !_calStripRange ||
-      _calStripRange.start !== startStr || _calStripRange.end !== endStr) {
-    _calStripWorkouts = await fetchWorkouts(profile?.id, startStr, endStr);
-    _calStripRange = { start: startStr, end: endStr };
-  }
-
-  const workoutDates = new Set(_calStripWorkouts.map(w => w.workout_date));
-
-  let planDates = new Set();
-  if (_activePlan) {
-    try {
-      const pw = await fetchPlanWorkoutsByDate(_activePlan.id, startStr, endStr);
-      pw.forEach(p => { if (!p.is_rest) planDates.add(p.workout_date); });
-    } catch (e) { /* ignore */ }
-  }
-
-  if (monthLabel) {
-    const midDate = addDays(selectedMonday, 3);
-    monthLabel.textContent = `V${wk} \u2014 ${midDate.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' })}`;
-  }
-
-  let html = '';
-  for (let d = 0; d < 7; d++) {
-    const cellDate = addDays(selectedMonday, d);
-    const cellStr = isoDate(cellDate);
-    const isToday = cellStr === todayStr;
-    const isPast = cellDate < now && !isToday;
-    const hasDone = workoutDates.has(cellStr);
-    const hasPlanned = planDates.has(cellStr);
-
-    let dotClass = 'cal-dot-none';
-    if (hasDone) dotClass = 'cal-dot-done';
-    else if (isPast && hasPlanned) dotClass = 'cal-dot-missed';
-    else if (hasPlanned) dotClass = 'cal-dot-planned';
-
-    const classes = ['cal-cell'];
-    if (isToday) classes.push('cal-today');
-
-    html += `<div class="${classes.join(' ')}">
-      <div class="cal-cell-day">${CAL_DAY_LETTERS[d]}</div>
-      <div class="cal-cell-num">${cellDate.getDate()}</div>
-      <div class="cal-cell-dot ${dotClass}"></div>
-    </div>`;
-  }
-
-  track.innerHTML = html;
-}
-
 function schemaWeekPrev() {
   const now = new Date();
   const currentMonday = mondayOfWeek(now);
@@ -1408,20 +1399,35 @@ function stripProgressionText(desc) {
     .trim();
 }
 
-function buildWorkoutStatsRow(w) {
-  const parts = [];
-  if (w.duration_minutes) parts.push(`<span class="sr-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="11" height="11"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span class="sr-stat-val">${w.duration_minutes}'</span></span>`);
-  if (w.distance_km) parts.push(`<span class="sr-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="11" height="11"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/></svg><span class="sr-stat-val">${w.distance_km} km</span></span>`);
-  if (w.avg_hr) parts.push(`<span class="sr-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="11" height="11"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg><span class="sr-stat-val">${w.avg_hr} bpm</span></span>`);
-  if (w.elevation_gain_m) parts.push(`<span class="sr-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="11" height="11"><path d="M22 21L14.5 6 9 16 2 8"/></svg><span class="sr-stat-val">${Math.round(w.elevation_gain_m)} m</span></span>`);
+function buildWorkoutBody(w, opts = {}) {
+  const { showMap = false } = opts;
+  let html = '';
+
+  html += `<div class="wo-label">${w.activity_type}`;
+  if (w.intensity) html += ` <span class="intensity-badge">${w.intensity}</span>`;
+  html += '</div>';
+
+  const primary = [];
+  if (w.duration_minutes) primary.push(`${w.duration_minutes} min`);
+  if (w.distance_km) primary.push(`${w.distance_km} km`);
+  if (primary.length) html += `<div class="wo-meta">${primary.join(' · ')}</div>`;
+
+  const secondary = [];
+  if (w.avg_hr) secondary.push(`\u2665 ${w.avg_hr} bpm`);
+  if (w.elevation_gain_m) secondary.push(`\u25B2 ${Math.round(w.elevation_gain_m)} m`);
   if (w.avg_speed_kmh && w.activity_type === 'Löpning') {
     const pace = 60 / w.avg_speed_kmh;
     const pMin = Math.floor(pace);
     const pSec = String(Math.round((pace - pMin) * 60)).padStart(2, '0');
-    parts.push(`<span class="sr-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="11" height="11"><polygon points="5 3 19 12 5 21 5 3"/></svg><span class="sr-stat-val">${pMin}:${pSec}/km</span></span>`);
+    secondary.push(`${pMin}:${pSec}/km`);
   }
-  if (w.calories) parts.push(`<span class="sr-stat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="11" height="11"><path d="M12 22c-4.97 0-9-2.69-9-6s4.03-6 9-11c4.97 5 9 2.69 9 11s-4.03 6-9 6z"/></svg><span class="sr-stat-val">${w.calories} kcal</span></span>`);
-  return parts.length ? `<div class="sr-stats-row">${parts.join('')}</div>` : '';
+  if (secondary.length) html += `<div class="wo-secondary">${secondary.join('  ')}</div>`;
+
+  if (showMap && w.map_polyline) {
+    html += `<div class="wo-map" id="wo-map-${w.id}" data-polyline="${w.map_polyline}"></div>`;
+  }
+
+  return html;
 }
 
 function activityIcon(type) {
@@ -1487,12 +1493,8 @@ function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchem
     let mainContent = '';
     if (dayWorkouts.length > 0) {
       mainContent = dayWorkouts.map(w => {
-        const intB = w.intensity ? ` <span class="intensity-badge">${w.intensity}</span>` : '';
-        const distB = w.distance_km ? ` <span class="sr-km-badge">${w.distance_km} km</span>` : '';
-        const stats = buildWorkoutStatsRow(w);
         return `<div class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
-          <div class="sr-plan-label">${activityIcon(w.activity_type)} ${w.activity_type}${distB}${intB}</div>
-          ${stats}
+          ${buildWorkoutBody(w)}
         </div>`;
       }).join('');
     } else {
@@ -1581,12 +1583,8 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
     let mainContent = '';
     if (dayWorkouts.length > 0) {
       mainContent = dayWorkouts.map(w => {
-        const intB = w.intensity ? ` <span class="intensity-badge">${w.intensity}</span>` : '';
-        const distB = w.distance_km ? ` <span class="sr-km-badge">${w.distance_km} km</span>` : '';
-        const stats = buildWorkoutStatsRow(w);
         return `<div class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
-          <div class="sr-plan-label">${activityIcon(w.activity_type)} ${w.activity_type}${distB}${intB}</div>
-          ${stats}
+          ${buildWorkoutBody(w)}
         </div>`;
       }).join('');
     } else {
@@ -3595,37 +3593,18 @@ function renderGenerateButton() {
   const container = document.getElementById('schema-generate-btn-container');
   if (!container) return;
   if (!PLAN_GENERATION_ENABLED) { container.innerHTML = ''; return; }
-
   if (!currentProfile) { container.innerHTML = ''; return; }
 
-  if (_activePlan) {
-    const planName = _activePlan.name || _activePlan.goal_text || 'Träningsplan';
-    const genModel = _activePlan.generation_model ? `<span style="font-size:0.65rem;color:var(--text-dim);margin-left:6px;">AI</span>` : '';
-    container.innerHTML = `
-      <div style="display:flex;gap:8px;margin-bottom:16px;">
-        <button class="schema-generate-btn" onclick="openPlanManager()" style="flex:1;border-style:solid;border-color:var(--border);background:var(--bg-card);margin-bottom:0;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-          ${planName}${genModel}
-        </button>
-        <button class="schema-generate-btn" onclick="openPlanEditModal()" style="flex:0 0 auto;border-style:solid;border-color:var(--border);background:var(--bg-card);margin-bottom:0;padding:14px 16px;" title="Redigera med AI">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-        </button>
-        <button class="schema-generate-btn" onclick="openPlanWizard()" style="flex:0 0 auto;border-style:solid;border-color:var(--border);background:var(--bg-card);margin-bottom:0;padding:14px 16px;" title="Nytt schema">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </button>
-      </div>`;
-  } else {
-    container.innerHTML = `
-      <div style="display:flex;gap:8px;margin-bottom:16px;">
-        <button class="schema-generate-btn" onclick="openPlanWizard()" style="flex:1;margin-bottom:0;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-          Skapa AI-träningsschema
-        </button>
-        <button class="schema-generate-btn" onclick="openPlanManager()" style="flex:0 0 auto;border-style:solid;border-color:var(--border);background:var(--bg-card);margin-bottom:0;padding:14px 16px;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-        </button>
-      </div>`;
-  }
+  const label = _activePlan
+    ? (_activePlan.name || _activePlan.goal_text || 'Träningsplan')
+    : 'Hantera schema';
+  const aiBadge = _activePlan?.generation_model ? '<span class="schema-pill-ai">AI</span>' : '';
+
+  container.innerHTML = `
+    <button class="schema-plan-pill" onclick="openPlanManager()">
+      <span class="schema-pill-label">${label}${aiBadge}</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>`;
 }
 
 // ═══════════════════════
@@ -3906,17 +3885,30 @@ async function fetchAllPlansForProfile(profileId) {
 async function openPlanManager() {
   const plans = await fetchAllPlansForProfile(currentProfile?.id);
   const listEl = document.getElementById('plan-manager-list');
+  const topEl = document.getElementById('pm-top-actions');
+
+  let topHtml = `<button class="pm-action-primary" onclick="closePlanManager();openPlanWizard();">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+    Skapa nytt AI-schema
+  </button>`;
+  if (_activePlan) {
+    topHtml += `<button class="pm-action-secondary" onclick="closePlanManager();openPlanEditModal();">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      Redigera aktivt schema med AI
+    </button>`;
+  }
+  topEl.innerHTML = topHtml;
 
   if (plans.length === 0) {
-    listEl.innerHTML = '<div class="sf-empty">Inga sparade scheman. Skapa ett nytt.</div>';
+    listEl.innerHTML = '<div class="sf-empty" style="padding:16px 0;">Inga sparade scheman.</div>';
   } else {
-    listEl.innerHTML = plans.map(p => {
+    listEl.innerHTML = '<div class="pm-section-label">Sparade scheman</div>' + plans.map(p => {
       const isActive = p.status === 'active';
       const name = p.name || p.goal_text || 'Träningsplan';
       const dateRange = `${p.start_date} — ${p.end_date}`;
-      const goalIcon = GOAL_TYPES.find(g => g.id === p.goal_type)?.icon || '📋';
+      const goalIcon = GOAL_TYPES.find(g => g.id === p.goal_type)?.icon || '';
       return `<div class="plan-manager-item${isActive ? ' active' : ''}" onclick="${isActive ? '' : `activatePlan('${p.id}')`}">
-        <span style="font-size:1.2rem;">${goalIcon}</span>
+        ${goalIcon ? `<span style="font-size:1.1rem;">${goalIcon}</span>` : ''}
         <div class="pm-info">
           <div class="pm-name">${name}</div>
           <div class="pm-meta">${dateRange}</div>
@@ -4358,7 +4350,7 @@ function buildSocialStatsRow(w) {
 
 function initSocialFeedMaps() {
   if (typeof L === 'undefined') return;
-  document.querySelectorAll('.sf-map[data-polyline]').forEach(el => {
+  document.querySelectorAll('.wo-map[data-polyline]').forEach(el => {
     if (el.dataset.init) return;
     el.dataset.init = '1';
     try {
@@ -4435,8 +4427,7 @@ async function renderSocialFeed(append) {
       </div>`;
     }).join('');
 
-    const statsHtml = buildSocialStatsRow(w);
-    const mapHtml = w.map_polyline ? `<div class="sf-map" id="sf-map-${w.id}" data-polyline="${w.map_polyline}"></div>` : '';
+    const mapHtml = w.map_polyline ? `<div class="wo-map wo-map-side" id="sf-map-${w.id}" data-polyline="${w.map_polyline}"></div>` : '';
 
     return `<div class="social-feed-item" data-workout-id="${w.id}">
       <div class="sf-header">
@@ -4444,11 +4435,11 @@ async function renderSocialFeed(append) {
         <span class="sf-name">${name}</span>
         <span class="sf-date">${wDate}</span>
       </div>
-      <div class="sf-body sf-body-clickable" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
-        <div class="sf-workout-label">${w.activity_type}${intBadge}</div>
-        <div class="sf-workout-meta">${w.duration_minutes} min${distText}</div>
-        ${statsHtml}
-        ${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? `<div class="sf-workout-notes">${w.notes}</div>` : ''}
+      <div class="sf-body sf-body-clickable${w.map_polyline ? ' sf-body-with-map' : ''}" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
+        <div class="sf-body-text">
+          ${buildWorkoutBody(w)}
+          ${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? `<div class="wo-notes">${w.notes}</div>` : ''}
+        </div>
         ${mapHtml}
       </div>
       <div class="sf-actions">

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NVDP</title>
-  <link rel="stylesheet" href="css/style.css?v=35">
+  <link rel="stylesheet" href="css/style.css?v=40">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -246,33 +246,21 @@
         <p id="dash-date"></p>
       </div>
 
-      <!-- Calendar strip -->
+      <!-- Calendar strip with navigation -->
       <div class="cal-strip-wrapper">
         <div class="cal-strip-header">
+          <button class="cal-strip-arrow" onclick="dashCalPrev()">‹</button>
           <span class="cal-strip-month" id="cal-strip-month"></span>
+          <button class="cal-strip-arrow" onclick="dashCalNext()">›</button>
         </div>
         <div class="cal-strip-scroll-area">
           <div class="cal-strip-track" id="cal-strip-track"></div>
         </div>
       </div>
 
-      <div class="dash-today-row">
-        <div class="card today-card dash-today-main">
-          <div class="card-header"><span class="card-title">Dagens pass</span></div>
-          <div id="today-content"></div>
-        </div>
-        <div class="card dash-tomorrow-card">
-          <div class="card-header"><span class="card-title">Imorgon</span></div>
-          <div id="tomorrow-content"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <span class="card-title">Veckans plan</span>
-          <span id="compliance-target" class="text-sm" style="font-weight:600; color:var(--text-dim);"></span>
-        </div>
-        <div id="dash-week-schedule"></div>
+      <!-- Selected day detail card -->
+      <div class="card dash-day-card" id="dash-day-card">
+        <div id="dash-day-content"></div>
       </div>
 
     </section>
@@ -853,13 +841,11 @@
 <div id="plan-manager" class="modal-overlay hidden" onclick="if(event.target===this)closePlanManager()">
   <div class="modal-box" style="max-width:440px;">
     <div class="modal-header">
-      <h3>Mina scheman</h3>
+      <h3>Hantera schema</h3>
       <button class="btn-close" onclick="closePlanManager()">&times;</button>
     </div>
+    <div class="pm-top-actions" id="pm-top-actions"></div>
     <div id="plan-manager-list"></div>
-    <div class="modal-actions" style="margin-top:16px;">
-      <button class="btn btn-primary btn-sm" onclick="closePlanManager();openPlanWizard();">+ Skapa nytt schema</button>
-    </div>
   </div>
 </div>
 
@@ -875,7 +861,7 @@
 </div>
 
 <script src="js/config.js?v=25"></script>
-<script src="js/app.js?v=35"></script>
+<script src="js/app.js?v=40"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {
