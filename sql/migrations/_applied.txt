@@ -2,3 +2,5 @@
 # Do not edit manually
 20260329_test_migration.sql
 20260330_fix_rls_security.sql
+20260404_add_email_prefs.sql
+20260404_ensure_invitations.sql
