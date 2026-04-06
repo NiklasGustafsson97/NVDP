@@ -148,13 +148,9 @@ document.getElementById('auth-form').addEventListener('submit', async (e) => {
         return;
       }
       btn.textContent = 'Laddar...';
-      // If onAuthStateChange doesn't fire within 3s, manually init
-      setTimeout(async () => {
-        if (!_initDone && signInData?.session) {
-          console.warn('Auth state change did not fire, manually initializing');
-          await initApp(signInData.session.user, signInData.session.access_token);
-        }
-      }, 3000);
+      if (signInData?.session) {
+        await initApp(signInData.session.user, signInData.session.access_token);
+      }
     } catch (ex) {
       btn.disabled = false;
       btn.textContent = 'Logga in';
@@ -409,12 +405,14 @@ function navigate(view) {
   currentView = view;
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  const viewEl = document.getElementById('view-' + view);
+
+  const viewId = view === 'progress' ? 'trends' : view;
+  const viewEl = document.getElementById('view-' + viewId);
   if (viewEl) viewEl.classList.add('active');
   const navEl = document.querySelector(`.nav-item[data-view="${view}"]`);
   if (navEl) navEl.classList.add('active');
 
-  if (view === 'dashboard' || view === 'schema' || view === 'trends') {
+  if (view === 'dashboard' || view === 'progress') {
     _activePlan = null;
     _activePlanWeeks = [];
     _activePlanWorkouts = [];
@@ -425,8 +423,7 @@ function navigate(view) {
     loadDashboard();
   }
   else if (view === 'log') resetLogForm();
-  else if (view === 'schema') loadSchema();
-  else if (view === 'trends') loadTrends();
+  else if (view === 'progress') loadTrends();
   else if (view === 'group') loadGroup();
   else if (view === 'social') loadSocial();
 }
@@ -648,22 +645,29 @@ async function _loadDashboard() {
     if (_activePlan) _activePlanWeeks = await fetchPlanWeeks(_activePlan.id);
   }
 
-  const monday = addDays(mondayOfWeek(now), _dashWeekOffset * 7);
-  await _renderDashCalendar(monday);
+  const centerDate = addDays(now, _dashWeekOffset * 7);
+  const stripStart = addDays(centerDate, -3);
+  await _renderDashCalendar(stripStart);
   await _renderDashDayCard(_dashSelectedDate);
+
+  await _loadSchema();
 }
 
-async function _renderDashCalendar(monday) {
+const _DASH_DAY_LETTER = ['S', 'M', 'T', 'O', 'T', 'F', 'L'];
+
+async function _renderDashCalendar(stripStart) {
   const track = document.getElementById('cal-strip-track');
   const monthLabel = document.getElementById('cal-strip-month');
   if (!track) return;
 
   const now = new Date();
   const todayStr = isoDate(now);
-  const sunday = addDays(monday, 6);
-  const startStr = isoDate(monday);
-  const endStr = isoDate(sunday);
-  const wk = weekNumber(monday);
+  const stripEnd = addDays(stripStart, 6);
+  const startStr = isoDate(stripStart);
+  const endStr = isoDate(stripEnd);
+
+  const centerDate = addDays(stripStart, 3);
+  const wk = weekNumber(centerDate);
 
   _dashWeekWorkouts = await fetchWorkouts(currentProfile?.id, startStr, endStr);
   _calStripWorkouts = _dashWeekWorkouts;
@@ -682,13 +686,12 @@ async function _renderDashCalendar(monday) {
   }
 
   if (monthLabel) {
-    const midDate = addDays(monday, 3);
-    monthLabel.textContent = `V${wk} \u2014 ${midDate.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' })}`;
+    monthLabel.textContent = `V${wk} \u2014 ${centerDate.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' })}`;
   }
 
   let html = '';
   for (let d = 0; d < 7; d++) {
-    const cellDate = addDays(monday, d);
+    const cellDate = addDays(stripStart, d);
     const cellStr = isoDate(cellDate);
     const isToday = cellStr === todayStr;
     const isSelected = cellStr === _dashSelectedDate;
@@ -705,8 +708,9 @@ async function _renderDashCalendar(monday) {
     if (isToday) classes.push('cal-today');
     if (isSelected && !isToday) classes.push('cal-selected');
 
+    const dayLetter = _DASH_DAY_LETTER[cellDate.getDay()];
     html += `<div class="${classes.join(' ')}" onclick="dashCalSelectDay('${cellStr}')">
-      <div class="cal-cell-day">${CAL_DAY_LETTERS[d]}</div>
+      <div class="cal-cell-day">${dayLetter}</div>
       <div class="cal-cell-num">${cellDate.getDate()}</div>
       <div class="cal-cell-dot ${dotClass}"></div>
     </div>`;
@@ -814,15 +818,15 @@ function _getPhaseForDate(dateStr) {
 function dashCalPrev() {
   _dashWeekOffset--;
   const now = new Date();
-  const monday = addDays(mondayOfWeek(now), _dashWeekOffset * 7);
-  _dashSelectedDate = isoDate(monday);
+  const center = addDays(now, _dashWeekOffset * 7);
+  _dashSelectedDate = isoDate(addDays(center, -3));
   loadDashboard();
 }
 function dashCalNext() {
   _dashWeekOffset++;
   const now = new Date();
-  const monday = addDays(mondayOfWeek(now), _dashWeekOffset * 7);
-  _dashSelectedDate = isoDate(monday);
+  const center = addDays(now, _dashWeekOffset * 7);
+  _dashSelectedDate = isoDate(addDays(center, -3));
   loadDashboard();
 }
 function dashCalSelectDay(dateStr) {
@@ -1247,9 +1251,7 @@ function resetLogForm() {
 //  SCHEMA
 // ═══════════════════════
 async function loadSchema() {
-  showViewLoading('view-schema');
   try { await _loadSchema(); } catch (e) { console.error('Schema error:', e); }
-  hideViewLoading('view-schema');
 }
 let _calStripWorkouts = null;
 let _calStripRange = null;
@@ -1836,7 +1838,7 @@ async function respondToInvitation(invitationId, accept) {
 
     await loadNudges();
     updateNudgeBadge();
-    if (currentView === 'schema') loadSchema();
+    if (currentView === 'dashboard') loadSchema();
   } catch (e) {
     console.error('Invitation response error:', e);
     await showAlertModal('Fel', 'Kunde inte svara på inbjudan.');
@@ -2118,34 +2120,151 @@ async function _loadTrends() {
   }
 }
 
-// ── Effort normalization ──
-// Based on training stress science: combines activity load factor and intensity multiplier.
-// Running carries higher musculoskeletal load than cycling per unit time.
-// Higher intensity zones generate disproportionately more physiological stress (exponential relationship).
-const EFFORT_ACTIVITY_FACTOR = {
-  'Löpning': 1.0,
-  'Hyrox': 1.05,
-  'Längdskidor': 0.90,
-  'Annat': 0.75,
-  'Stakmaskin': 0.70,
-  'Cykel': 0.65,
-  'Gym': 0.60,
-  'Vila': 0,
-};
-const EFFORT_INTENSITY_MULT = {
-  'Z1': 0.65,
-  'Z2': 1.00,
-  'mixed': 1.25,
-  'Z3': 1.30,
-  'Kvalitet': 1.50,
-  'Z4': 1.60,
-  'Z5': 1.85,
+// ── MET-based effort scoring (Ainsworth Compendium 2011) ──
+// WorkoutScore = Duration_min × MET(sport, speed) × ElevationFactor × IntensityMultiplier
+
+const SPORT_TYPE_MAP = {
+  'Löpning': 'Run',
+  'Hyrox':   'Run',
+  'Cykel':   'Ride',
+  'Gym':     'WeightTraining',
+  'Längdskidor': 'Other',
+  'Stakmaskin':  'Rowing',
+  'Annat':   'Other',
+  'Vila':    'Other',
+  'Simning': 'Swim',
+  'Vandring':'Hike',
+  'Promenad':'Walk',
 };
 
+const DEFAULT_MET = 5.0;
+
+// maxSpeedMps is exclusive upper bound; met is the value for that bracket
+const MET_TABLE = {
+  Run: [
+    { maxSpeedMps: 2.222, met: 8.3 },
+    { maxSpeedMps: 2.694, met: 9.3 },
+    { maxSpeedMps: 3.000, met: 10.5 },
+    { maxSpeedMps: 3.361, met: 12.0 },
+    { maxSpeedMps: 3.833, met: 13.5 },
+    { maxSpeedMps: 4.028, met: 14.0 },
+    { maxSpeedMps: 4.472, met: 14.8 },
+    { maxSpeedMps: 4.861, met: 16.0 },
+    { maxSpeedMps: Infinity, met: 16.8 },
+  ],
+  Ride: [
+    { maxSpeedMps: 4.444, met: 4.0 },
+    { maxSpeedMps: 5.278, met: 6.8 },
+    { maxSpeedMps: 6.111, met: 8.0 },
+    { maxSpeedMps: 7.222, met: 10.0 },
+    { maxSpeedMps: 8.333, met: 12.0 },
+    { maxSpeedMps: Infinity, met: 16.0 },
+  ],
+  Swim: [
+    { maxSpeedMps: 0.7, met: 6.0 },
+    { maxSpeedMps: 1.0, met: 10.3 },
+    { maxSpeedMps: Infinity, met: 13.0 },
+  ],
+  Rowing: [
+    { maxSpeedMps: 2.0, met: 5.0 },
+    { maxSpeedMps: 3.0, met: 7.0 },
+    { maxSpeedMps: Infinity, met: 12.0 },
+  ],
+  WeightTraining: [
+    { rpeMax: 3, met: 3.5 },
+    { rpeMax: 6, met: 5.0 },
+    { rpeMax: 10, met: 8.0 },
+  ],
+  HIIT: [
+    { rpeMax: 3, met: 6.0 },
+    { rpeMax: 6, met: 8.0 },
+    { rpeMax: 10, met: 10.0 },
+  ],
+  Walk: [
+    { maxSpeedMps: 1.250, met: 2.5 },
+    { maxSpeedMps: 1.667, met: 3.5 },
+    { maxSpeedMps: Infinity, met: 4.3 },
+  ],
+  Hike: [
+    { maxSpeedMps: 1.250, met: 5.3 },
+    { maxSpeedMps: 1.667, met: 6.0 },
+    { maxSpeedMps: Infinity, met: 7.3 },
+  ],
+  Other: [
+    { maxSpeedMps: Infinity, met: DEFAULT_MET },
+  ],
+};
+
+// Map intensity strings to RPE values for tier selection & fallback
+const INTENSITY_TO_RPE = {
+  'Z1': 1, 'Z2': 3, 'mixed': 5, 'Z3': 5,
+  'Kvalitet': 7, 'Z4': 8, 'Z5': 10,
+};
+
+function _lookupMET(sport, speedMps, rpe) {
+  const brackets = MET_TABLE[sport];
+  if (!brackets) return DEFAULT_MET;
+
+  // RPE-based tier selection (strength, HIIT, or when no speed)
+  if (brackets[0].rpeMax !== undefined) {
+    const r = rpe ?? 5;
+    for (const b of brackets) { if (r <= b.rpeMax) return b.met; }
+    return brackets[brackets.length - 1].met;
+  }
+
+  if (speedMps == null || speedMps <= 0) {
+    // No speed — use RPE to pick easy/moderate/hard
+    if (rpe != null) {
+      if (rpe <= 3) return brackets[0].met;
+      if (rpe <= 6) return brackets[Math.min(1, brackets.length - 1)].met;
+      return brackets[brackets.length - 1].met;
+    }
+    return brackets[Math.min(1, brackets.length - 1)].met;
+  }
+
+  // Interpolated speed-based lookup
+  for (let i = 0; i < brackets.length; i++) {
+    if (speedMps < brackets[i].maxSpeedMps) {
+      if (i === 0) return brackets[0].met;
+      const lo = brackets[i - 1].maxSpeedMps === Infinity ? 0 : brackets[i - 1].maxSpeedMps;
+      const hi = brackets[i].maxSpeedMps === Infinity ? lo * 2 : brackets[i].maxSpeedMps;
+      const frac = (speedMps - lo) / (hi - lo);
+      return brackets[i - 1].met + frac * (brackets[i].met - brackets[i - 1].met);
+    }
+  }
+  return brackets[brackets.length - 1].met;
+}
+
+function _elevationFactor(elevGainM, distKm) {
+  if (!elevGainM || elevGainM <= 0 || !distKm || distKm <= 0) return 1.0;
+  const gradient = elevGainM / (distKm * 1000);
+  return Math.min(2.0, 1.0 + gradient * 10);
+}
+
+function _intensityMultiplier(w) {
+  // Level 2: average HR (requires both avg_hr and max_hr)
+  if (w.avg_hr && w.avg_hr >= 30 && w.max_hr && w.max_hr >= 100) {
+    const pctMax = w.avg_hr / w.max_hr;
+    return Math.max(0.7, Math.min(1.5, 0.7 + (pctMax - 0.5) * 1.6));
+  }
+  // Level 3: intensity string → RPE
+  if (w.intensity && INTENSITY_TO_RPE[w.intensity] != null) {
+    const rpe = INTENSITY_TO_RPE[w.intensity];
+    return Math.max(0.7, Math.min(1.5, 0.7 + (rpe - 1) * (0.8 / 9)));
+  }
+  // Level 4: no intensity data
+  return 1.0;
+}
+
 function calcWorkoutEffort(w) {
-  const actFactor = EFFORT_ACTIVITY_FACTOR[w.activity_type] ?? 0.75;
-  const intMult = w.intensity ? (EFFORT_INTENSITY_MULT[w.intensity] ?? 1.0) : 0.85;
-  return (w.duration_minutes / 60) * actFactor * intMult;
+  if (w.activity_type === 'Vila') return 0;
+  const sport = SPORT_TYPE_MAP[w.activity_type] || 'Other';
+  const speedMps = w.avg_speed_kmh ? w.avg_speed_kmh / 3.6 : null;
+  const rpe = w.intensity ? (INTENSITY_TO_RPE[w.intensity] ?? null) : null;
+  const met = _lookupMET(sport, speedMps, rpe);
+  const elev = _elevationFactor(w.elevation_gain_m, w.distance_km);
+  const im = _intensityMultiplier(w);
+  return w.duration_minutes * met * elev * im;
 }
 
 let _seasonBarMode = 'hours';
@@ -2294,7 +2413,7 @@ function renderEffortChart(workouts) {
   const legendEl = document.getElementById('effort-legend');
   if (legendEl) {
     legendEl.innerHTML = `
-      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> Effort = timmar × aktivitet (löpn 1.0, cykel 0.65, gym 0.60) × intensitet (Z2 1.0, Z4 1.6, Z5 1.85)</div>
+      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> Effort = min × MET(sport, fart) × höjdfaktor × intensitet (puls/zon)</div>
     `;
   }
 }
@@ -2426,6 +2545,7 @@ async function _loadGroup() {
 
   // Group weekly chart
   renderGroupChart(allWorkouts, members);
+  renderGroupEffortChart(allWorkouts, members);
 
   // Season totals bars
   const maxTotal = Math.max(...members.map(m => allWorkouts.filter(w => w.profile_id === m.id).reduce((s, w) => s + w.duration_minutes, 0) / 60), 1);
@@ -2510,6 +2630,58 @@ function renderGroupChart(allWorkouts, members) {
       }
     }
   });
+}
+
+function renderGroupEffortChart(allWorkouts, members) {
+  const canvas = document.getElementById('chart-group-effort');
+  if (!canvas) return;
+  if (window._chartGroupEffort) window._chartGroupEffort.destroy();
+
+  const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
+  const weekMap = {};
+  allWorkouts.forEach(w => {
+    const mon = mondayOfWeek(new Date(w.workout_date));
+    const key = isoDate(mon);
+    if (!weekMap[key]) weekMap[key] = {};
+    if (!weekMap[key][w.profile_id]) weekMap[key][w.profile_id] = { effort: 0, hours: 0 };
+    weekMap[key][w.profile_id].effort += calcWorkoutEffort(w);
+    weekMap[key][w.profile_id].hours += w.duration_minutes / 60;
+  });
+
+  const weeks = Object.keys(weekMap).sort();
+  const labels = weeks.map(w => `V${weekNumber(new Date(w))}`);
+  const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
+
+  const datasets = members.map((m, i) => ({
+    label: m.name.split(' ')[0],
+    data: weeks.map(w => +(weekMap[w]?.[m.id]?.effort || 0).toFixed(0)),
+    backgroundColor: colors[i % colors.length] + '88',
+    borderColor: colors[i % colors.length],
+    borderWidth: 1,
+    borderRadius: 3,
+  }));
+
+  window._chartGroupEffort = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { intersect: false, mode: 'index' },
+      plugins: {
+        legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, padding: 16 } },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(0)} effort` } }
+      },
+      scales: {
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor }, title: { display: true, text: 'Effort', color: textColor } },
+        x: { grid: { display: false }, ticks: { color: textColor } }
+      }
+    }
+  });
+
+  const legendEl = document.getElementById('group-effort-legend');
+  if (legendEl) {
+    legendEl.innerHTML = `<div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> Effort = min × MET(sport, fart) × höjdfaktor × intensitet</div>`;
+  }
 }
 
 async function createGroup() {
@@ -3852,7 +4024,7 @@ async function submitPlanWizard() {
     _activePlan = null;
     _activePlanWeeks = [];
     _activePlanWorkouts = [];
-    navigate('schema');
+    navigate('dashboard');
 
   } catch (e) {
     console.error('Plan generation error:', e);
@@ -3950,7 +4122,7 @@ async function activatePlan(planId) {
     _activePlanWeeks = [];
     _activePlanWorkouts = [];
     closePlanManager();
-    navigate('schema');
+    navigate('dashboard');
   } catch (e) {
     console.error('Activate plan error:', e);
     await showAlertModal('Fel', 'Kunde inte byta schema: ' + e.message);

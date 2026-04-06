@@ -130,6 +130,16 @@ export interface StravaActivity {
   average_cadence?: number;
   gear?: { name?: string };
   map?: { summary_polyline?: string };
+  splits_metric?: Array<{
+    distance: number;
+    elapsed_time: number;
+    moving_time: number;
+    elevation_difference: number;
+    average_speed: number;
+    average_heartrate?: number;
+    pace_zone: number;
+    split: number;
+  }>;
 }
 
 export function activityToWorkout(
@@ -165,6 +175,7 @@ export function activityToWorkout(
   if (activity.calories) result.calories = Math.round(activity.calories);
   if (activity.average_cadence) result.avg_cadence = +activity.average_cadence.toFixed(1);
   if (activity.map?.summary_polyline) result.map_polyline = activity.map.summary_polyline;
+  if (activity.splits_metric?.length) result.splits_data = JSON.stringify(activity.splits_metric);
 
   return result;
 }

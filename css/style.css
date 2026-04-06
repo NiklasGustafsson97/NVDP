@@ -396,6 +396,14 @@ select option { background: #1a1a2e; color: var(--text); }
   font-weight: 700;
 }
 
+/* ── Dashboard schema divider ── */
+.dash-schema-divider {
+  font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--text-dim);
+  margin: 20px 0 12px; padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
 /* ── Compliance ── */
 .compliance-bar { margin-top: 12px; }
 .compliance-track {

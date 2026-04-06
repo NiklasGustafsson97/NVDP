@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NVDP</title>
-  <link rel="stylesheet" href="css/style.css?v=40">
+  <link rel="stylesheet" href="css/style.css?v=41">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -168,12 +168,6 @@
         <button class="btn btn-sm btn-primary" onclick="saveProfileName()">Spara</button>
       </div>
     </div>
-    <div class="sm-section">
-      <button class="sm-item" onclick="toggleSideMenu();navigate('trends')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        Min träning
-      </button>
-    </div>
     <div class="sm-divider"></div>
     <div class="sm-section" id="sm-strava-section">
       <div class="sm-section-title">Strava</div>
@@ -263,6 +257,37 @@
         <div id="dash-day-content"></div>
       </div>
 
+      <!-- ── Veckoschema (merged from schema view) ── -->
+      <div class="dash-schema-divider">Veckoschema</div>
+
+      <div id="plan-info-bar" class="plan-info-bar hidden">
+        <div class="pib-left">
+          <div class="pib-goal" id="pib-goal"></div>
+          <div class="pib-phase" id="pib-phase"></div>
+        </div>
+        <div class="pib-right">
+          <div class="pib-progress">
+            <div class="pib-progress-track"><div class="pib-progress-fill" id="pib-progress-fill"></div></div>
+            <span class="pib-progress-label" id="pib-progress-label"></span>
+          </div>
+        </div>
+      </div>
+
+      <div id="schema-generate-btn-container"></div>
+
+      <div class="schema-tabs" id="schema-person-tabs"></div>
+
+      <div class="schema-week-nav">
+        <button onclick="schemaWeekPrev()">&#9664;</button>
+        <span class="schema-week-label" id="schema-week-label"></span>
+        <div class="schema-nav-right">
+          <button id="schema-today-btn" class="btn-today hidden" onclick="schemaWeekToday()">Idag</button>
+          <button onclick="schemaWeekNext()">&#9654;</button>
+        </div>
+      </div>
+
+      <div id="schema-content"></div>
+
     </section>
 
     <!-- ── LOG WORKOUT ── -->
@@ -325,47 +350,11 @@
       </div>
     </section>
 
-    <!-- ── SCHEMA ── -->
-    <section id="view-schema" class="view">
-      <div class="page-header">
-        <h2>Veckoschema</h2>
-      </div>
-
-      <!-- Plan info bar (shown when AI plan is active) -->
-      <div id="plan-info-bar" class="plan-info-bar hidden">
-        <div class="pib-left">
-          <div class="pib-goal" id="pib-goal"></div>
-          <div class="pib-phase" id="pib-phase"></div>
-        </div>
-        <div class="pib-right">
-          <div class="pib-progress">
-            <div class="pib-progress-track"><div class="pib-progress-fill" id="pib-progress-fill"></div></div>
-            <span class="pib-progress-label" id="pib-progress-label"></span>
-          </div>
-        </div>
-      </div>
-
-      <div id="schema-generate-btn-container"></div>
-
-      <div class="schema-tabs" id="schema-person-tabs"></div>
-
-      <div class="schema-week-nav">
-        <button onclick="schemaWeekPrev()">&#9664;</button>
-        <span class="schema-week-label" id="schema-week-label"></span>
-        <div class="schema-nav-right">
-          <button id="schema-today-btn" class="btn-today hidden" onclick="schemaWeekToday()">Idag</button>
-          <button onclick="schemaWeekNext()">&#9654;</button>
-        </div>
-      </div>
-
-      <div id="schema-content"></div>
-    </section>
-
-    <!-- ── TRENDS (Personal) ── -->
+    <!-- ── TRENDS (Personal / Din progress) ── -->
     <section id="view-trends" class="view">
       <div class="page-header">
-        <h2>Min träning</h2>
-        <p>Dina personliga trender och statistik</p>
+        <h2>Din progress</h2>
+        <p>Personliga trender och statistik</p>
       </div>
 
       <div class="ios-toggle-row">
@@ -543,6 +532,14 @@
           <div id="group-totals-bars"></div>
         </div>
 
+        <div class="card" id="group-effort-card">
+          <div class="card-header">
+            <span class="card-title">Effort per vecka</span>
+          </div>
+          <div class="chart-container"><canvas id="chart-group-effort"></canvas></div>
+          <div class="effort-legend" id="group-effort-legend"></div>
+        </div>
+
         <div class="card">
           <div class="card-header">
             <span class="card-title">Flöde</span>
@@ -563,12 +560,12 @@
   <!-- Bottom Nav -->
   <nav class="bottom-nav">
     <a class="nav-item" data-view="dashboard" onclick="navigate('dashboard')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      Idag
-    </a>
-    <a class="nav-item" data-view="schema" onclick="navigate('schema')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      Schema
+      Ditt schema
+    </a>
+    <a class="nav-item" data-view="progress" onclick="navigate('progress')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Din progress
     </a>
     <a class="nav-item" data-view="log" onclick="navigate('log')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -861,7 +858,7 @@
 </div>
 
 <script src="js/config.js?v=25"></script>
-<script src="js/app.js?v=40"></script>
+<script src="js/app.js?v=41"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {
