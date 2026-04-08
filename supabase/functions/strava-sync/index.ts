@@ -6,6 +6,7 @@ import {
   refreshTokenIfNeeded,
   activityToWorkout,
   shouldImportActivity,
+  fetchHRZoneSeconds,
   corsHeaders,
   type StravaActivity,
 } from "../_shared/strava.ts";
@@ -117,13 +118,31 @@ serve(async (req) => {
       totalFetched += activities.length;
       if (activities.length === 0) break;
 
-      for (const activity of activities) {
-        if (!shouldImportActivity(activity)) {
+      for (const summaryActivity of activities) {
+        if (!shouldImportActivity(summaryActivity)) {
           skipped++;
           continue;
         }
 
+        // Fetch detailed activity for splits, laps, perceived_exertion
+        let activity: StravaActivity = summaryActivity;
+        try {
+          const detailRes = await fetch(
+            `https://www.strava.com/api/v3/activities/${summaryActivity.id}`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          if (detailRes.ok) {
+            activity = await detailRes.json();
+          }
+        } catch { /* fall back to summary data */ }
+
         const workout = activityToWorkout(activity, conn.profile_id);
+
+        // Fetch HR zone distribution if HR data exists
+        if (activity.has_heartrate || activity.average_heartrate) {
+          const zoneSeconds = await fetchHRZoneSeconds(activity.id, accessToken);
+          if (zoneSeconds) workout.hr_zone_seconds = JSON.stringify(zoneSeconds);
+        }
 
         // Check if already imported
         const { data: existing } = await db.from("workouts")

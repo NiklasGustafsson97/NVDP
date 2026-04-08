@@ -57,6 +57,23 @@ const CARDIO_TYPES = [
   'Längdskidor',
 ];
 
+/**
+ * Skalar rå effort (min × MET × höjd × intensitet) till visningsenheter ~samma storleksordning som timmar.
+ * 600 ≈ 60 min × MET 10 som referens för en "typisk" träningstimme.
+ */
+const EFFORT_DISPLAY_DIVISOR = 600;
+
+/** Vikt för "konditionstimmar" i absolut läge (≤1 → summa överstiger aldrig faktisk träningstid). */
+const ACTIVITY_HOUR_WEIGHT = {
+  Löpning: 1,
+  Cykel: 0.55,
+  Annat: 1,
+  Hyrox: 1,
+  Stakmaskin: 1,
+  'Längdskidor': 1,
+  Gym: 1,
+};
+
 // ── Plan Generation ──
 const PLAN_GENERATION_ENABLED = true;
 

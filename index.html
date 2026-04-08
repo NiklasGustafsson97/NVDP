@@ -209,6 +209,10 @@
           <span class="ios-slider"></span>
         </label>
       </div>
+      <div class="sm-setting-row">
+        <span class="sm-setting-label">Max puls (bpm)</span>
+        <input type="number" id="sm-max-hr" class="sm-setting-input" placeholder="t.ex. 195" min="100" max="230" style="width:80px;text-align:center;" onchange="saveMaxHR(this.value)">
+      </div>
     </div>
     <div class="sm-divider"></div>
     <div class="sm-section">
@@ -377,12 +381,12 @@
       <div id="volume-delta"></div>
 
       <div class="card">
-        <div class="card-title mb-8">Timmar per vecka</div>
+        <div class="card-title mb-8" id="trends-weekly-title">Timmar per vecka</div>
         <div class="chart-container"><canvas id="chart-weekly"></canvas></div>
       </div>
 
       <div class="card">
-        <div class="card-title mb-8">Aktivitetsmix</div>
+        <div class="card-title mb-8" id="trends-mix-title">Aktivitetsmix (timmar)</div>
         <div class="chart-container"><canvas id="chart-mix-personal"></canvas></div>
       </div>
 
@@ -857,8 +861,8 @@
   </div>
 </div>
 
-<script src="js/config.js?v=25"></script>
-<script src="js/app.js?v=41"></script>
+<script src="js/config.js?v=27"></script>
+<script src="js/app.js?v=44"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {

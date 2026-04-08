@@ -128,6 +128,8 @@ export interface StravaActivity {
   suffer_score?: number;
   calories?: number;
   average_cadence?: number;
+  has_heartrate?: boolean;
+  perceived_exertion?: number;
   gear?: { name?: string };
   map?: { summary_polyline?: string };
   splits_metric?: Array<{
@@ -138,6 +140,23 @@ export interface StravaActivity {
     average_speed: number;
     average_heartrate?: number;
     pace_zone: number;
+    split: number;
+  }>;
+  laps?: Array<{
+    id: number;
+    name: string;
+    elapsed_time: number;
+    moving_time: number;
+    distance: number;
+    start_index: number;
+    end_index: number;
+    total_elevation_gain?: number;
+    average_speed: number;
+    max_speed?: number;
+    average_heartrate?: number;
+    max_heartrate?: number;
+    average_cadence?: number;
+    lap_index: number;
     split: number;
   }>;
 }
@@ -176,8 +195,31 @@ export function activityToWorkout(
   if (activity.average_cadence) result.avg_cadence = +activity.average_cadence.toFixed(1);
   if (activity.map?.summary_polyline) result.map_polyline = activity.map.summary_polyline;
   if (activity.splits_metric?.length) result.splits_data = JSON.stringify(activity.splits_metric);
+  if (activity.perceived_exertion) result.perceived_exertion = activity.perceived_exertion;
+  if (activity.laps?.length) result.laps_data = JSON.stringify(activity.laps);
 
   return result;
+}
+
+export async function fetchHRZoneSeconds(
+  activityId: number,
+  accessToken: string
+): Promise<number[] | null> {
+  try {
+    const res = await fetch(
+      `https://www.strava.com/api/v3/activities/${activityId}/zones`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!res.ok) return null;
+    const zones = await res.json();
+    const hrZone = zones.find((z: { type: string }) => z.type === "heartrate");
+    if (!hrZone?.distribution_buckets) return null;
+    const buckets: Array<{ min: number; max: number; time: number }> = hrZone.distribution_buckets;
+    if (buckets.length < 5) return null;
+    return buckets.slice(0, 5).map((b) => b.time);
+  } catch {
+    return null;
+  }
 }
 
 export function corsHeaders() {

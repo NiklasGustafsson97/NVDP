@@ -5,6 +5,7 @@ import {
   refreshTokenIfNeeded,
   activityToWorkout,
   shouldImportActivity,
+  fetchHRZoneSeconds,
   corsHeaders,
   type StravaActivity,
 } from "../_shared/strava.ts";
@@ -82,6 +83,11 @@ serve(async (req) => {
       }
 
       const workout = activityToWorkout(activity, conn.profile_id);
+
+      if (activity.has_heartrate) {
+        const zoneSeconds = await fetchHRZoneSeconds(activityId, accessToken);
+        if (zoneSeconds) workout.hr_zone_seconds = JSON.stringify(zoneSeconds);
+      }
 
       // Upsert: if strava_activity_id already exists, update it
       const { error: insertErr } = await db.from("workouts").upsert(workout, {

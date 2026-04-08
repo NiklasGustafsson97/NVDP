@@ -244,6 +244,11 @@ function updateSideMenuContent() {
   }
   if (currentUser) smEmail.textContent = currentUser.email;
 
+  const maxHrInput = document.getElementById('sm-max-hr');
+  if (maxHrInput && currentProfile?.user_max_hr) {
+    maxHrInput.value = currentProfile.user_max_hr;
+  }
+
   updateGroupSettingsCard();
 
   updateStravaUI();
@@ -314,6 +319,18 @@ async function saveProfileName() {
   document.getElementById('name-edit-row').classList.add('hidden');
   document.getElementById('sm-name').textContent = newName;
   refreshAvatars();
+}
+
+async function saveMaxHR(val) {
+  const hr = parseInt(val, 10);
+  if (!currentProfile || isNaN(hr) || hr < 100 || hr > 230) return;
+  const token = (await sb.auth.getSession()).data.session.access_token;
+  await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + currentProfile.id, {
+    method: 'PATCH',
+    headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_max_hr: hr })
+  });
+  currentProfile.user_max_hr = hr;
 }
 
 function showAuth() {
@@ -467,16 +484,50 @@ function formatDate(d) {
 }
 
 function isDeloadWeek(mondayDate) {
-  const p1Start = new Date(P1_START);
-  const p2Start = new Date(P2_START);
+  const p1Start = parseISOWeekKeyLocal(P1_START);
+  const p2Start = parseISOWeekKeyLocal(P2_START);
+  const md = mondayDate instanceof Date ? new Date(mondayDate.getTime()) : parseISOWeekKeyLocal(mondayDate);
+  md.setHours(12, 0, 0, 0);
+  p1Start.setHours(12, 0, 0, 0);
+  p2Start.setHours(12, 0, 0, 0);
   let weeksSinceStart;
-  const md = new Date(mondayDate);
   if (md >= p2Start) {
     weeksSinceStart = Math.floor((md - p2Start) / (7 * 86400000));
   } else {
     weeksSinceStart = Math.floor((md - p1Start) / (7 * 86400000));
   }
   return weeksSinceStart >= 0 && (weeksSinceStart + 1) % 4 === 0;
+}
+
+/** Måndagsnyckel YYYY-MM-DD → lokalt datum (undviker UTC-förskjutning). */
+function parseISOWeekKeyLocal(iso) {
+  const p = String(iso).split('-').map(Number);
+  if (p.length < 3 || p.some(n => Number.isNaN(n))) {
+    const d = new Date(iso);
+    d.setHours(12, 0, 0, 0);
+    return d;
+  }
+  const dt = new Date(p[0], p[1] - 1, p[2]);
+  dt.setHours(12, 0, 0, 0);
+  return dt;
+}
+
+/** Basvecka för WoW-%: hoppa över deload som jämförelse så veckan efter deload jämförs med veckan före deload. */
+function wowBaselineWeekIndex(weekKeys, i) {
+  if (i < 1) return null;
+  const prevMon = parseISOWeekKeyLocal(weekKeys[i - 1]);
+  if (isDeloadWeek(prevMon)) {
+    if (i >= 2) return i - 2;
+    return null;
+  }
+  return i - 1;
+}
+
+/** Föregående kalender-måndag; om den veckan är deload, hoppa ytterligare en vecka bakåt. */
+function calendarBaselineMonday(fromMonday) {
+  let m = addDays(fromMonday, -7);
+  if (isDeloadWeek(m)) m = addDays(m, -7);
+  return m;
 }
 
 function getCurrentPeriod(date) {
@@ -988,6 +1039,45 @@ async function openWorkoutModal(w) {
   }
   if (w.calories) body += `<div class="modal-detail-row"><span class="mdr-label">Kalorier</span><span class="mdr-value">${w.calories} kcal</span></div>`;
   if (w.avg_cadence) body += `<div class="modal-detail-row"><span class="mdr-label">Kadens</span><span class="mdr-value">${Math.round(w.avg_cadence)} spm</span></div>`;
+
+  // Splits (per-km) table
+  const splits = w.splits_data ? (typeof w.splits_data === 'string' ? JSON.parse(w.splits_data) : w.splits_data) : null;
+  if (splits && splits.length > 0) {
+    let splitsHtml = `<div class="wm-section-title">Kilometersplits</div><table class="wm-splits-table"><thead><tr><th>Km</th><th>Tid</th><th>Tempo</th><th>Puls</th><th>Höjd</th></tr></thead><tbody>`;
+    splits.forEach(s => {
+      const km = s.split || Math.round(s.distance / 1000);
+      const mins = Math.floor(s.moving_time / 60);
+      const secs = s.moving_time % 60;
+      const pace = s.average_speed > 0 ? 1000 / s.average_speed / 60 : 0;
+      const paceMin = Math.floor(pace);
+      const paceSec = Math.round((pace - paceMin) * 60);
+      const paceStr = pace > 0 ? `${paceMin}:${String(paceSec).padStart(2, '0')}/km` : '—';
+      const hr = s.average_heartrate ? Math.round(s.average_heartrate) : '—';
+      const elev = s.elevation_difference != null ? (s.elevation_difference > 0 ? '+' : '') + Math.round(s.elevation_difference) + 'm' : '—';
+      splitsHtml += `<tr><td>${km}</td><td>${mins}:${String(secs).padStart(2, '0')}</td><td>${paceStr}</td><td>${hr}</td><td>${elev}</td></tr>`;
+    });
+    splitsHtml += '</tbody></table>';
+    body += splitsHtml;
+  }
+
+  // Laps table
+  const laps = w.laps_data ? (typeof w.laps_data === 'string' ? JSON.parse(w.laps_data) : w.laps_data) : null;
+  if (laps && laps.length > 1) {
+    let lapsHtml = `<div class="wm-section-title">Varv</div><table class="wm-splits-table"><thead><tr><th>#</th><th>Distans</th><th>Tid</th><th>Tempo</th><th>Puls</th></tr></thead><tbody>`;
+    laps.forEach((lap, idx) => {
+      const dist = (lap.distance / 1000).toFixed(2);
+      const mins = Math.floor(lap.moving_time / 60);
+      const secs = lap.moving_time % 60;
+      const pace = lap.average_speed > 0 ? 1000 / lap.average_speed / 60 : 0;
+      const paceMin = Math.floor(pace);
+      const paceSec = Math.round((pace - paceMin) * 60);
+      const paceStr = pace > 0 ? `${paceMin}:${String(paceSec).padStart(2, '0')}/km` : '—';
+      const hr = lap.average_heartrate ? Math.round(lap.average_heartrate) : '—';
+      lapsHtml += `<tr><td>${idx + 1}</td><td>${dist} km</td><td>${mins}:${String(secs).padStart(2, '0')}</td><td>${paceStr}</td><td>${hr}</td></tr>`;
+    });
+    lapsHtml += '</tbody></table>';
+    body += lapsHtml;
+  }
 
   if (w.map_polyline && typeof L !== 'undefined') {
     body += `<div id="wm-map" style="height:200px;border-radius:8px;margin:12px 0;"></div>`;
@@ -1891,24 +1981,36 @@ async function _loadTrends() {
 
   const weeks = Object.keys(weekData).sort();
   const labels = weeks.map(w => {
-    const mon = new Date(w);
+    const mon = parseISOWeekKeyLocal(w);
     const wn = weekNumber(mon);
     return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
   });
   const isNorm = effortMode === 'normalized';
-  const yUnit = isNorm ? '' : 'h';
+  const yUnit = isNorm ? ' n·h' : 'h';
+
+  const weeklyTitleEl = document.getElementById('trends-weekly-title');
+  const mixTitleEl = document.getElementById('trends-mix-title');
+  if (weeklyTitleEl) {
+    weeklyTitleEl.textContent = isNorm ? 'Belastning per vecka (n·h)' : 'Timmar per vecka';
+  }
+  if (mixTitleEl) {
+    mixTitleEl.textContent = isNorm ? 'Aktivitetsmix (n·h)' : 'Aktivitetsmix (timmar)';
+  }
+
   const myData = weeks.map(w => {
     const types = trendMode === 'cardio' ? CARDIO_TYPES : [...CARDIO_TYPES, 'Gym'];
+    const wos = weekWorkouts[w].filter(wo => types.includes(wo.activity_type));
     if (isNorm) {
-      return weekWorkouts[w].filter(wo => types.includes(wo.activity_type)).reduce((s, wo) => s + calcWorkoutEffort(wo), 0);
+      const raw = wos.reduce((s, wo) => s + calcWorkoutEffort(wo), 0);
+      return effortRawToDisplay(raw);
     }
-    const d = weekData[w];
-    return types.reduce((s, t) => s + (d[t] || 0), 0) / 60;
+    return wos.reduce((s, wo) => s + durationWeightedHours(wo), 0);
   });
 
   const wowDeltas = myData.map((val, i) => {
-    if (i === 0) return null;
-    const prev = myData[i - 1];
+    const bi = wowBaselineWeekIndex(weeks, i);
+    if (bi === null) return null;
+    const prev = myData[bi];
     return prev > 0 ? ((val - prev) / prev) * 100 : null;
   });
 
@@ -1934,7 +2036,8 @@ async function _loadTrends() {
         tooltip: { callbacks: { label: c => {
           const d = wowDeltas[c.dataIndex];
           const pct = d !== null ? ` (${d >= 0 ? '+' : ''}${Math.round(d)}%)` : '';
-          return `${c.parsed.y.toFixed(1)} ${yUnit}${pct}`;
+          const yStr = c.parsed.y.toFixed(1);
+          return `${yStr}${yUnit}${pct}`;
         }}},
       },
       scales: {
@@ -1954,7 +2057,7 @@ async function _loadTrends() {
           if (d === null) return;
           const txt = (d >= 0 ? '+' : '') + Math.round(d) + '%';
           const weekMon = weeks[i];
-          const dl = isDeloadWeek(new Date(weekMon));
+          const dl = isDeloadWeek(parseISOWeekKeyLocal(weekMon));
           if (dl) {
             ctxC.fillStyle = d <= -20 ? '#2ECC71' : '#F39C12';
           } else {
@@ -1966,13 +2069,19 @@ async function _loadTrends() {
     }]
   });
 
-  // Week-over-week volume delta (same-day comparison)
+  // Week-over-week volume delta (same-day comparison).
+  // Use calendar "this week" Monday — not weeks.at(-1), so an empty post-deload week does not stick to deload as "current".
+  // Baseline = previous calendar Monday; if that week is deload, compare to the Monday before deload.
   const deltaEl = document.getElementById('volume-delta');
-  if (deltaEl && weeks.length >= 2) {
+  if (deltaEl) {
     const now = new Date();
     const todayDow = (now.getDay() + 6) % 7; // 0=Mon
-    const thisMonday = weeks[weeks.length - 1];
-    const prevMonday = weeks[weeks.length - 2];
+    const thisWeekMon = mondayOfWeek(now);
+    const thisMonday = isoDate(thisWeekMon);
+    const baselineMon = calendarBaselineMonday(thisWeekMon);
+    const baselineMonday = isoDate(baselineMon);
+    const wnB = weekNumber(baselineMon);
+    const vsLabel = isDeloadWeek(baselineMon) ? `V${wnB} (D)` : `V${wnB}`;
     const types = trendMode === 'cardio' ? CARDIO_TYPES : [...CARDIO_TYPES, 'Gym'];
 
     const accumTo = (mondayStr, maxDow) => {
@@ -1984,42 +2093,45 @@ async function _loadTrends() {
         return wDow <= maxDow;
       });
       return isNorm
-        ? filtered.reduce((s, w) => s + calcWorkoutEffort(w), 0)
-        : filtered.reduce((s, w) => s + w.duration_minutes, 0) / 60;
+        ? effortRawToDisplay(filtered.reduce((s, w) => s + calcWorkoutEffort(w), 0))
+        : filtered.reduce((s, w) => s + durationWeightedHours(w), 0);
     };
 
     const curr = accumTo(thisMonday, todayDow);
-    const prev = accumTo(prevMonday, todayDow);
-    const pctChange = prev > 0 ? ((curr - prev) / prev) * 100 : 0;
-    const sign = pctChange >= 0 ? '+' : '';
+    const prev = accumTo(baselineMonday, todayDow);
+    const pctChange = prev > 0 ? ((curr - prev) / prev) * 100 : null;
     const deload = isDeloadWeek(mondayOfWeek(now));
     const dayLabel = DAY_NAMES[todayDow].toLowerCase();
 
-    let colorClass = 'delta-neutral';
-    let msg = '';
-    if (deload) {
-      colorClass = pctChange <= -20 ? 'delta-good' : 'delta-warn';
-      msg = pctChange <= -20 ? 'Bra deload' : 'Sänk mer';
-    } else if (pctChange > 10) {
-      colorClass = 'delta-high';
-      msg = 'Hög ökning';
-    } else if (pctChange >= 0) {
-      colorClass = 'delta-good';
-      msg = 'Bra progression';
+    if (pctChange === null || (prev <= 0 && curr <= 0)) {
+      deltaEl.innerHTML = '';
     } else {
-      colorClass = 'delta-warn';
-      msg = 'Minskad volym';
-    }
+      const sign = pctChange >= 0 ? '+' : '';
+      let colorClass = 'delta-neutral';
+      let msg = '';
+      if (deload) {
+        colorClass = pctChange <= -20 ? 'delta-good' : 'delta-warn';
+        msg = pctChange <= -20 ? 'Bra deload' : 'Sänk mer';
+      } else if (pctChange > 10) {
+        colorClass = 'delta-high';
+        msg = 'Hög ökning';
+      } else if (pctChange >= 0) {
+        colorClass = 'delta-good';
+        msg = 'Bra progression';
+      } else {
+        colorClass = 'delta-warn';
+        msg = 'Minskad volym';
+      }
 
-    deltaEl.innerHTML = `
+      const valFmt = (v) => v.toFixed(1);
+      deltaEl.innerHTML = `
       <div class="vd-compact ${colorClass}">
         <span class="vd-pct">${sign}${Math.round(pctChange)}%</span>
-        <span class="vd-detail">vs ${labels[labels.length - 2]} (mån–${dayLabel})</span>
-        <span class="vd-val">${curr.toFixed(1)}${yUnit} / ${prev.toFixed(1)}${yUnit}</span>
+        <span class="vd-detail">vs ${vsLabel} samma period (mån–${dayLabel})</span>
+        <span class="vd-val">${valFmt(curr)}${yUnit} / ${valFmt(prev)}${yUnit}</span>
         <span class="vd-msg">${msg}</span>
       </div>`;
-  } else if (deltaEl) {
-    deltaEl.innerHTML = '';
+    }
   }
 
   // Activity mix stacked bar
@@ -2038,9 +2150,19 @@ async function _loadTrends() {
       });
     }
 
-    const datasets = types.filter(t => weeks.some(w => isNorm ? (weekEffortByType[w]?.[t] || 0) > 0 : (weekData[w][t] || 0) > 0)).map(t => ({
+    const datasets = types.filter(t => weeks.some(w => {
+      if (isNorm) return (weekEffortByType[w]?.[t] || 0) > 0;
+      const sumW = (weekWorkouts[w] || []).filter(wo => wo.activity_type === t)
+        .reduce((s, wo) => s + durationWeightedHours(wo), 0);
+      return sumW > 0;
+    })).map(t => ({
       label: t,
-      data: weeks.map(w => isNorm ? +(weekEffortByType[w]?.[t] || 0).toFixed(2) : (weekData[w][t] || 0) / 60),
+      data: weeks.map(w => {
+        if (isNorm) return +effortRawToDisplay(weekEffortByType[w]?.[t] || 0).toFixed(2);
+        const sumW = (weekWorkouts[w] || []).filter(wo => wo.activity_type === t)
+          .reduce((s, wo) => s + durationWeightedHours(wo), 0);
+        return +sumW.toFixed(2);
+      }),
       backgroundColor: ACTIVITY_COLORS[t] || '#555',
       borderRadius: 4
     }));
@@ -2051,7 +2173,7 @@ async function _loadTrends() {
         responsive: true, maintainAspectRatio: false,
         plugins: {
           legend: { position: 'bottom', labels: { color: '#aaa', usePointStyle: true, boxWidth: 12 } },
-          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)} ${yUnit}` } }
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)}${yUnit}` } }
         },
         scales: {
           y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + yUnit } },
@@ -2242,12 +2364,28 @@ function _elevationFactor(elevGainM, distKm) {
 }
 
 function _intensityMultiplier(w) {
-  // Level 2: average HR (requires both avg_hr and max_hr)
-  if (w.avg_hr && w.avg_hr >= 30 && w.max_hr && w.max_hr >= 100) {
-    const pctMax = w.avg_hr / w.max_hr;
+  // Level 1: Edwards HR zone distribution (best accuracy)
+  const zs = w.hr_zone_seconds;
+  if (zs && Array.isArray(zs) && zs.length >= 5) {
+    const total = zs.reduce((a, b) => a + b, 0);
+    if (total > 0) {
+      const wi = zs.reduce((s, sec, i) => s + (sec / total) * (i + 1), 0);
+      return Math.max(0.7, Math.min(1.5, 0.7 + (wi - 1.0) * 0.2));
+    }
+  }
+  // Level 2: average HR (use profile max HR if available, else workout max HR)
+  const maxHr = (currentProfile?.user_max_hr && currentProfile.user_max_hr >= 100)
+    ? currentProfile.user_max_hr : w.max_hr;
+  if (w.avg_hr && w.avg_hr >= 30 && maxHr && maxHr >= 100) {
+    const pctMax = w.avg_hr / maxHr;
     return Math.max(0.7, Math.min(1.5, 0.7 + (pctMax - 0.5) * 1.6));
   }
-  // Level 3: intensity string → RPE
+  // Level 3a: Strava perceived exertion (direct RPE 1-10)
+  if (w.perceived_exertion && w.perceived_exertion >= 1) {
+    const rpe = Math.min(10, w.perceived_exertion);
+    return Math.max(0.7, Math.min(1.5, 0.7 + (rpe - 1) * (0.8 / 9)));
+  }
+  // Level 3b: intensity string → RPE
   if (w.intensity && INTENSITY_TO_RPE[w.intensity] != null) {
     const rpe = INTENSITY_TO_RPE[w.intensity];
     return Math.max(0.7, Math.min(1.5, 0.7 + (rpe - 1) * (0.8 / 9)));
@@ -2265,6 +2403,22 @@ function calcWorkoutEffort(w) {
   const elev = _elevationFactor(w.elevation_gain_m, w.distance_km);
   const im = _intensityMultiplier(w);
   return w.duration_minutes * met * elev * im;
+}
+
+/** Rå effort → visningsvärde (n·h) så veckosummor hamnar nära faktiska träningstimmar. */
+function effortRawToDisplay(rawEffort) {
+  const div = typeof EFFORT_DISPLAY_DIVISOR === 'number' && EFFORT_DISPLAY_DIVISOR > 0
+    ? EFFORT_DISPLAY_DIVISOR
+    : 600;
+  return rawEffort / div;
+}
+
+function durationWeightedHours(w) {
+  const m = w.duration_minutes || 0;
+  const wt = (typeof ACTIVITY_HOUR_WEIGHT !== 'undefined' && ACTIVITY_HOUR_WEIGHT[w.activity_type] != null)
+    ? ACTIVITY_HOUR_WEIGHT[w.activity_type]
+    : 1;
+  return (m / 60) * wt;
 }
 
 let _seasonBarMode = 'hours';
@@ -2353,11 +2507,12 @@ function renderEffortChart(workouts) {
   });
 
   const weeks = Object.keys(weekMap).sort();
-  const effortData = weeks.map(w => +weekMap[w].effort.toFixed(2));
+  const effortData = weeks.map(w => +effortRawToDisplay(weekMap[w].effort).toFixed(2));
   const hoursData = weeks.map(w => +weekMap[w].hours.toFixed(1));
   const labels = weeks.map(w => {
-    const d = new Date(w);
-    return `${d.getDate()}/${d.getMonth() + 1}`;
+    const mon = parseISOWeekKeyLocal(w);
+    const wn = weekNumber(mon);
+    return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
   });
 
   const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
@@ -2368,7 +2523,7 @@ function renderEffortChart(workouts) {
       labels,
       datasets: [
         {
-          label: 'Effort (normaliserat)',
+          label: 'Belastning (n·h)',
           data: effortData,
           backgroundColor: 'rgba(214,99,158,0.5)',
           borderColor: 'rgba(214,99,158,0.8)',
@@ -2396,16 +2551,16 @@ function renderEffortChart(workouts) {
         legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, boxWidth: 12 } },
         tooltip: {
           callbacks: {
-            label: c => c.dataset.label === 'Effort (normaliserat)'
-              ? `Effort: ${c.parsed.y.toFixed(1)}`
+            label: c => c.dataset.label === 'Belastning (n·h)'
+              ? `Belastning: ${c.parsed.y.toFixed(1)} n·h`
               : `Timmar: ${c.parsed.y.toFixed(1)}h`
           }
         }
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor }, title: { display: true, text: 'Effort', color: textColor } },
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor, callback: v => v + ' n·h' }, title: { display: true, text: 'n·h (skalad)', color: textColor } },
         y1: { beginAtZero: true, position: 'right', grid: { display: false }, ticks: { color: textColor, callback: v => v + 'h' }, title: { display: true, text: 'Timmar', color: textColor } },
-        x: { grid: { display: false }, ticks: { color: textColor } }
+        x: { grid: { display: false }, ticks: { color: textColor, maxRotation: 45, minRotation: 0 } }
       }
     }
   });
@@ -2413,7 +2568,7 @@ function renderEffortChart(workouts) {
   const legendEl = document.getElementById('effort-legend');
   if (legendEl) {
     legendEl.innerHTML = `
-      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> Effort = min × MET(sport, fart) × höjdfaktor × intensitet (puls/zon)</div>
+      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> n·h = normaliserade timmar: rå effort delat med ${EFFORT_DISPLAY_DIVISOR} (≈ 1 h @ MET 10), samma skala som graferna ovan. Timmar-linjen är faktisk tid.</div>
     `;
   }
 }
@@ -2584,7 +2739,7 @@ function setGrpEffortMode(mode) {
 function renderGroupChart(allWorkouts, members) {
   const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
   const isGrpNorm = grpEffortMode === 'normalized';
-  const gUnit = isGrpNorm ? '' : 'h';
+  const gUnit = isGrpNorm ? ' n·h' : 'h';
   const weekData = {};
   allWorkouts.forEach(w => {
     const mon = mondayOfWeek(new Date(w.workout_date));
@@ -2597,18 +2752,22 @@ function renderGroupChart(allWorkouts, members) {
   });
 
   const weeks = Object.keys(weekData).sort();
-  const labels = weeks.map(w => `V${weekNumber(new Date(w))}`);
+  const labels = weeks.map(w => {
+    const mon = parseISOWeekKeyLocal(w);
+    const wn = weekNumber(mon);
+    return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
+  });
 
   if (chartGroupWeekly) chartGroupWeekly.destroy();
   const canvas = document.getElementById('chart-group-weekly');
   if (!canvas) return;
 
   const titleEl = document.getElementById('grp-chart-title');
-  if (titleEl) titleEl.textContent = isGrpNorm ? 'Effort per vecka' : 'Timmar per vecka';
+  if (titleEl) titleEl.textContent = isGrpNorm ? 'Belastning per vecka (n·h)' : 'Timmar per vecka';
 
   const datasets = members.map((m, i) => ({
     label: m.name.split(' ')[0],
-    data: weeks.map(w => isGrpNorm ? +(weekData[w]?.[m.id] || 0).toFixed(2) : (weekData[w]?.[m.id] || 0) / 60),
+    data: weeks.map(w => isGrpNorm ? +effortRawToDisplay(weekData[w]?.[m.id] || 0).toFixed(2) : (weekData[w]?.[m.id] || 0) / 60),
     borderColor: colors[i % colors.length],
     backgroundColor: colors[i % colors.length] + '18',
     tension: 0.35, fill: true, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2.5
@@ -2622,7 +2781,7 @@ function renderGroupChart(allWorkouts, members) {
       interaction: { intersect: false, mode: 'index' },
       plugins: {
         legend: { position: 'bottom', labels: { color: '#aaa', usePointStyle: true, padding: 16 } },
-        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)} ${gUnit}` } }
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)}${gUnit}` } }
       },
       scales: {
         y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + gUnit } },
@@ -2649,12 +2808,16 @@ function renderGroupEffortChart(allWorkouts, members) {
   });
 
   const weeks = Object.keys(weekMap).sort();
-  const labels = weeks.map(w => `V${weekNumber(new Date(w))}`);
+  const labels = weeks.map(w => {
+    const mon = parseISOWeekKeyLocal(w);
+    const wn = weekNumber(mon);
+    return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
+  });
   const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
 
   const datasets = members.map((m, i) => ({
     label: m.name.split(' ')[0],
-    data: weeks.map(w => +(weekMap[w]?.[m.id]?.effort || 0).toFixed(0)),
+    data: weeks.map(w => +effortRawToDisplay(weekMap[w]?.[m.id]?.effort || 0).toFixed(2)),
     backgroundColor: colors[i % colors.length] + '88',
     borderColor: colors[i % colors.length],
     borderWidth: 1,
@@ -2669,10 +2832,10 @@ function renderGroupEffortChart(allWorkouts, members) {
       interaction: { intersect: false, mode: 'index' },
       plugins: {
         legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, padding: 16 } },
-        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(0)} effort` } }
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)} n·h` } }
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor }, title: { display: true, text: 'Effort', color: textColor } },
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor, callback: v => v + ' n·h' }, title: { display: true, text: 'n·h', color: textColor } },
         x: { grid: { display: false }, ticks: { color: textColor } }
       }
     }
@@ -2680,7 +2843,7 @@ function renderGroupEffortChart(allWorkouts, members) {
 
   const legendEl = document.getElementById('group-effort-legend');
   if (legendEl) {
-    legendEl.innerHTML = `<div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> Effort = min × MET(sport, fart) × höjdfaktor × intensitet</div>`;
+    legendEl.innerHTML = `<div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> n·h = skalad belastning (rå effort ÷ ${EFFORT_DISPLAY_DIVISOR}), samma som på Din progress.</div>`;
   }
 }
 

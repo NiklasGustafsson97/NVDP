@@ -803,6 +803,31 @@ input.code-input {
 .modal-actions { display: flex; gap: 10px; margin-top: 24px; }
 .modal-actions .btn { flex: 1; }
 
+/* ── Splits / Laps tables ── */
+.wm-section-title {
+  font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--text-dim); margin: 16px 0 8px;
+}
+.wm-splits-table {
+  width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-bottom: 8px;
+}
+.wm-splits-table th {
+  text-align: left; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.3px; color: var(--text-dim); padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.wm-splits-table td {
+  padding: 5px 6px; border-bottom: 1px solid rgba(255,255,255,0.03);
+  font-variant-numeric: tabular-nums;
+}
+.wm-splits-table tr:last-child td { border-bottom: none; }
+
+/* ── Settings input ── */
+.sm-setting-input {
+  background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); padding: 6px 8px; font-size: 0.85rem;
+}
+
 /* ── Reactions ── */
 .wm-reactions { margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.06); }
 .reaction-bar { display: flex; gap: 8px; }
