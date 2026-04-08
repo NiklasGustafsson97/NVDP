@@ -3,7 +3,15 @@
    ══════════════════════════════════════════ */
 
 // ── Supabase Client ──
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Persist session in localStorage so users stay logged in across visits (refresh token).
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    storage: localStorage,
+  },
+});
 
 // ── App State ──
 let currentUser = null;
@@ -24,9 +32,27 @@ const DAY_NAMES_FULL = ['Måndag', 'Tisdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lö
 // ── Init ──
 let _initDone = false;
 
+const GATE_PASSED_KEY = 'nvdp_gate_passed';
+
 function gateOpen() {
-  return sessionStorage.getItem('gate_passed') === '1';
+  return (
+    sessionStorage.getItem('gate_passed') === '1' ||
+    localStorage.getItem(GATE_PASSED_KEY) === '1'
+  );
 }
+
+/** After beta gate succeeds: restore Supabase session if token still in localStorage */
+async function resumeSessionAfterGate() {
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session && !_initDone) {
+      await initApp(session.user, session.access_token);
+    }
+  } catch (e) {
+    console.error('resumeSessionAfterGate:', e);
+  }
+}
+window.NVDP_resumeAfterGate = resumeSessionAfterGate;
 
 async function fetchProfilesDirect(accessToken) {
   const resp = await fetch(SUPABASE_URL + '/rest/v1/profiles?select=*', {

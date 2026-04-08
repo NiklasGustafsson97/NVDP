@@ -1,0 +1,42 @@
+name: Auto cache-bust on deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'css/**'
+      - 'js/**'
+      - 'index.html'
+
+jobs:
+  cache-bust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Replace version strings with commit hash
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          sed -i "s/style\.css?v=[a-zA-Z0-9_-]*/style.css?v=${SHORT_SHA}/g" index.html
+          sed -i "s/config\.js?v=[a-zA-Z0-9_-]*/config.js?v=${SHORT_SHA}/g" index.html
+          sed -i "s/app\.js?v=[a-zA-Z0-9_-]*/app.js?v=${SHORT_SHA}/g" index.html
+
+      - name: Check for changes
+        id: check
+        run: |
+          if git diff --quiet index.html; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push cache-bust
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Auto cache-bust: v=$(git rev-parse --short HEAD)"
+          git push
