@@ -4234,10 +4234,35 @@ async function openPlanManager() {
   }
   topEl.innerHTML = topHtml;
 
-  if (plans.length === 0) {
-    listEl.innerHTML = '<div class="sf-empty" style="padding:16px 0;">Inga sparade scheman.</div>';
-  } else {
-    listEl.innerHTML = '<div class="pm-section-label">Sparade scheman</div>' + plans.map(p => {
+  // Check for legacy period-based schema
+  const periods = await fetchPeriods();
+  const todayStr = isoDate(new Date());
+  const hasActivePlan = plans.some(p => p.status === 'active');
+  const isLegacyActive = !hasActivePlan;
+  const legacyPeriods = periods.filter(p => todayStr <= p.end_date);
+
+  let html = '';
+
+  // Show legacy schemas
+  if (legacyPeriods.length > 0) {
+    html += '<div class="pm-section-label">Manuella scheman</div>';
+    legacyPeriods.forEach(p => {
+      const active = isLegacyActive && todayStr >= p.start_date && todayStr <= p.end_date;
+      html += `<div class="plan-manager-item${active ? ' active' : ''}" onclick="${active ? '' : `switchToLegacy()`}">
+        <span style="font-size:1.1rem;">📋</span>
+        <div class="pm-info">
+          <div class="pm-name">${p.name || 'Manuellt schema'}</div>
+          <div class="pm-meta">${p.start_date} — ${p.end_date}</div>
+        </div>
+        <span class="pm-status-badge ${active ? 'active' : 'archived'}">${active ? 'Aktiv' : 'Tillgänglig'}</span>
+      </div>`;
+    });
+  }
+
+  // Show AI-generated plans
+  if (plans.length > 0) {
+    html += '<div class="pm-section-label">AI-genererade scheman</div>';
+    html += plans.map(p => {
       const isActive = p.status === 'active';
       const name = p.name || p.goal_text || 'Träningsplan';
       const dateRange = `${p.start_date} — ${p.end_date}`;
@@ -4261,7 +4286,31 @@ async function openPlanManager() {
     }).join('');
   }
 
+  if (html === '') {
+    html = '<div class="sf-empty" style="padding:16px 0;">Inga sparade scheman.</div>';
+  }
+
+  listEl.innerHTML = html;
   document.getElementById('plan-manager').classList.remove('hidden');
+}
+
+async function switchToLegacy() {
+  const ok = await showConfirmModal('Byt till manuellt schema', 'Vill du byta tillbaka till det manuella schemat? Det AI-genererade schemat arkiveras.', 'Byt');
+  if (!ok) return;
+  try {
+    await sb.from('training_plans')
+      .update({ status: 'archived' })
+      .eq('profile_id', currentProfile.id)
+      .eq('status', 'active');
+    _activePlan = null;
+    _activePlanWeeks = [];
+    _activePlanWorkouts = [];
+    closePlanManager();
+    navigate('dashboard');
+  } catch (e) {
+    console.error('Switch to legacy error:', e);
+    await showAlertModal('Fel', 'Kunde inte byta schema.');
+  }
 }
 
 function closePlanManager() {
