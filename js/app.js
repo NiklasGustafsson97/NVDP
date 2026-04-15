@@ -34,6 +34,52 @@ let _initDone = false;
 
 const GATE_PASSED_KEY = 'nvdp_gate_passed';
 
+// ── Lazy Leaflet (PERF-01: ladda karta först när den behövs) ──
+let _leafletPromise = null;
+function ensureLeafletLoaded() {
+  if (typeof L !== 'undefined') return Promise.resolve();
+  if (_leafletPromise) return _leafletPromise;
+  _leafletPromise = new Promise((resolve, reject) => {
+    if (!document.querySelector('link[data-nvdp-leaflet-css]')) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      link.setAttribute('data-nvdp-leaflet-css', '1');
+      document.head.appendChild(link);
+    }
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Leaflet'));
+    document.head.appendChild(s);
+  });
+  return _leafletPromise;
+}
+
+let _toastTimer = null;
+function showToast(msg) {
+  const el = document.getElementById('app-toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.add('hidden'), 3500);
+}
+
+/** AUTH-03: korta svenska fel från Supabase */
+function mapAuthError(msg) {
+  const m = String(msg || '').toLowerCase();
+  if (m.includes('invalid login') || m.includes('invalid_credentials') || m.includes('invalid email or password')) {
+    return 'Fel email eller lösenord.';
+  }
+  if (m.includes('email not confirmed')) return 'Bekräfta din email innan du loggar in.';
+  if (m.includes('user already registered')) return 'Det finns redan ett konto med den emailen.';
+  if (m.includes('network') || m.includes('fetch')) return 'Nätverksfel. Kontrollera anslutningen.';
+  return msg || 'Något gick fel. Försök igen.';
+}
+
+let _wmFocusBefore = null;
+
 function gateOpen() {
   return (
     sessionStorage.getItem('gate_passed') === '1' ||
@@ -67,6 +113,8 @@ async function fetchProfilesDirect(accessToken) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   restoreSettings();
+  document.getElementById('log-type')?.addEventListener('change', suggestLogMinutesFromHistory);
+  window.addEventListener('offline', () => showToast('Ingen anslutning'));
   try {
     sb.auth.onAuthStateChange(async (event, session) => {
       try {
@@ -107,6 +155,9 @@ function toggleAuthMode() {
   document.getElementById('auth-toggle').textContent = authMode === 'login' ? 'Skapa konto' : 'Logga in';
   document.getElementById('auth-name-group').classList.toggle('hidden', authMode === 'login');
   document.getElementById('auth-error').classList.add('hidden');
+  document.getElementById('auth-forgot-panel')?.classList.add('hidden');
+  document.getElementById('auth-forgot-msg')?.classList.add('hidden');
+  document.getElementById('auth-forgot-wrap')?.classList.toggle('hidden', authMode !== 'login');
 }
 
 document.getElementById('auth-form').addEventListener('submit', async (e) => {
@@ -147,7 +198,7 @@ document.getElementById('auth-form').addEventListener('submit', async (e) => {
     });
     btn.disabled = false;
     btn.textContent = 'Skapa konto';
-    if (error) { errEl.style.color = 'var(--red)'; errEl.textContent = error.message; errEl.classList.remove('hidden'); return; }
+    if (error) { errEl.style.color = 'var(--red)'; errEl.textContent = mapAuthError(error.message); errEl.classList.remove('hidden'); return; }
     if (data.session) {
       // Email confirmation disabled -- session created, onAuthStateChange handles redirect
       return;
@@ -169,7 +220,7 @@ document.getElementById('auth-form').addEventListener('submit', async (e) => {
         btn.disabled = false;
         btn.textContent = 'Logga in';
         errEl.style.color = 'var(--red)';
-        errEl.textContent = error.message;
+        errEl.textContent = mapAuthError(error.message);
         errEl.classList.remove('hidden');
         return;
       }
@@ -181,11 +232,37 @@ document.getElementById('auth-form').addEventListener('submit', async (e) => {
       btn.disabled = false;
       btn.textContent = 'Logga in';
       errEl.style.color = 'var(--red)';
-      errEl.textContent = ex.message || 'Något gick fel. Försök igen.';
+      errEl.textContent = mapAuthError(ex.message);
       errEl.classList.remove('hidden');
     }
   }
 });
+
+function toggleForgotPassword() {
+  document.getElementById('auth-forgot-panel')?.classList.toggle('hidden');
+}
+
+async function sendPasswordResetEmail() {
+  const msg = document.getElementById('auth-forgot-msg');
+  const email = document.getElementById('auth-email').value.trim();
+  if (!email) {
+    if (msg) { msg.textContent = 'Fyll i email i fältet ovan.'; msg.style.color = 'var(--red)'; msg.classList.remove('hidden'); }
+    return;
+  }
+  const { error } = await sb.auth.resetPasswordForEmail(email, {
+    redirectTo: window.location.origin + window.location.pathname,
+  });
+  if (msg) {
+    msg.classList.remove('hidden');
+    if (error) {
+      msg.style.color = 'var(--red)';
+      msg.textContent = mapAuthError(error.message);
+    } else {
+      msg.style.color = 'var(--green)';
+      msg.textContent = 'Om kontot finns har vi skickat en återställningslänk till din email.';
+    }
+  }
+}
 
 async function logout() {
   closeSideMenu();
@@ -251,6 +328,14 @@ function restoreSettings() {
   if (unitToggle) unitToggle.checked = unit === 'mi';
   const wsToggle = document.querySelector('#weekstart-toggle input');
   if (wsToggle) wsToggle.checked = ws === 'sun';
+
+  const wkCol = localStorage.getItem('nvdp_dash_week_collapsed');
+  const dashPanel = document.getElementById('dash-week-collapsible');
+  const dashBtn = document.getElementById('dash-schema-toggle');
+  if (wkCol === '1' && dashPanel && dashBtn) {
+    dashPanel.classList.add('dash-week-collapsed');
+    dashBtn.setAttribute('aria-expanded', 'false');
+  }
 }
 
 function restoreEmailNotifToggle() {
@@ -445,6 +530,7 @@ async function initApp(user, accessToken) {
 //  NAVIGATION
 // ═══════════════════════
 function navigate(view) {
+  // NAV-02: bottennav data-view="progress" → vy-element #view-trends ("Din progress"). Håll mappningen synkad.
   currentView = view;
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -699,7 +785,10 @@ function getProfileByName(name) {
 // ═══════════════════════
 async function loadDashboard() {
   showViewLoading('view-dashboard');
-  try { await _loadDashboard(); } catch (e) { console.error('Dashboard error:', e); }
+  try { await _loadDashboard(); } catch (e) {
+    console.error('Dashboard error:', e);
+    showToast('Kunde inte ladda dashboard. Kontrollera anslutningen.');
+  }
   hideViewLoading('view-dashboard');
 }
 let _dashWeekOffset = 0;
@@ -918,6 +1007,83 @@ function dashCalSelectDay(dateStr) {
     const selDay = new Date(dateStr + 'T12:00:00').getDate();
     if (day === selDay && !c.classList.contains('cal-today')) c.classList.add('cal-selected');
   });
+  if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 600px)').matches) {
+    document.getElementById('dash-day-card')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+function quickLogFromDashboard() {
+  const d = _dashSelectedDate || isoDate(new Date());
+  navigate('log');
+  requestAnimationFrame(() => {
+    const inp = document.getElementById('log-date');
+    if (inp) inp.value = d;
+    suggestLogMinutesFromHistory();
+  });
+}
+
+function toggleDashWeekSection() {
+  const panel = document.getElementById('dash-week-collapsible');
+  const btn = document.getElementById('dash-schema-toggle');
+  if (!panel || !btn) return;
+  panel.classList.toggle('dash-week-collapsed');
+  const collapsed = panel.classList.contains('dash-week-collapsed');
+  btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  localStorage.setItem('nvdp_dash_week_collapsed', collapsed ? '1' : '0');
+}
+
+function updateSchemaEmptyBanner() {
+  const container = document.getElementById('schema-content');
+  const banner = document.getElementById('dash-schema-empty');
+  const planBtn = document.getElementById('dash-empty-plan-btn');
+  if (!container || !banner) return;
+  const hasWorkoutCards = container.querySelector('.clickable-workout');
+  let hasPlanContent = false;
+  container.querySelectorAll('.sr-card').forEach(card => {
+    if (card.querySelector('.clickable-workout')) hasPlanContent = true;
+    const t = card.querySelector('.sr-plan-text');
+    if (t && t.textContent.replace(/\s+/g, ' ').trim().length > 0) hasPlanContent = true;
+  });
+  const empty = !hasWorkoutCards && !hasPlanContent;
+  banner.classList.toggle('hidden', !empty);
+  if (planBtn) planBtn.classList.toggle('hidden', !PLAN_GENERATION_ENABLED);
+}
+
+function toggleEffortHelp() {
+  const p = document.getElementById('effort-help-panel');
+  const b = document.querySelector('.effort-help-btn');
+  if (!p) return;
+  p.classList.toggle('hidden');
+  const hidden = p.classList.contains('hidden');
+  if (b) b.setAttribute('aria-expanded', hidden ? 'false' : 'true');
+}
+
+function toggleIntensityMore() {
+  const ex = document.getElementById('intensity-pills-extra');
+  const btn = document.getElementById('intensity-more-btn');
+  if (!ex || !btn) return;
+  ex.classList.toggle('hidden');
+  btn.textContent = ex.classList.contains('hidden') ? 'Visa fler zoner' : 'Dölj extra zoner';
+}
+
+function suggestLogMinutesFromHistory() {
+  const type = document.getElementById('log-type')?.value;
+  if (!type) return;
+  try {
+    const raw = localStorage.getItem('nvdp_avg_min_' + type);
+    if (!raw) return;
+    const n = parseInt(raw, 10);
+    const minsEl = document.getElementById('log-minutes');
+    if (n > 0 && n <= 600 && minsEl) {
+      minsEl.value = String(n);
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function copyGroupInviteCode() {
+  const code = document.getElementById('group-share-code')?.textContent?.trim();
+  if (!code || code === '———') return;
+  navigator.clipboard?.writeText(code).then(() => showToast('Kod kopierad')).catch(() => showToast('Kunde inte kopiera'));
 }
 
 let _recentWorkouts = [];
@@ -1022,6 +1188,7 @@ function activityEmoji(type) {
 //  WORKOUT MODAL (Edit / Delete)
 // ═══════════════════════
 async function openWorkoutModal(w) {
+  _wmFocusBefore = document.activeElement;
   selectedWorkout = w;
   const isOwn = w.profile_id === currentProfile.id;
   const ownerProfile = allProfiles.find(p => p.id === w.profile_id);
@@ -1105,7 +1272,7 @@ async function openWorkoutModal(w) {
     body += lapsHtml;
   }
 
-  if (w.map_polyline && typeof L !== 'undefined') {
+  if (w.map_polyline) {
     body += `<div id="wm-map" style="height:200px;border-radius:8px;margin:12px 0;"></div>`;
   }
 
@@ -1114,17 +1281,19 @@ async function openWorkoutModal(w) {
 
   document.getElementById('wm-body').innerHTML = body;
 
-  if (w.map_polyline && typeof L !== 'undefined') {
-    setTimeout(() => {
-      const mapEl = document.getElementById('wm-map');
-      if (!mapEl) return;
-      const coords = decodePolyline(w.map_polyline);
-      if (coords.length === 0) return;
-      const map = L.map(mapEl, { zoomControl: false, attributionControl: false });
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
-      const line = L.polyline(coords, { color: '#2E86C1', weight: 3, opacity: 0.8 }).addTo(map);
-      map.fitBounds(line.getBounds(), { padding: [20, 20] });
-    }, 100);
+  if (w.map_polyline) {
+    ensureLeafletLoaded().then(() => {
+      setTimeout(() => {
+        const mapEl = document.getElementById('wm-map');
+        if (!mapEl || typeof L === 'undefined') return;
+        const coords = decodePolyline(w.map_polyline);
+        if (coords.length === 0) return;
+        const map = L.map(mapEl, { zoomControl: false, attributionControl: false });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+        const line = L.polyline(coords, { color: '#2E86C1', weight: 3, opacity: 0.8 }).addTo(map);
+        map.fitBounds(line.getBounds(), { padding: [20, 20] });
+      }, 100);
+    }).catch(() => {});
   }
 
   const actionsEl = document.getElementById('wm-edit-actions');
@@ -1259,6 +1428,10 @@ async function handleDeleteComment(commentId, workoutId) {
 function closeWorkoutModal() {
   document.getElementById('workout-modal').classList.add('hidden');
   selectedWorkout = null;
+  if (_wmFocusBefore && typeof _wmFocusBefore.focus === 'function') {
+    try { _wmFocusBefore.focus(); } catch (e) { /* ignore */ }
+  }
+  _wmFocusBefore = null;
 }
 
 function editWorkout() {
@@ -1345,6 +1518,17 @@ document.getElementById('log-form').addEventListener('submit', async (e) => {
   }
 
   editingWorkoutId = null;
+  try {
+    const keyMin = 'nvdp_avg_min_' + type;
+    const keyN = 'nvdp_avg_n_' + type;
+    const prevN = parseInt(localStorage.getItem(keyN) || '0', 10);
+    const prevAvg = parseInt(localStorage.getItem(keyMin) || '0', 10);
+    const newN = prevN + 1;
+    const newAvg = prevN > 0 ? Math.round((prevAvg * prevN + mins) / newN) : mins;
+    localStorage.setItem(keyMin, String(newAvg));
+    localStorage.setItem(keyN, String(newN));
+  } catch (e) { /* ignore */ }
+
   document.getElementById('log-form-container').classList.add('hidden');
   document.getElementById('log-success').classList.remove('hidden');
   const intLabel = intensity ? ` (${intensity})` : '';
@@ -1360,6 +1544,12 @@ function resetLogForm() {
   document.getElementById('log-time').value = '';
   document.getElementById('log-intensity').value = '';
   document.querySelectorAll('.intensity-pill').forEach(p => p.classList.remove('active'));
+  const ex = document.getElementById('intensity-pills-extra');
+  const imb = document.getElementById('intensity-more-btn');
+  if (ex && !ex.classList.contains('hidden')) {
+    ex.classList.add('hidden');
+    if (imb) imb.textContent = 'Visa fler zoner';
+  }
   document.getElementById('log-form').querySelector('[type="submit"]').textContent = 'Spara pass';
 }
 
@@ -1436,6 +1626,7 @@ async function _loadSchema() {
 
     renderSchema(workouts, plans, targetMonday, deload, invitations, isOwnSchema, profile);
   }
+  updateSchemaEmptyBanner();
 }
 
 // ── Calendar Strip ──
@@ -1983,9 +2174,13 @@ function setEffortMode(mode) {
 
 async function loadTrends() {
   if (!currentProfile) return;
+  document.querySelectorAll('#view-trends .chart-skeleton').forEach(el => el.classList.add('active'));
   showViewLoading('view-trends');
   try { await _loadTrends(); } catch (e) { console.error('Trends error:', e); }
-  hideViewLoading('view-trends');
+  finally {
+    hideViewLoading('view-trends');
+    document.querySelectorAll('#view-trends .chart-skeleton').forEach(el => el.classList.remove('active'));
+  }
 }
 async function _loadTrends() {
   const myWorkouts = await fetchWorkouts(currentProfile.id);
@@ -2579,7 +2774,14 @@ function renderEffortChart(workouts) {
           callbacks: {
             label: c => c.dataset.label === 'Belastning (n·h)'
               ? `Belastning: ${c.parsed.y.toFixed(1)} n·h`
-              : `Timmar: ${c.parsed.y.toFixed(1)}h`
+              : `Timmar: ${c.parsed.y.toFixed(1)} h`,
+            afterBody: (items) => {
+              if (!items.length) return [];
+              const i = items[0].dataIndex;
+              const e = effortData[i];
+              const h = hoursData[i];
+              return [`Sammanhang: ${e.toFixed(1)} n·h  ·  ${h.toFixed(1)} h faktisk tid`];
+            },
           }
         }
       },
@@ -2680,6 +2882,8 @@ async function _loadGroup() {
     _cachedGroupCode = group.code;
     _cachedGroupCreatedBy = group.created_by;
     document.getElementById('group-subtitle').textContent = group.name;
+    const shareCode = document.getElementById('group-share-code');
+    if (shareCode) shareCode.textContent = group.code || '———';
   }
 
   // Fetch group members
@@ -2899,6 +3103,7 @@ async function createGroup() {
         body: JSON.stringify({ group_id: created[0].id })
       });
       currentProfile.group_id = created[0].id;
+      showToast('Grupp skapad — dela koden med vänner.');
       loadGroup();
     }
   } catch (e) { console.error('Create group error:', e); }
@@ -2926,6 +3131,7 @@ async function joinGroup() {
       body: JSON.stringify({ group_id: groups[0].id })
     });
     currentProfile.group_id = groups[0].id;
+    showToast('Du gick med i gruppen!');
     loadGroup();
   } catch (e) { errEl.textContent = 'Något gick fel'; errEl.classList.remove('hidden'); }
 }
@@ -3458,11 +3664,7 @@ function updateStravaUI() {
         <div class="strava-actions">
           <button class="strava-sync-btn" id="strava-sync-btn" onclick="syncStrava()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            Synka nu
-          </button>
-          <button class="strava-sync-btn" id="strava-resync-btn" onclick="fullResyncStrava()" style="background:var(--accent2,#f59e0b)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            Hämta all data
+            Synka
           </button>
           <button class="strava-disconnect-btn" onclick="disconnectStrava()">Koppla från</button>
         </div>
@@ -3522,7 +3724,7 @@ async function syncStrava() {
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ profile_id: currentProfile.id }),
+      body: JSON.stringify({ profile_id: currentProfile.id, since: P1_START }),
     });
 
     const result = await res.json();
@@ -3541,42 +3743,7 @@ async function syncStrava() {
     await showAlertModal('Synk-fel', 'Nätverksfel vid synkning');
   }
 
-  if (btn) { btn.classList.remove('syncing'); btn.textContent = 'Synka nu'; }
-}
-
-async function fullResyncStrava() {
-  if (!_stravaConnection || !currentProfile) return;
-  const btn = document.getElementById('strava-resync-btn');
-  if (btn) { btn.classList.add('syncing'); btn.textContent = 'Hämtar...'; }
-
-  try {
-    const { data: { session } } = await sb.auth.getSession();
-    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/strava-sync', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + session.access_token,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ profile_id: currentProfile.id, since: '2026-03-02' }),
-    });
-
-    const result = await res.json();
-    if (res.ok) {
-      _stravaConnection.last_sync_at = result.last_sync_at;
-      updateStravaUI();
-      const errInfo = result.debug?.firstError ? `\nFel: ${result.debug.firstError}` : '';
-      const debugInfo = result.debug ? `\nHämtade ${result.totalFetched}, importerade ${result.imported}, skippade ${result.skipped}${errInfo}` : '';
-      await showAlertModal('Full synk klar', `${result.imported} pass uppdaterade.${debugInfo}`);
-      navigate(currentView);
-    } else {
-      await showAlertModal('Synk-fel', result.error || 'Okänt fel');
-    }
-  } catch (e) {
-    console.error('Strava full resync error:', e);
-    await showAlertModal('Synk-fel', 'Nätverksfel vid synkning');
-  }
-
-  if (btn) { btn.classList.remove('syncing'); btn.textContent = 'Hämta all data'; }
+  if (btn) { btn.classList.remove('syncing'); btn.textContent = 'Synka'; }
 }
 
 function handleStravaRedirect() {
@@ -4078,6 +4245,9 @@ function updateWizardUI() {
 
   const nextBtn = document.getElementById('wiz-next');
   nextBtn.textContent = _wizardStep === 3 ? 'Generera schema' : 'Nästa';
+
+  const stepBanner = document.getElementById('wizard-step-banner');
+  if (stepBanner) stepBanner.textContent = `Steg ${_wizardStep + 1} av 4`;
 
   // Init day button toggles
   document.querySelectorAll('.wiz-day-btn').forEach(btn => {
@@ -4758,7 +4928,12 @@ function buildSocialStatsRow(w) {
   return parts.length ? `<div class="sf-stats-row">${parts.join('')}</div>` : '';
 }
 
-function initSocialFeedMaps() {
+async function initSocialFeedMaps() {
+  try {
+    await ensureLeafletLoaded();
+  } catch (e) {
+    return;
+  }
   if (typeof L === 'undefined') return;
   document.querySelectorAll('.wo-map[data-polyline]').forEach(el => {
     if (el.dataset.init) return;
@@ -4782,7 +4957,8 @@ async function renderSocialFeed(append) {
   const feedIds = [currentProfile.id, ...friendIds];
 
   if (feedIds.length === 0) {
-    feedEl.innerHTML = '<div class="sf-empty">Lägg till vänner för att se deras aktiviteter i flödet.</div>';
+    feedEl.innerHTML = `<div class="sf-empty">Lägg till vänner för att se deras aktiviteter i flödet.</div>
+      <button type="button" class="btn btn-sm btn-primary" style="margin-top:12px;" onclick="toggleFriendSearch()">Bjud in vänner</button>`;
     moreBtn.classList.add('hidden');
     return;
   }
@@ -4795,7 +4971,10 @@ async function renderSocialFeed(append) {
     .range(offset, offset + SOCIAL_FEED_PAGE_SIZE - 1);
 
   if (!workouts || workouts.length === 0) {
-    if (!append) feedEl.innerHTML = '<div class="sf-empty">Inga pass att visa. Dina vänner har inte loggat något ännu.</div>';
+    if (!append) {
+      feedEl.innerHTML = `<div class="sf-empty">Inga pass att visa ännu.</div>
+        <button type="button" class="btn btn-sm btn-ghost" style="margin-top:12px;" onclick="toggleFriendSearch()">Bjud in fler vänner</button>`;
+    }
     moreBtn.classList.add('hidden');
     return;
   }
@@ -4877,7 +5056,7 @@ async function renderSocialFeed(append) {
   }
 
   moreBtn.classList.toggle('hidden', workouts.length < SOCIAL_FEED_PAGE_SIZE);
-  requestAnimationFrame(() => initSocialFeedMaps());
+  requestAnimationFrame(() => { initSocialFeedMaps(); });
 }
 
 async function loadMoreSocialFeed() {
@@ -4965,3 +5144,31 @@ async function submitSocialComment(workoutId, input) {
     console.error('Submit comment error:', e);
   }
 }
+
+// MOD-02: Escape stänger översta överlägg; fokus åter till utlösare där det stöds (t.ex. workout-modal).
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const confirmEl = document.getElementById('confirm-modal');
+  if (confirmEl && !confirmEl.classList.contains('hidden')) {
+    closeConfirmModal(false);
+    e.preventDefault();
+    return;
+  }
+  const chain = [
+    ['workout-modal', closeWorkoutModal],
+    ['member-profile-modal', closeMemberProfile],
+    ['plan-edit-modal', closePlanEditModal],
+    ['plan-manager', closePlanManager],
+    ['plan-wizard', closePlanWizard],
+    ['invite-picker', closeInvitePicker],
+    ['plan-modal', closePlanModal],
+  ];
+  for (const [id, fn] of chain) {
+    const el = document.getElementById(id);
+    if (el && !el.classList.contains('hidden')) {
+      fn();
+      e.preventDefault();
+      return;
+    }
+  }
+});

@@ -4,11 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NVDP</title>
-  <link rel="stylesheet" href="css/style.css?v=41">
+  <link rel="stylesheet" href="css/style.css?v=42">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
   <style>
     #gate {
@@ -91,30 +89,39 @@
   <div class="auth-box">
     <h1 id="auth-title">Logga in</h1>
     <p class="subtitle">NVDP</p>
+    <p class="auth-beta-note">Du är inne i beta. Åtkomstkoden är bara för att nå sidan — ditt NVDP-konto (email/lösenord) är separat.</p>
     <div id="auth-error" class="error-msg hidden"></div>
     <form id="auth-form">
       <div id="auth-name-group" class="hidden">
         <div class="form-row">
           <div class="form-group flex-1">
-            <label>Förnamn</label>
+            <label for="auth-firstname">Förnamn</label>
             <input type="text" id="auth-firstname" placeholder="Förnamn" minlength="2">
           </div>
           <div class="form-group flex-1">
-            <label>Efternamn</label>
+            <label for="auth-lastname">Efternamn</label>
             <input type="text" id="auth-lastname" placeholder="Efternamn" minlength="2">
           </div>
         </div>
       </div>
       <div class="form-group">
-        <label>Email</label>
+        <label for="auth-email">Email</label>
         <input type="email" id="auth-email" required placeholder="din@email.com">
       </div>
       <div class="form-group">
-        <label>Lösenord</label>
+        <label for="auth-password">Lösenord</label>
         <input type="password" id="auth-password" required placeholder="Minst 6 tecken" minlength="6">
       </div>
       <button type="submit" class="btn btn-primary" id="auth-submit">Logga in</button>
     </form>
+    <p class="toggle-link auth-forgot-wrap" id="auth-forgot-wrap">
+      <a href="#" id="auth-forgot-link" onclick="event.preventDefault();toggleForgotPassword();">Glömt lösenord?</a>
+    </p>
+    <div id="auth-forgot-panel" class="auth-forgot-panel hidden">
+      <p class="text-dim sm-text">Vi skickar en återställningslänk till din email (kräver att återställning är aktiverat i Supabase).</p>
+      <button type="button" class="btn btn-outline btn-sm" style="width:100%;margin-top:8px;" onclick="sendPasswordResetEmail()">Skicka länk</button>
+      <div id="auth-forgot-msg" class="error-msg hidden" style="margin-top:8px;"></div>
+    </div>
     <p class="toggle-link">
       <span id="auth-toggle-text">Inget konto?</span>
       <a id="auth-toggle" onclick="toggleAuthMode()">Skapa konto</a>
@@ -124,19 +131,20 @@
 
 <!-- ═══ APP SHELL ═══ -->
 <div id="app" class="app">
+  <div id="app-toast" class="app-toast hidden" role="status" aria-live="polite"></div>
 
   <!-- Top Bar -->
   <header class="topbar">
     <div class="logo">NVDP</div>
     <div class="user-info">
-      <button class="topbar-icon-btn" id="topbar-search-btn" onclick="toggleTopbarSearch()" title="Sök användare">
+      <button type="button" class="topbar-icon-btn" id="topbar-search-btn" onclick="toggleTopbarSearch()" title="Sök användare" aria-label="Sök användare">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       </button>
-      <button class="nudge-bell" id="nudge-bell" onclick="toggleNudgePanel()" title="Notiser">
+      <button type="button" class="nudge-bell" id="nudge-bell" onclick="toggleNudgePanel()" title="Notiser" aria-label="Notiser">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         <span class="nudge-badge hidden" id="nudge-badge">0</span>
       </button>
-      <div class="avatar" id="user-avatar" onclick="toggleSideMenu()"></div>
+      <div class="avatar" id="user-avatar" onclick="toggleSideMenu()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ')toggleSideMenu()" aria-label="Öppna meny" title="Meny"></div>
     </div>
   </header>
 
@@ -144,7 +152,7 @@
   <div id="topbar-search-panel" class="topbar-search-panel hidden">
     <div class="topbar-search-inner">
       <input type="text" id="topbar-search-input" class="topbar-search-input" placeholder="Sök användare..." oninput="topbarSearchUsers()" autocomplete="off">
-      <button class="btn-close" onclick="toggleTopbarSearch()" style="flex-shrink:0;">&times;</button>
+      <button type="button" class="btn-close" onclick="toggleTopbarSearch()" style="flex-shrink:0;" aria-label="Stäng sök">&times;</button>
     </div>
     <div id="topbar-search-results" class="topbar-search-results"></div>
   </div>
@@ -169,18 +177,18 @@
       </div>
     </div>
     <div class="sm-divider"></div>
+    <div class="sm-nav-group-label">Anslutningar</div>
     <div class="sm-section" id="sm-strava-section">
-      <div class="sm-section-title">Strava</div>
+      <div class="sm-section-title sm-section-title-sub">Strava</div>
       <div id="sm-strava-info"></div>
     </div>
-    <div class="sm-divider"></div>
     <div class="sm-section" id="sm-garmin-section">
-      <div class="sm-section-title">Garmin</div>
+      <div class="sm-section-title sm-section-title-sub">Garmin</div>
       <div id="sm-garmin-info"></div>
     </div>
     <div class="sm-divider"></div>
+    <div class="sm-nav-group-label">Utseende</div>
     <div class="sm-section">
-      <div class="sm-section-title">Inställningar</div>
       <div class="sm-setting-row">
         <span class="sm-setting-label">Ljust tema</span>
         <label class="ios-switch" id="theme-toggle">
@@ -202,6 +210,10 @@
           <span class="ios-slider"></span>
         </label>
       </div>
+    </div>
+    <div class="sm-divider"></div>
+    <div class="sm-nav-group-label">Hälsa &amp; notiser</div>
+    <div class="sm-section">
       <div class="sm-setting-row">
         <span class="sm-setting-label">Mailnotiser</span>
         <label class="ios-switch" id="email-notif-toggle">
@@ -210,13 +222,15 @@
         </label>
       </div>
       <div class="sm-setting-row">
-        <span class="sm-setting-label">Max puls (bpm)</span>
-        <input type="number" id="sm-max-hr" class="sm-setting-input" placeholder="t.ex. 195" min="100" max="230" style="width:80px;text-align:center;" onchange="saveMaxHR(this.value)">
+        <label class="sm-setting-label" for="sm-max-hr">Max puls (bpm)</label>
+        <input type="number" id="sm-max-hr" class="sm-setting-input" placeholder="t.ex. 195" min="100" max="230" style="width:80px;text-align:center;" onchange="saveMaxHR(this.value)" aria-describedby="sm-max-hr-hint">
       </div>
+      <p id="sm-max-hr-hint" class="sm-hint">Används för intensitetsberäkning när zoner saknas.</p>
     </div>
     <div class="sm-divider"></div>
+    <div class="sm-nav-group-label">Konto</div>
     <div class="sm-section">
-      <button class="sm-item sm-logout" onclick="logout()">
+      <button type="button" class="sm-item sm-logout" onclick="logout()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         Logga ut
       </button>
@@ -227,7 +241,7 @@
   <div id="nudge-panel" class="nudge-panel hidden">
     <div class="nudge-panel-header">
       <span class="card-title">Notiser</span>
-      <button class="btn-close" onclick="toggleNudgePanel()">&times;</button>
+      <button type="button" class="btn-close" onclick="toggleNudgePanel()" aria-label="Stäng notiser">&times;</button>
     </div>
     <div id="nudge-list" class="nudge-list">
       <div class="empty-state"><p>Inga notiser</p></div>
@@ -239,17 +253,18 @@
 
     <!-- ── DASHBOARD ── -->
     <section id="view-dashboard" class="view">
-      <div class="page-header">
-        <h2 id="dash-greeting">Hej!</h2>
+      <div class="page-header page-header--dashboard">
+        <h1 class="dash-page-title">Ditt schema</h1>
+        <h2 id="dash-greeting" class="dash-greeting-sub">Hej!</h2>
         <p id="dash-date"></p>
       </div>
 
       <!-- Calendar strip with navigation -->
       <div class="cal-strip-wrapper">
         <div class="cal-strip-header">
-          <button class="cal-strip-arrow" onclick="dashCalPrev()">‹</button>
+          <button type="button" class="cal-strip-arrow" onclick="dashCalPrev()" aria-label="Föregående vecka i kalendern">‹</button>
           <span class="cal-strip-month" id="cal-strip-month"></span>
-          <button class="cal-strip-arrow" onclick="dashCalNext()">›</button>
+          <button type="button" class="cal-strip-arrow" onclick="dashCalNext()" aria-label="Nästa vecka i kalendern">›</button>
         </div>
         <div class="cal-strip-scroll-area">
           <div class="cal-strip-track" id="cal-strip-track"></div>
@@ -261,9 +276,15 @@
         <div id="dash-day-content"></div>
       </div>
 
-      <!-- ── Veckoschema (merged from schema view) ── -->
-      <div class="dash-schema-divider">Veckoschema</div>
+      <button type="button" class="dash-log-fab" onclick="quickLogFromDashboard()" aria-label="Logga pass för vald dag">+ Logga pass</button>
 
+      <!-- ── Veckoschema (merged from schema view) ── -->
+      <button type="button" class="dash-schema-toggle" id="dash-schema-toggle" aria-expanded="true" aria-controls="dash-week-collapsible" onclick="toggleDashWeekSection()">
+        <span class="dash-schema-toggle-label">Veckoschema</span>
+        <span class="dash-schema-chevron" aria-hidden="true">▼</span>
+      </button>
+
+      <div id="dash-week-collapsible" class="dash-week-collapsible">
       <div id="plan-info-bar" class="plan-info-bar hidden">
         <div class="pib-left">
           <div class="pib-goal" id="pib-goal"></div>
@@ -291,6 +312,15 @@
       </div>
 
       <div id="schema-content"></div>
+      <div id="dash-schema-empty" class="dash-schema-empty hidden empty-state empty-state--inline">
+        <div class="empty-state-icon" aria-hidden="true">&#128197;</div>
+        <p>Ingen plan eller pass denna vecka.</p>
+        <div class="dash-schema-empty-actions">
+          <button type="button" class="btn btn-primary btn-sm" onclick="navigate('log')">Logga första passet</button>
+          <button type="button" class="btn btn-outline btn-sm hidden" id="dash-empty-plan-btn" onclick="openPlanManager()">Skapa plan</button>
+        </div>
+      </div>
+      </div>
 
     </section>
 
@@ -304,28 +334,28 @@
       <div id="log-form-container">
         <div class="card">
           <form id="log-form">
-            <div class="form-row">
-              <div class="form-group flex-1">
-                <label>Datum</label>
-                <input type="date" id="log-date" required>
-              </div>
-              <div class="form-group flex-1">
-                <label>Tid</label>
-                <input type="time" id="log-time">
-              </div>
-            </div>
             <div class="form-group">
-              <label>Aktivitet</label>
+              <label for="log-type">Aktivitet</label>
               <select id="log-type" required>
                 <option value="">Välj typ...</option>
               </select>
             </div>
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="log-date">Datum</label>
+                <input type="date" id="log-date" required>
+              </div>
+              <div class="form-group flex-1">
+                <label for="log-time">Tid</label>
+                <input type="time" id="log-time">
+              </div>
+            </div>
             <div class="form-group">
-              <label>Tid (minuter)</label>
+              <label for="log-minutes">Tid (minuter)</label>
               <input type="number" id="log-minutes" required min="1" max="600" placeholder="45">
             </div>
             <div class="form-group">
-              <label>Distans (km, valfritt)</label>
+              <label for="log-distance">Distans (km, valfritt)</label>
               <input type="number" id="log-distance" min="0" max="999" step="0.1" placeholder="5.0">
             </div>
             <div class="form-group">
@@ -335,10 +365,17 @@
                 <button type="button" class="intensity-pill" data-value="Kvalitet">Kvalitet</button>
                 <button type="button" class="intensity-pill" data-value="Annat">Annat</button>
               </div>
+              <div id="intensity-pills-extra" class="intensity-pills intensity-pills-extra hidden">
+                <button type="button" class="intensity-pill" data-value="Z1">Z1</button>
+                <button type="button" class="intensity-pill" data-value="Z3">Z3</button>
+                <button type="button" class="intensity-pill" data-value="Z4">Z4</button>
+                <button type="button" class="intensity-pill" data-value="Z5">Z5</button>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm intensity-more-btn" id="intensity-more-btn" onclick="toggleIntensityMore()">Visa fler zoner</button>
               <input type="hidden" id="log-intensity" value="">
             </div>
             <div class="form-group">
-              <label>Anteckning (valfritt)</label>
+              <label for="log-notes">Anteckning (valfritt)</label>
               <textarea id="log-notes" placeholder="Hur kändes det?"></textarea>
             </div>
             <button type="submit" class="btn btn-primary">Spara pass</button>
@@ -350,7 +387,10 @@
         <div class="check">&#10003;</div>
         <h3>Pass sparat!</h3>
         <p id="log-success-text"></p>
-        <button class="btn btn-ghost mt-16" onclick="resetLogForm()">Logga ett till</button>
+        <div class="log-success-actions">
+          <button type="button" class="btn btn-primary" onclick="navigate('dashboard')">Till dashboard</button>
+          <button type="button" class="btn btn-outline" onclick="resetLogForm()">Logga ett till</button>
+        </div>
       </div>
     </section>
 
@@ -361,33 +401,40 @@
         <p>Personliga trender och statistik</p>
       </div>
 
-      <div class="ios-toggle-row">
-        <span class="ios-toggle-label">Cardio</span>
-        <label class="ios-switch" id="trend-mode-toggle">
-          <input type="checkbox" onchange="setTrendMode(this.checked?'total':'cardio')">
-          <span class="ios-slider"></span>
-        </label>
-        <span class="ios-toggle-label">+ Gym</span>
+      <div class="trends-toggle-wrap" role="group" aria-label="Grafinställningar">
+        <div class="ios-toggle-row ios-toggle-inline">
+          <span class="ios-toggle-label">Cardio</span>
+          <label class="ios-switch" id="trend-mode-toggle">
+            <input type="checkbox" onchange="setTrendMode(this.checked?'total':'cardio')">
+            <span class="ios-slider"></span>
+          </label>
+          <span class="ios-toggle-label">+ Gym</span>
+        </div>
+        <div class="ios-toggle-row ios-toggle-inline">
+          <span class="ios-toggle-label">Absolut (h)</span>
+          <label class="ios-switch" id="effort-mode-toggle">
+            <input type="checkbox" onchange="setEffortMode(this.checked?'normalized':'absolute')">
+            <span class="ios-slider"></span>
+          </label>
+          <span class="ios-toggle-label">Normaliserad</span>
+          <button type="button" class="effort-help-btn" onclick="toggleEffortHelp()" aria-expanded="false" aria-controls="effort-help-panel" title="Vad betyder normaliserad belastning?">?</button>
+        </div>
       </div>
-      <div class="ios-toggle-row">
-        <span class="ios-toggle-label">Absolut (h)</span>
-        <label class="ios-switch" id="effort-mode-toggle">
-          <input type="checkbox" onchange="setEffortMode(this.checked?'normalized':'absolute')">
-          <span class="ios-slider"></span>
-        </label>
-        <span class="ios-toggle-label">Normaliserad</span>
+      <div id="effort-help-panel" class="effort-help-panel hidden" role="region" aria-label="Förklaring effort">
+        <strong>Normaliserad</strong> visar belastning som MET × tid × höjd × intensitet (pulszoner, upplevd ansträngning eller vald zon), skalad till <em>n·h</em> så det är jämförbart mellan veckor.
+        <span class="text-dim"> Absolut = faktiska träningstimmar (ev. vikt per aktivitet).</span>
       </div>
 
       <div id="volume-delta"></div>
 
       <div class="card">
         <div class="card-title mb-8" id="trends-weekly-title">Timmar per vecka</div>
-        <div class="chart-container"><canvas id="chart-weekly"></canvas></div>
+        <div class="chart-container chart-container--skeleton" id="chart-weekly-wrap"><div class="chart-skeleton" id="chart-skeleton-weekly"></div><canvas id="chart-weekly"></canvas></div>
       </div>
 
       <div class="card">
         <div class="card-title mb-8" id="trends-mix-title">Aktivitetsmix (timmar)</div>
-        <div class="chart-container"><canvas id="chart-mix-personal"></canvas></div>
+        <div class="chart-container chart-container--skeleton" id="chart-mix-wrap"><div class="chart-skeleton" id="chart-skeleton-mix"></div><canvas id="chart-mix-personal"></canvas></div>
       </div>
 
       <div class="card streak-card">
@@ -419,7 +466,7 @@
         <div class="card-header">
           <span class="card-title">Effort per vecka</span>
         </div>
-        <div class="chart-container"><canvas id="chart-effort"></canvas></div>
+        <div class="chart-container chart-container--skeleton" id="chart-effort-wrap"><div class="chart-skeleton" id="chart-skeleton-effort"></div><canvas id="chart-effort"></canvas></div>
         <div class="effort-legend" id="effort-legend"></div>
       </div>
 
@@ -439,6 +486,7 @@
       <div class="page-header">
         <h2>Social</h2>
         <p>Vänner och aktiviteter</p>
+        <p class="view-scope-hint">Social = vänner och gemensamt flöde.</p>
       </div>
 
       <div class="card" id="social-friends-card">
@@ -468,6 +516,7 @@
       <div class="page-header">
         <h2>Grupp</h2>
         <p id="group-subtitle">Din träningsgrupp</p>
+        <p class="view-scope-hint">Grupp = gemensam kod, jämförelser och gruppledare.</p>
       </div>
 
       <!-- No group state -->
@@ -494,6 +543,16 @@
 
       <!-- Has group state -->
       <div id="group-has-group" class="hidden">
+        <div class="card" id="group-share-card">
+          <div class="card-header">
+            <span class="card-title">Dela gruppkod</span>
+          </div>
+          <p class="text-dim sm-text">Bjud in andra med samma kod.</p>
+          <div class="group-code-row">
+            <code id="group-share-code" class="group-share-code">———</code>
+            <button type="button" class="btn btn-sm btn-primary" onclick="copyGroupInviteCode()">Kopiera</button>
+          </div>
+        </div>
         <div class="card">
           <div class="card-header">
             <span class="card-title">Veckans leaderboard</span>
@@ -509,24 +568,26 @@
         </div>
 
         <div class="card">
-          <div class="card-header">
+          <div class="card-header card-header--stack">
             <span class="card-title" id="grp-chart-title">Timmar per vecka</span>
-          <div class="ios-toggle-row" style="margin:0;gap:6px;">
-            <span class="ios-toggle-label" style="font-size:0.75rem;">Cardio</span>
-            <label class="ios-switch ios-switch-sm" id="grp-chart-toggle">
-              <input type="checkbox" onchange="setGrpChartMode(this.checked?'total':'cardio')">
-              <span class="ios-slider"></span>
-            </label>
-            <span class="ios-toggle-label" style="font-size:0.75rem;">+ Gym</span>
           </div>
-        </div>
-          <div class="ios-toggle-row" style="margin:0 0 8px;gap:6px;">
-            <span class="ios-toggle-label" style="font-size:0.75rem;">Absolut</span>
-            <label class="ios-switch ios-switch-sm" id="grp-effort-toggle">
-              <input type="checkbox" onchange="setGrpEffortMode(this.checked?'normalized':'absolute')">
-              <span class="ios-slider"></span>
-            </label>
-            <span class="ios-toggle-label" style="font-size:0.75rem;">Norm.</span>
+          <div class="trends-toggle-wrap trends-toggle-wrap--sm" role="group" aria-label="Gruppgrafer">
+            <div class="ios-toggle-row ios-toggle-inline">
+              <span class="ios-toggle-label sm-lab">Cardio</span>
+              <label class="ios-switch ios-switch-sm" id="grp-chart-toggle">
+                <input type="checkbox" onchange="setGrpChartMode(this.checked?'total':'cardio')">
+                <span class="ios-slider"></span>
+              </label>
+              <span class="ios-toggle-label sm-lab">+ Gym</span>
+            </div>
+            <div class="ios-toggle-row ios-toggle-inline">
+              <span class="ios-toggle-label sm-lab">Absolut</span>
+              <label class="ios-switch ios-switch-sm" id="grp-effort-toggle">
+                <input type="checkbox" onchange="setGrpEffortMode(this.checked?'normalized':'absolute')">
+                <span class="ios-slider"></span>
+              </label>
+              <span class="ios-toggle-label sm-lab">Normaliserad</span>
+            </div>
           </div>
           <div class="chart-container"><canvas id="chart-group-weekly"></canvas></div>
         </div>
@@ -635,10 +696,11 @@
 
 <!-- ═══ WORKOUT DETAIL MODAL ═══ -->
 <div id="workout-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeWorkoutModal()">
-  <div class="modal-box">
+  <div class="modal-box workout-modal-panel">
     <div class="modal-header">
+      <button type="button" class="wm-back-btn" onclick="closeWorkoutModal()" aria-label="Stäng pass">&larr;</button>
       <h3 id="wm-title">Pass</h3>
-      <button class="btn-close" onclick="closeWorkoutModal()">&times;</button>
+      <button type="button" class="btn-close" onclick="closeWorkoutModal()" aria-label="Stäng">&times;</button>
     </div>
     <div id="wm-body"></div>
     <div class="modal-actions" id="wm-edit-actions">
@@ -681,6 +743,7 @@
     </div>
 
     <!-- Progress indicator -->
+    <div class="wizard-step-banner" id="wizard-step-banner" aria-live="polite">Steg 1 av 4</div>
     <div class="wizard-progress">
       <div class="wizard-step-dot active" data-step="0"></div>
       <div class="wizard-step-line"></div>
@@ -862,7 +925,7 @@
 </div>
 
 <script src="js/config.js?v=27"></script>
-<script src="js/app.js?v=46"></script>
+<script src="js/app.js?v=48"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {
