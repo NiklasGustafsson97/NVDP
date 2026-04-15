@@ -3731,9 +3731,13 @@ async function syncStrava() {
     if (res.ok) {
       _stravaConnection.last_sync_at = result.last_sync_at;
       updateStravaUI();
-      const errInfo = result.debug?.firstError ? `\nFel: ${result.debug.firstError}` : '';
-      const debugInfo = result.debug ? `\nHämtade ${result.totalFetched}, importerade ${result.imported}, skippade ${result.skipped}${errInfo}` : '';
-      await showAlertModal('Synk klar', `${result.imported} pass importerade.${debugInfo}`);
+      if (result.debug) console.log('Strava sync debug:', result.debug);
+      let msg = result.imported > 0
+        ? `${result.imported} nya pass importerade.`
+        : 'Inga nya pass att importera.';
+      if (result.skipped > 0) msg += `\n${result.skipped} pass hoppades över.`;
+      if (result.debug?.firstError) msg += '\nVissa pass kunde inte sparas — kontakta admin om det upprepas.';
+      await showAlertModal('Synk klar', msg);
       navigate(currentView);
     } else {
       await showAlertModal('Synk-fel', result.error || 'Okänt fel');
@@ -3867,9 +3871,13 @@ async function syncGarmin() {
     if (res.ok) {
       _garminConnection.last_sync_at = result.last_sync_at;
       updateGarminUI();
-      const errInfo = result.debug?.firstError ? `\nFel: ${result.debug.firstError}` : '';
-      const debugInfo = result.debug ? `\nHämtade ${result.totalFetched}, importerade ${result.imported}, skippade ${result.skipped}${errInfo}` : '';
-      await showAlertModal('Synk klar', `${result.imported} pass importerade.${debugInfo}`);
+      if (result.debug) console.log('Garmin sync debug:', result.debug);
+      let msg = result.imported > 0
+        ? `${result.imported} nya pass importerade.`
+        : 'Inga nya pass att importera.';
+      if (result.skipped > 0) msg += `\n${result.skipped} pass hoppades över.`;
+      if (result.debug?.firstError) msg += '\nVissa pass kunde inte sparas — kontakta admin om det upprepas.';
+      await showAlertModal('Synk klar', msg);
       navigate(currentView);
     } else {
       await showAlertModal('Synk-fel', result.error || 'Okänt fel');
