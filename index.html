@@ -427,6 +427,14 @@
 
       <div id="volume-delta"></div>
 
+      <div class="card" id="effort-card">
+        <div class="card-header">
+          <span class="card-title">Effort per vecka</span>
+        </div>
+        <div class="chart-container chart-container--skeleton" id="chart-effort-wrap"><div class="chart-skeleton" id="chart-skeleton-effort"></div><canvas id="chart-effort"></canvas></div>
+        <div class="effort-legend" id="effort-legend"></div>
+      </div>
+
       <div class="card">
         <div class="card-title mb-8" id="trends-weekly-title">Timmar per vecka</div>
         <div class="chart-container chart-container--skeleton" id="chart-weekly-wrap"><div class="chart-skeleton" id="chart-skeleton-weekly"></div><canvas id="chart-weekly"></canvas></div>
@@ -460,14 +468,6 @@
           </div>
         </div>
         <div id="season-activity-bars"></div>
-      </div>
-
-      <div class="card" id="effort-card">
-        <div class="card-header">
-          <span class="card-title">Effort per vecka</span>
-        </div>
-        <div class="chart-container chart-container--skeleton" id="chart-effort-wrap"><div class="chart-skeleton" id="chart-skeleton-effort"></div><canvas id="chart-effort"></canvas></div>
-        <div class="effort-legend" id="effort-legend"></div>
       </div>
 
       <div id="weekly-summary-card" class="card hidden">
@@ -925,7 +925,7 @@
 </div>
 
 <script src="js/config.js?v=27"></script>
-<script src="js/app.js?v=48"></script>
+<script src="js/app.js?v=49"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {
