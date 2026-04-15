@@ -1396,6 +1396,28 @@ function decodePolyline(encoded) {
   return coords;
 }
 
+function polylineToSvg(coords, width, height) {
+  if (!coords || coords.length < 2) return '';
+  const pad = 8;
+  const w = width || 120;
+  const h = height || 120;
+  const lats = coords.map(c => c[0]);
+  const lngs = coords.map(c => c[1]);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+  const dLat = maxLat - minLat || 0.001;
+  const dLng = maxLng - minLng || 0.001;
+  const scale = Math.min((w - pad * 2) / dLng, (h - pad * 2) / dLat);
+  const points = coords.map(([lat, lng]) => {
+    const x = pad + (lng - minLng) * scale;
+    const y = pad + (maxLat - lat) * scale;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const svgW = Math.ceil(dLng * scale + pad * 2);
+  const svgH = Math.ceil(dLat * scale + pad * 2);
+  return `<svg viewBox="0 0 ${svgW} ${svgH}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="max-width:${w}px;max-height:${h}px;"><polyline points="${points}" fill="none" stroke="#3498db" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/></svg>`;
+}
+
 function timeAgo(isoStr) {
   const diff = Date.now() - new Date(isoStr).getTime();
   const mins = Math.floor(diff / 60000);
@@ -4949,10 +4971,11 @@ async function initSocialFeedMaps() {
     try {
       const coords = decodePolyline(el.dataset.polyline);
       if (coords.length < 2) { el.style.display = 'none'; return; }
-      const map = L.map(el, { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false });
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 18 }).addTo(map);
-      const line = L.polyline(coords, { color: '#2E86C1', weight: 3, opacity: 0.8 }).addTo(map);
-      map.fitBounds(line.getBounds(), { padding: [10, 10] });
+      const svgHtml = polylineToSvg(coords, el.offsetWidth || 120, el.offsetHeight || 120);
+      el.innerHTML = svgHtml;
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
     } catch (e) { el.style.display = 'none'; }
   });
 }
