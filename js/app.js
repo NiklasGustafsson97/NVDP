@@ -3733,6 +3733,7 @@ async function autoSyncStravaIfStale() {
     });
     if (res.ok) {
       const result = await res.json();
+      console.log(`Strava auto-sync: imported=${result.imported}, fetched=${result.totalFetched}, skipped=${result.skipped}`, result.debug);
       if (result.last_sync_at) _stravaConnection.last_sync_at = result.last_sync_at;
       updateStravaUI();
       if (result.imported > 0) navigate(currentView);
@@ -3833,7 +3834,7 @@ async function syncStrava() {
     if (res.ok) {
       if (result.last_sync_at) _stravaConnection.last_sync_at = result.last_sync_at;
       updateStravaUI();
-      if (result.debug) console.log('Strava sync debug:', result.debug);
+      console.log(`Strava sync: imported=${result.imported}, fetched=${result.totalFetched}, skipped=${result.skipped}`, result.debug);
       let msg;
       if (result.imported > 0) {
         msg = `${result.imported} nya pass importerade.`;

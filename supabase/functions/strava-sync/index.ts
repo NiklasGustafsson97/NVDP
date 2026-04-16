@@ -67,11 +67,12 @@ serve(async (req) => {
 
     const accessToken = await refreshTokenIfNeeded(conn);
 
+    const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
     let after: number;
     if (since) {
-      after = Math.floor(new Date(since).getTime() / 1000);
+      const sinceTs = Math.floor(new Date(since).getTime() / 1000);
+      after = Math.min(sinceTs, sevenDaysAgo);
     } else {
-      const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
       const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
       const lastSyncTs = conn.last_sync_at
         ? Math.floor(new Date(conn.last_sync_at).getTime() / 1000)
