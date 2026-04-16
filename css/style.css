@@ -604,8 +604,8 @@ select option { background: #1a1a2e; color: var(--text); }
   .cal-strip-wrapper { padding: 12px 6px 8px; }
   .cal-cell-num { width: 30px; height: 30px; font-size: 0.82rem; }
   .cal-strip-arrow { min-width: 44px; width: 44px; }
-  .sf-body-with-map { flex-direction: column; }
-  .wo-map-side { min-width: unset; max-width: unset; width: 100%; height: 130px; }
+  .sf-body-with-map { flex-direction: row; }
+  .wo-map-side { min-width: 80px; max-width: 100px; height: 60px; }
 
   .bottom-nav {
     height: auto;
@@ -763,13 +763,13 @@ select option { background: #1a1a2e; color: var(--text); }
 .wo-secondary { font-size: 0.72rem; color: var(--text-dim); margin-top: 3px; }
 .wo-notes { font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; font-style: italic; }
 .wo-map {
-  height: 120px; border-radius: 10px; overflow: hidden;
+  height: 70px; border-radius: 8px; overflow: hidden;
   pointer-events: none; position: relative; z-index: 0;
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.06);
 }
 .wo-map .leaflet-container { background: transparent !important; }
-.wo-map-side { min-width: 130px; max-width: 170px; flex-shrink: 0; height: 110px; }
+.wo-map-side { min-width: 90px; max-width: 110px; flex-shrink: 0; height: 65px; }
 .wo-map-mini {
   height: 60px; width: 80px; min-width: 80px; flex-shrink: 0;
   border-radius: 8px; margin-left: auto;
