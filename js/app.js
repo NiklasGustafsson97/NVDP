@@ -1832,16 +1832,16 @@ function estimateDurationFromDescription(description, storedMinutes) {
 
 function buildWorkoutBody(w, opts = {}) {
   const { showMap = false } = opts;
-  let html = '';
+  let text = '';
 
-  html += `<div class="wo-label">${w.activity_type}`;
-  if (w.intensity) html += ` <span class="intensity-badge">${w.intensity}</span>`;
-  html += '</div>';
+  text += `<div class="wo-label">${w.activity_type}`;
+  if (w.intensity) text += ` <span class="intensity-badge">${w.intensity}</span>`;
+  text += '</div>';
 
   const primary = [];
   if (w.duration_minutes) primary.push(`${w.duration_minutes} min`);
   if (w.distance_km) primary.push(`${w.distance_km} km`);
-  if (primary.length) html += `<div class="wo-meta">${primary.join(' · ')}</div>`;
+  if (primary.length) text += `<div class="wo-meta">${primary.join(' · ')}</div>`;
 
   const secondary = [];
   if (w.avg_hr) secondary.push(`\u2665 ${w.avg_hr} bpm`);
@@ -1852,13 +1852,13 @@ function buildWorkoutBody(w, opts = {}) {
     const pSec = String(Math.round((pace - pMin) * 60)).padStart(2, '0');
     secondary.push(`${pMin}:${pSec}/km`);
   }
-  if (secondary.length) html += `<div class="wo-secondary">${secondary.join('  ')}</div>`;
+  if (secondary.length) text += `<div class="wo-secondary">${secondary.join('  ')}</div>`;
 
   if (showMap && w.map_polyline) {
-    html += `<div class="wo-map" id="wo-map-${w.id}" data-polyline="${w.map_polyline}"></div>`;
+    return `<div class="wo-body-flex"><div class="wo-body-text">${text}</div><div class="wo-map wo-map-thumb" id="wo-map-${w.id}" data-polyline="${w.map_polyline}"></div></div>`;
   }
 
-  return html;
+  return text;
 }
 
 function activityIcon(type) {
