@@ -75,17 +75,21 @@ Quality sessions must be structured with exact intervals, recovery, and pace/HR 
 ## DESCRIPTION SPECIFICITY (critical requirement)
 
 Every non-rest workout description MUST include:
-- Exact structure (warm-up duration → intervals/main set → cool-down)
-- Pace guidance in min/km or HR zones (e.g., "5:30-5:50/km" or "puls 165-175")
-- For intervals: number of reps × duration, target pace/HR, recovery duration and type
-- For Z2 runs: target km and pace range
-- For long runs: target km, pace, and any progressive finish instructions
+- Exact structure (warm-up duration, main set, cool-down)
+- For intervals: number of reps x duration, target HR zone, recovery duration and type
+- For Z2 runs: target km and HR zone
+- For long runs: target km and any progressive finish instructions
+
+PACE AND HR RULES:
+- If the user provides HR data (resting HR, max HR), use Karvonen-calculated zones in descriptions (e.g., "puls 145-155").
+- If the user provides recent race times or easy pace, derive training paces from those. Example: if easy pace is 5:45/km, use that for Z2 descriptions.
+- If NO HR or pace data is provided, describe intensity using RPE and zone labels only (e.g., "Z2, lugnt pratstempo" or "Z4, ansträngt men kontrollerbart"). Do NOT invent specific pace numbers or HR values.
+- NEVER guess a user's pace per km or HR zones without data. Wrong pace prescriptions are worse than no pace prescriptions.
 
 BAD example: "45 min löpning inkl intervaller" (too vague)
-GOOD example: "15 min uppvärm Z2 → 5×3 min Z5 (puls 180+, ~3:50-4:15/km), 3 min lugn jogg mellan → 10 min nedvarvning"
-
-BAD example: "Långpass Z2: 90 min" (no km target, no pace)
-GOOD example: "16 km lugn Z2 (5:30-6:00/km). Sista 3 km progressivt mot Z4 (5:00→4:30/km)."
+BAD example: "8 km Z2 (5:30-6:00/km)" when no pace data was provided (invented numbers)
+GOOD example (with HR data): "15 min uppvärm Z2 (puls under 150) -> 5x3 min Z5 (puls 180+), 3 min lugn jogg -> 10 min nedvarvning"
+GOOD example (without data): "8 km lugn Z2 (pratstempo, RPE 3-4). Sista 3 km progressivt mot Z4."
 
 ## WEEK-TO-WEEK VARIATION
 
@@ -290,6 +294,11 @@ interface PlanRequest {
     activity_mix: Record<string, number>;
     fitness_level: string;
     longest_session_minutes: number;
+    resting_hr?: number | null;
+    max_hr?: number | null;
+    recent_5k?: string | null;
+    recent_10k?: string | null;
+    easy_pace?: string | null;
   };
   preferences: {
     activity_types: string[];
@@ -324,6 +333,26 @@ function buildUserPrompt(req: PlanRequest, workoutHistory: string): string {
     numWeeks = 12;
   }
 
+  const b = req.baseline;
+  let physioStr = "";
+  if (b.resting_hr || b.max_hr || b.recent_5k || b.recent_10k || b.easy_pace) {
+    physioStr = "\n\n## PHYSIOLOGY & PACE DATA (from user — use these, do NOT guess)";
+    if (b.resting_hr) physioStr += `\nVilopuls: ${b.resting_hr} bpm`;
+    if (b.max_hr) physioStr += `\nMax puls: ${b.max_hr} bpm`;
+    if (b.resting_hr && b.max_hr) {
+      const z2lo = Math.round(b.resting_hr + (b.max_hr - b.resting_hr) * 0.6);
+      const z2hi = Math.round(b.resting_hr + (b.max_hr - b.resting_hr) * 0.7);
+      const z4lo = Math.round(b.resting_hr + (b.max_hr - b.resting_hr) * 0.8);
+      const z4hi = Math.round(b.resting_hr + (b.max_hr - b.resting_hr) * 0.87);
+      const z5lo = Math.round(b.resting_hr + (b.max_hr - b.resting_hr) * 0.88);
+      const z5hi = Math.round(b.resting_hr + (b.max_hr - b.resting_hr) * 0.95);
+      physioStr += `\nBeräknade pulszoner (Karvonen): Z2 ${z2lo}-${z2hi}, Z4 ${z4lo}-${z4hi}, Z5 ${z5lo}-${z5hi}`;
+    }
+    if (b.recent_5k) physioStr += `\nSenaste 5 km: ${b.recent_5k}`;
+    if (b.recent_10k) physioStr += `\nSenaste 10 km: ${b.recent_10k}`;
+    if (b.easy_pace) physioStr += `\nNuvarande lugnt tempo: ${b.easy_pace} min/km`;
+  }
+
   return `Generate a ${numWeeks}-week training plan starting ${startDate}.
 
 ## GOAL
@@ -341,7 +370,7 @@ Pass per vecka (snitt): ${req.baseline.sessions_per_week}
 Timmar per vecka (snitt): ${req.baseline.hours_per_week}
 Aktivitetsmix: ${mixStr}
 Fitnessnivå: ${req.baseline.fitness_level}
-Längsta pass senaste 4v: ${req.baseline.longest_session_minutes} min
+Längsta pass senaste 4v: ${req.baseline.longest_session_minutes} min${physioStr}
 
 ## PREFERENCES
 Aktivitetstyper: ${actTypes}

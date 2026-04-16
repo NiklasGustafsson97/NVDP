@@ -177,14 +177,14 @@ select option { background: #1a1a2e; color: var(--text); }
 
 /* ── Side Menu ── */
 .side-menu-overlay {
-  position: fixed; inset: 0; z-index: 1100;
+  position: fixed; inset: 0; z-index: 1040;
   background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);
 }
 .side-menu {
   position: fixed; top: 0; right: -300px; width: 280px; height: 100dvh;
   background: rgba(11,13,23,0.72); backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
   border-left: 1px solid var(--border);
-  z-index: 1101; transition: right 0.25s ease;
+  z-index: 1050; transition: right 0.25s ease;
   display: flex; flex-direction: column; overflow-y: auto;
   padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 12px);
   overscroll-behavior: contain;
@@ -832,7 +832,7 @@ input.code-input {
 
 /* ── Workout Modal ── */
 .modal-overlay {
-  position: fixed; inset: 0; z-index: 1100;
+  position: fixed; inset: 0; z-index: 1150;
   background: rgba(0,0,0,0.65); backdrop-filter: blur(6px);
   display: flex; align-items: center; justify-content: center; padding: 24px;
 }
@@ -1000,7 +1000,7 @@ input.code-input {
   position: fixed; top: 56px; right: 0; width: 320px; max-width: 90vw;
   max-height: 60vh; background: #1a1a2e; border: 1px solid var(--border);
   border-radius: 0 0 var(--radius) var(--radius);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.5); z-index: 150;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5); z-index: 1030;
   display: flex; flex-direction: column; overflow: hidden;
   animation: fadeIn 0.15s ease;
 }
@@ -1064,7 +1064,7 @@ input.code-input {
 
 /* ── Confirm / Alert Modal ── */
 .confirm-overlay {
-  position: fixed; inset: 0; z-index: 1200;
+  position: fixed; inset: 0; z-index: 1250;
   background: rgba(0,0,0,0.65); backdrop-filter: blur(6px);
   display: flex; align-items: center; justify-content: center; padding: 24px;
   animation: fadeIn 0.15s ease;

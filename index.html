@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NVDP</title>
-  <link rel="stylesheet" href="css/style.css?v=43">
+  <link rel="stylesheet" href="css/style.css?v=45">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
@@ -410,19 +410,6 @@
           </label>
           <span class="ios-toggle-label">+ Gym</span>
         </div>
-        <div class="ios-toggle-row ios-toggle-inline">
-          <span class="ios-toggle-label">Absolut (h)</span>
-          <label class="ios-switch" id="effort-mode-toggle">
-            <input type="checkbox" onchange="setEffortMode(this.checked?'normalized':'absolute')">
-            <span class="ios-slider"></span>
-          </label>
-          <span class="ios-toggle-label">Normaliserad</span>
-          <button type="button" class="effort-help-btn" onclick="toggleEffortHelp()" aria-expanded="false" aria-controls="effort-help-panel" title="Vad betyder normaliserad belastning?">?</button>
-        </div>
-      </div>
-      <div id="effort-help-panel" class="effort-help-panel hidden" role="region" aria-label="Förklaring effort">
-        <strong>Normaliserad</strong> visar belastning som MET × tid × höjd × intensitet (pulszoner, upplevd ansträngning eller vald zon), skalad till <em>n·h</em> så det är jämförbart mellan veckor.
-        <span class="text-dim"> Absolut = faktiska träningstimmar (ev. vikt per aktivitet).</span>
       </div>
 
       <div id="volume-delta"></div>
@@ -433,11 +420,6 @@
         </div>
         <div class="chart-container chart-container--skeleton" id="chart-effort-wrap"><div class="chart-skeleton" id="chart-skeleton-effort"></div><canvas id="chart-effort"></canvas></div>
         <div class="effort-legend" id="effort-legend"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-title mb-8" id="trends-weekly-title">Timmar per vecka</div>
-        <div class="chart-container chart-container--skeleton" id="chart-weekly-wrap"><div class="chart-skeleton" id="chart-skeleton-weekly"></div><canvas id="chart-weekly"></canvas></div>
       </div>
 
       <div class="card">
@@ -949,7 +931,7 @@
 </div>
 
 <script src="js/config.js?v=27"></script>
-<script src="js/app.js?v=50"></script>
+<script src="js/app.js?v=52"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {

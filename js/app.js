@@ -21,7 +21,6 @@ let currentView = 'dashboard';
 let schemaPersonIdx = 0;
 let schemaWeekOffset = 0;
 let trendMode = 'cardio';
-let chartWeekly = null;
 let selectedWorkout = null;
 let editingWorkoutId = null;
 
@@ -278,14 +277,19 @@ function toggleSideMenu() {
 }
 
 function openSideMenu() {
+  document.getElementById('topbar-search-panel')?.classList.add('hidden');
+  document.getElementById('nudge-panel')?.classList.add('hidden');
+  _nudgePanelOpen = false;
   document.getElementById('side-menu').classList.add('open');
   document.getElementById('side-menu-overlay').classList.remove('hidden');
+  document.body.classList.add('nvdp-side-open');
   updateSideMenuContent();
 }
 
 function closeSideMenu() {
   document.getElementById('side-menu').classList.remove('open');
   document.getElementById('side-menu-overlay').classList.add('hidden');
+  document.body.classList.remove('nvdp-side-open');
 }
 
 function setTheme(theme) {
@@ -294,7 +298,6 @@ function setTheme(theme) {
   const toggle = document.querySelector('#theme-toggle input');
   if (toggle) toggle.checked = theme === 'light';
   if (window._chartSeasonPie) { window._chartSeasonPie.update(); }
-  if (window.chartWeekly) { window.chartWeekly.update(); }
 }
 
 function setUnit(unit) {
@@ -1238,7 +1241,7 @@ async function openWorkoutModal(w) {
   // Splits (per-km) table
   const splits = w.splits_data ? (typeof w.splits_data === 'string' ? JSON.parse(w.splits_data) : w.splits_data) : null;
   if (splits && splits.length > 0) {
-    let splitsHtml = `<div class="wm-section-title">Kilometersplits</div><table class="wm-splits-table"><thead><tr><th>Km</th><th>Tid</th><th>Tempo</th><th>Puls</th><th>Höjd</th></tr></thead><tbody>`;
+    let splitsHtml = `<div class="wm-section-title">Kilometersplits</div><div class="wm-table-scroll"><table class="wm-splits-table"><thead><tr><th>Km</th><th>Tid</th><th>Tempo</th><th>Puls</th><th>Höjd</th></tr></thead><tbody>`;
     splits.forEach(s => {
       const km = s.split || Math.round(s.distance / 1000);
       const mins = Math.floor(s.moving_time / 60);
@@ -1251,14 +1254,14 @@ async function openWorkoutModal(w) {
       const elev = s.elevation_difference != null ? (s.elevation_difference > 0 ? '+' : '') + Math.round(s.elevation_difference) + 'm' : '—';
       splitsHtml += `<tr><td>${km}</td><td>${mins}:${String(secs).padStart(2, '0')}</td><td>${paceStr}</td><td>${hr}</td><td>${elev}</td></tr>`;
     });
-    splitsHtml += '</tbody></table>';
+    splitsHtml += '</tbody></table></div>';
     body += splitsHtml;
   }
 
   // Laps table
   const laps = w.laps_data ? (typeof w.laps_data === 'string' ? JSON.parse(w.laps_data) : w.laps_data) : null;
   if (laps && laps.length > 1) {
-    let lapsHtml = `<div class="wm-section-title">Varv</div><table class="wm-splits-table"><thead><tr><th>#</th><th>Distans</th><th>Tid</th><th>Tempo</th><th>Puls</th></tr></thead><tbody>`;
+    let lapsHtml = `<div class="wm-section-title">Varv</div><div class="wm-table-scroll"><table class="wm-splits-table"><thead><tr><th>#</th><th>Distans</th><th>Tid</th><th>Tempo</th><th>Puls</th></tr></thead><tbody>`;
     laps.forEach((lap, idx) => {
       const dist = (lap.distance / 1000).toFixed(2);
       const mins = Math.floor(lap.moving_time / 60);
@@ -1270,7 +1273,7 @@ async function openWorkoutModal(w) {
       const hr = lap.average_heartrate ? Math.round(lap.average_heartrate) : '—';
       lapsHtml += `<tr><td>${idx + 1}</td><td>${dist} km</td><td>${mins}:${String(secs).padStart(2, '0')}</td><td>${paceStr}</td><td>${hr}</td></tr>`;
     });
-    lapsHtml += '</tbody></table>';
+    lapsHtml += '</tbody></table></div>';
     body += lapsHtml;
   }
 
@@ -2257,61 +2260,6 @@ async function _loadTrends() {
     if (bi === null) return null;
     const prev = myData[bi];
     return prev > 0 ? ((val - prev) / prev) * 100 : null;
-  });
-
-  if (chartWeekly) chartWeekly.destroy();
-  const ctx = document.getElementById('chart-weekly').getContext('2d');
-  const color = PERSON_COLORS[currentProfile.name.split(' ')[0]] || '#2E86C1';
-  chartWeekly = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        label: currentProfile.name, data: myData,
-        borderColor: color,
-        backgroundColor: color + '22',
-        tension: 0.3, fill: true, pointRadius: 5, pointHoverRadius: 7
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      layout: { padding: { top: 24 } },
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: c => {
-          const d = wowDeltas[c.dataIndex];
-          const pct = d !== null ? ` (${d >= 0 ? '+' : ''}${Math.round(d)}%)` : '';
-          const yStr = c.parsed.y.toFixed(1);
-          return `${yStr}${yUnit}${pct}`;
-        }}},
-      },
-      scales: {
-        y: { beginAtZero: true, grid: { color: () => getComputedStyle(document.body).getPropertyValue('--border').trim() }, ticks: { color: () => getComputedStyle(document.body).getPropertyValue('--text-muted').trim(), callback: v => v.toFixed(1) + yUnit } },
-        x: { grid: { display: false }, ticks: { color: () => getComputedStyle(document.body).getPropertyValue('--text-muted').trim() } }
-      }
-    },
-    plugins: [{
-      id: 'wowLabels',
-      afterDatasetsDraw(chart) {
-        const meta = chart.getDatasetMeta(0);
-        const ctxC = chart.ctx;
-        ctxC.font = '600 11px ' + getComputedStyle(document.body).fontFamily;
-        ctxC.textAlign = 'center';
-        meta.data.forEach((pt, i) => {
-          const d = wowDeltas[i];
-          if (d === null) return;
-          const txt = (d >= 0 ? '+' : '') + Math.round(d) + '%';
-          const weekMon = weeks[i];
-          const dl = isDeloadWeek(parseISOWeekKeyLocal(weekMon));
-          if (dl) {
-            ctxC.fillStyle = d <= -20 ? '#2ECC71' : '#F39C12';
-          } else {
-            ctxC.fillStyle = d > 10 ? '#E74C3C' : d >= 0 ? '#2ECC71' : '#F39C12';
-          }
-          ctxC.fillText(txt, pt.x, pt.y - 12);
-        });
-      }
-    }]
   });
 
   // Week-over-week volume delta (same-day comparison).
@@ -5230,6 +5178,12 @@ async function submitSocialComment(workoutId, input) {
 // MOD-02: Escape stänger översta överlägg; fokus åter till utlösare där det stöds (t.ex. workout-modal).
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  const sideMenu = document.getElementById('side-menu');
+  if (sideMenu && sideMenu.classList.contains('open')) {
+    closeSideMenu();
+    e.preventDefault();
+    return;
+  }
   const confirmEl = document.getElementById('confirm-modal');
   if (confirmEl && !confirmEl.classList.contains('hidden')) {
     closeConfirmModal(false);
