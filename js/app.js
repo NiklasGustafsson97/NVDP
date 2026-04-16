@@ -2403,9 +2403,13 @@ async function _loadTrends() {
   if (mixCanvas) {
     if (chartMixPersonal) chartMixPersonal.destroy();
     const types = ['Löpning', 'Cykel', 'Gym', 'Annat', 'Hyrox', 'Stakmaskin', 'Längdskidor'];
+    const mixIsKm = _mixUnit === 'km';
+    const mixYUnit = mixIsKm ? ' km' : yUnit;
+
+    if (mixTitleEl) mixTitleEl.textContent = mixIsKm ? 'Aktivitetsmix (km)' : (isNorm ? 'Aktivitetsmix (n·h)' : 'Aktivitetsmix (timmar)');
 
     const weekEffortByType = {};
-    if (isNorm) {
+    if (isNorm && !mixIsKm) {
       weeks.forEach(w => {
         weekEffortByType[w] = {};
         (weekWorkouts[w] || []).forEach(wo => {
@@ -2415,17 +2419,17 @@ async function _loadTrends() {
     }
 
     const datasets = types.filter(t => weeks.some(w => {
+      const wos = (weekWorkouts[w] || []).filter(wo => wo.activity_type === t);
+      if (mixIsKm) return wos.reduce((s, wo) => s + (wo.distance_km || 0), 0) > 0;
       if (isNorm) return (weekEffortByType[w]?.[t] || 0) > 0;
-      const sumW = (weekWorkouts[w] || []).filter(wo => wo.activity_type === t)
-        .reduce((s, wo) => s + durationWeightedHours(wo), 0);
-      return sumW > 0;
+      return wos.reduce((s, wo) => s + durationWeightedHours(wo), 0) > 0;
     })).map(t => ({
       label: t,
       data: weeks.map(w => {
+        const wos = (weekWorkouts[w] || []).filter(wo => wo.activity_type === t);
+        if (mixIsKm) return +wos.reduce((s, wo) => s + (wo.distance_km || 0), 0).toFixed(1);
         if (isNorm) return +effortRawToDisplay(weekEffortByType[w]?.[t] || 0).toFixed(2);
-        const sumW = (weekWorkouts[w] || []).filter(wo => wo.activity_type === t)
-          .reduce((s, wo) => s + durationWeightedHours(wo), 0);
-        return +sumW.toFixed(2);
+        return +wos.reduce((s, wo) => s + durationWeightedHours(wo), 0).toFixed(2);
       }),
       backgroundColor: ACTIVITY_COLORS[t] || '#555',
       borderRadius: 4
@@ -2437,10 +2441,10 @@ async function _loadTrends() {
         responsive: true, maintainAspectRatio: false,
         plugins: {
           legend: { position: 'bottom', labels: { color: '#aaa', usePointStyle: true, boxWidth: 12 } },
-          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)}${yUnit}` } }
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)}${mixYUnit}` } }
         },
         scales: {
-          y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + yUnit } },
+          y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + mixYUnit } },
           x: { stacked: true, grid: { display: false }, ticks: { color: '#888' } }
         }
       }
