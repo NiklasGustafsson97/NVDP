@@ -1036,7 +1036,7 @@ async function _renderDashDayCard(dateStr) {
     html += `<div class="ddc-done-label">${dayWorkouts.length > 1 ? dayWorkouts.length + ' genomförda pass' : 'Genomfört'}</div>`;
     dayWorkouts.forEach(w => {
       html += `<div class="ddc-done-item clickable" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
-        ${buildWorkoutBody(w, { showMap: true })}
+        ${buildWorkoutBody(w)}
       </div>`;
     });
     html += '</div>';
@@ -1929,7 +1929,7 @@ function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchem
     if (dayWorkouts.length > 0) {
       mainContent = dayWorkouts.map(w => {
         return `<div class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
-          ${buildWorkoutBody(w, { showMap: true })}
+          ${buildWorkoutBody(w)}
         </div>`;
       }).join('');
     } else {
@@ -2021,7 +2021,7 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
     if (dayWorkouts.length > 0) {
       mainContent = dayWorkouts.map(w => {
         return `<div class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
-          ${buildWorkoutBody(w, { showMap: true })}
+          ${buildWorkoutBody(w)}
         </div>`;
       }).join('');
     } else {
@@ -3735,6 +3735,7 @@ function updateStravaUI() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
             Synka
           </button>
+          <button class="strava-sync-btn strava-deep-sync-btn" onclick="syncStravaAll()">Synka allt</button>
           <button class="strava-disconnect-btn" onclick="disconnectStrava()">Koppla från</button>
         </div>
         <div class="strava-powered-by">
@@ -3755,7 +3756,7 @@ function connectStrava() {
   if (!STRAVA_CLIENT_ID || !currentProfile) return;
   const scope = 'activity:read_all';
   const state = currentProfile.id;
-  const url = `https://www.strava.com/oauth/authorize?client_id=${STRAVA_CLIENT_ID}&redirect_uri=${encodeURIComponent(STRAVA_REDIRECT_URI)}&response_type=code&scope=${scope}&state=${state}&approval_prompt=auto`;
+  const url = `https://www.strava.com/oauth/authorize?client_id=${STRAVA_CLIENT_ID}&redirect_uri=${encodeURIComponent(STRAVA_REDIRECT_URI)}&response_type=code&scope=${scope}&state=${state}&approval_prompt=force`;
   window.location.href = url;
 }
 
@@ -3817,6 +3818,45 @@ async function syncStrava() {
   }
 
   if (btn) { btn.classList.remove('syncing'); btn.textContent = 'Synka'; }
+}
+
+async function syncStravaAll() {
+  if (!_stravaConnection || !currentProfile) return;
+  const btn = document.querySelector('.strava-deep-sync-btn');
+  if (btn) { btn.classList.add('syncing'); btn.textContent = 'Synkar...'; }
+
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/strava-sync', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ profile_id: currentProfile.id, since: null }),
+    });
+
+    const result = await res.json();
+    if (res.ok) {
+      if (result.last_sync_at) _stravaConnection.last_sync_at = result.last_sync_at;
+      updateStravaUI();
+      if (result.debug) console.log('Strava deep sync debug:', result.debug);
+      let msg = result.imported > 0
+        ? `${result.imported} pass importerade.`
+        : 'Inga pass hittades.';
+      if (result.totalFetched > 0) msg += `\nHämtade ${result.totalFetched} från Strava, importerade ${result.imported}.`;
+      if (result.totalFetched === 0) msg += '\nStrava returnerade 0 aktiviteter. Testa koppla från och anslut igen.';
+      await showAlertModal('Full synk klar', msg);
+      navigate(currentView);
+    } else {
+      await showAlertModal('Synk-fel', result.error || 'Okänt fel');
+    }
+  } catch (e) {
+    console.error('Strava deep sync error:', e);
+    await showAlertModal('Synk-fel', 'Nätverksfel vid synkning');
+  }
+
+  if (btn) { btn.classList.remove('syncing'); btn.textContent = 'Synka allt'; }
 }
 
 function handleStravaRedirect() {

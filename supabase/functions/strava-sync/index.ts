@@ -162,15 +162,18 @@ serve(async (req) => {
       page++;
     }
 
-    // Update last_sync_at
-    await db
-      .from("strava_connections")
-      .update({ last_sync_at: new Date().toISOString() })
-      .eq("id", conn.id);
+    // Only update last_sync_at if we actually fetched activities from Strava
+    const newSyncAt = totalFetched > 0 ? new Date().toISOString() : null;
+    if (newSyncAt) {
+      await db
+        .from("strava_connections")
+        .update({ last_sync_at: newSyncAt })
+        .eq("id", conn.id);
+    }
 
     if (firstError) debug.firstError = firstError;
     return new Response(
-      JSON.stringify({ imported, skipped, totalFetched, last_sync_at: new Date().toISOString(), debug }),
+      JSON.stringify({ imported, skipped, totalFetched, last_sync_at: newSyncAt, debug }),
       {
         status: 200,
         headers: { ...corsHeaders(), "Content-Type": "application/json" },
