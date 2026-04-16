@@ -525,6 +525,10 @@ async function initApp(user, accessToken) {
   _initDone = true;
   try {
     currentUser = user;
+    const gateEl = document.getElementById('gate');
+    if (gateEl) gateEl.style.display = 'none';
+    localStorage.setItem(GATE_PASSED_KEY, '1');
+    sessionStorage.setItem('gate_passed', '1');
     document.getElementById('auth-view').style.display = 'none';
     document.getElementById('app').classList.add('active');
     document.body.style.overflow = '';
