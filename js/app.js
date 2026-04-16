@@ -177,7 +177,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       } catch (err) {
         console.error('Auth state change error:', err);
-        showAuth();
       }
     });
 
@@ -277,7 +276,13 @@ document.getElementById('auth-form').addEventListener('submit', async (e) => {
       }
       btn.textContent = 'Laddar...';
       if (signInData?.session) {
-        await initApp(signInData.session.user, signInData.session.access_token);
+        try {
+          await initApp(signInData.session.user, signInData.session.access_token);
+        } catch (initErr) {
+          console.error('initApp error during login:', initErr);
+          document.getElementById('auth-view').style.display = 'none';
+          document.getElementById('app').classList.add('active');
+        }
       }
     } catch (ex) {
       btn.disabled = false;
@@ -579,18 +584,18 @@ async function initApp(user, accessToken) {
     }
 
     document.getElementById('log-date').value = isoDate(new Date());
-    navigate(currentView);
-
-    updateNudgeBadge();
-    updateFriendRequestBadge();
-    setInterval(updateFriendRequestBadge, 60000);
-    registerPushSubscription();
-    checkStravaConnection();
-    handleStravaRedirect();
-    checkGarminConnection();
-    handleGarminRedirect();
+    try { navigate(currentView); } catch (e) { console.error('navigate error:', e); }
+    try { updateNudgeBadge(); } catch (e) { console.error('nudge badge error:', e); }
+    try { updateFriendRequestBadge(); } catch (e) { console.error('friend badge error:', e); }
+    try { setInterval(updateFriendRequestBadge, 60000); } catch (e) {}
+    try { registerPushSubscription(); } catch (e) { console.error('push sub error:', e); }
+    try { checkStravaConnection(); } catch (e) { console.error('strava check error:', e); }
+    try { handleStravaRedirect(); } catch (e) { console.error('strava redirect error:', e); }
+    try { checkGarminConnection(); } catch (e) { console.error('garmin check error:', e); }
+    try { handleGarminRedirect(); } catch (e) { console.error('garmin redirect error:', e); }
   } catch (err) {
     console.error('initApp error:', err);
+    document.getElementById('auth-view').style.display = 'none';
     document.getElementById('app').classList.add('active');
   }
 }
