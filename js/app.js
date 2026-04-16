@@ -2,6 +2,17 @@
    NVDP — Main Application Logic
    ══════════════════════════════════════════ */
 
+// Intercept failed fetches to log full URL + status for debugging
+const _origFetch = window.fetch;
+window.fetch = async function(...args) {
+  const res = await _origFetch.apply(this, args);
+  if (!res.ok && res.status >= 400) {
+    const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+    console.warn(`[NVDP] HTTP ${res.status} → ${url}`);
+  }
+  return res;
+};
+
 // ── Supabase Client ──
 // Persist session in localStorage so users stay logged in across visits (refresh token).
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
