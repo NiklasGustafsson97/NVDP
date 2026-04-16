@@ -177,26 +177,32 @@ select option { background: #1a1a2e; color: var(--text); }
 
 /* ── Side Menu ── */
 .side-menu-overlay {
-  position: fixed; inset: 0; z-index: 200;
+  position: fixed; inset: 0; z-index: 1100;
   background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);
 }
 .side-menu {
-  position: fixed; top: 0; right: -300px; width: 280px; height: 100%;
+  position: fixed; top: 0; right: -300px; width: 280px; height: 100dvh;
   background: rgba(11,13,23,0.72); backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
   border-left: 1px solid var(--border);
-  z-index: 201; transition: right 0.25s ease;
+  z-index: 1101; transition: right 0.25s ease;
   display: flex; flex-direction: column; overflow-y: auto;
+  padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 12px);
+  overscroll-behavior: contain;
 }
 .side-menu.open { right: 0; }
 .sm-header { padding: 24px 20px 16px; border-bottom: 1px solid var(--border); }
 .sm-user { display: flex; align-items: center; gap: 12px; }
+.sm-user > div:last-child { min-width: 0; }
 .sm-avatar {
   width: 40px; height: 40px; border-radius: 50%; background: var(--accent);
   display: flex; align-items: center; justify-content: center;
   font-size: 1rem; font-weight: 700; color: #fff; flex-shrink: 0;
 }
 .sm-name { font-weight: 700; font-size: 0.95rem; }
-.sm-email { font-size: 0.75rem; color: var(--text-dim); margin-top: 2px; }
+.sm-email {
+  font-size: 0.75rem; color: var(--text-dim); margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .sm-section { padding: 12px 20px; }
 .sm-section-title { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); font-weight: 700; margin-bottom: 8px; }
 .sm-divider { height: 1px; background: var(--border); margin: 0 20px; }
@@ -217,7 +223,10 @@ select option { background: #1a1a2e; color: var(--text); }
 
 /* ── Avatar Picker ── */
 .avatar-picker { margin-top: 12px; }
-.avatar-picker-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+.avatar-picker-grid {
+  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px;
+  max-width: 100%;
+}
 .avatar-option {
   width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
   font-size: 1.2rem; border-radius: 8px; cursor: pointer; border: 2px solid transparent;
@@ -311,6 +320,28 @@ select option { background: #1a1a2e; color: var(--text); }
   filter: none;
 }
 .nav-item:hover { color: var(--text-muted); }
+
+.nav-badge {
+  position: absolute;
+  top: 2px;
+  right: 50%;
+  transform: translateX(14px);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--red, #e74c3c);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  pointer-events: none;
+}
+.nav-badge.hidden { display: none; }
+
 /* log button styled like other nav items (no CTA) */
 
 /* ── Content Area ── */
@@ -553,6 +584,11 @@ select option { background: #1a1a2e; color: var(--text); }
 .cal-dot-none { background: transparent; }
 
 @media (max-width: 600px) {
+  .side-menu {
+    width: min(86vw, 320px);
+    padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 16px);
+  }
+  .avatar-picker-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .cal-strip-wrapper { padding: 12px 6px 8px; }
   .cal-cell-num { width: 30px; height: 30px; font-size: 0.82rem; }
   .cal-strip-arrow { min-width: 44px; width: 44px; }
@@ -1356,7 +1392,9 @@ input.code-input {
 
 .wizard-step { display: none; }
 .wizard-step.active { display: block; animation: fadeIn 0.3s ease; }
-.wizard-step-title { font-size: 1rem; font-weight: 700; margin-bottom: 16px; }
+.wizard-step-title { font-size: 1rem; font-weight: 700; margin-bottom: 4px; }
+.wizard-step-subtitle { font-size: 0.8rem; color: var(--text-dim); margin-bottom: 16px; }
+.wiz-section-divider { border-top: 1px solid rgba(255,255,255,0.06); margin: 18px 0 14px; }
 
 .wizard-goal-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px;

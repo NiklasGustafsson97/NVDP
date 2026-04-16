@@ -515,6 +515,8 @@ async function initApp(user, accessToken) {
     navigate(currentView);
 
     updateNudgeBadge();
+    updateFriendRequestBadge();
+    setInterval(updateFriendRequestBadge, 60000);
     registerPushSubscription();
     checkStravaConnection();
     handleStravaRedirect();
@@ -3942,7 +3944,11 @@ async function openMemberProfile(memberId) {
   const bodyEl = document.getElementById('mp-body');
   if (!modal || !bodyEl) return;
 
-  const member = allProfiles.find(p => p.id === memberId);
+  let member = allProfiles.find(p => p.id === memberId);
+  if (!member) {
+    await refreshAllProfiles();
+    member = allProfiles.find(p => p.id === memberId);
+  }
   if (!member) return;
 
   const isMe = memberId === currentProfile.id;
@@ -4196,6 +4202,12 @@ function openPlanWizard() {
   nextMon.setDate(nextMon.getDate() + diff);
   document.getElementById('wiz-start-date').value = isoDate(nextMon);
 
+  document.getElementById('wiz-resting-hr').value = '';
+  document.getElementById('wiz-max-hr').value = '';
+  document.getElementById('wiz-recent-5k').value = '';
+  document.getElementById('wiz-recent-10k').value = '';
+  document.getElementById('wiz-easy-pace').value = '';
+
   autoPopulateBaseline();
   updateWizardUI();
   document.getElementById('plan-wizard').classList.remove('hidden');
@@ -4259,7 +4271,7 @@ async function autoPopulateBaseline() {
 }
 
 function updateWizardUI() {
-  for (let i = 0; i <= 3; i++) {
+  for (let i = 0; i <= 2; i++) {
     const stepEl = document.getElementById(`wizard-step-${i}`);
     if (stepEl) stepEl.classList.toggle('active', i === _wizardStep);
   }
@@ -4274,17 +4286,15 @@ function updateWizardUI() {
   prevBtn.style.visibility = _wizardStep === 0 ? 'hidden' : 'visible';
 
   const nextBtn = document.getElementById('wiz-next');
-  nextBtn.textContent = _wizardStep === 3 ? 'Generera schema' : 'Nästa';
+  nextBtn.textContent = _wizardStep === 2 ? 'Generera schema' : 'Nästa';
 
   const stepBanner = document.getElementById('wizard-step-banner');
-  if (stepBanner) stepBanner.textContent = `Steg ${_wizardStep + 1} av 4`;
+  if (stepBanner) stepBanner.textContent = `Steg ${_wizardStep + 1} av 3`;
 
-  // Init day button toggles
   document.querySelectorAll('.wiz-day-btn').forEach(btn => {
     btn.onclick = () => btn.classList.toggle('active');
   });
 
-  // Init fitness level pills
   document.querySelectorAll('#wiz-fitness-level .intensity-pill').forEach(pill => {
     pill.onclick = () => {
       document.querySelectorAll('#wiz-fitness-level .intensity-pill').forEach(p => p.classList.remove('active'));
@@ -4298,8 +4308,8 @@ function wizardPrev() {
 }
 
 async function wizardNext() {
-  if (_wizardStep < 3) {
-    if (_wizardStep === 0 && !_wizardGoalType) {
+  if (_wizardStep < 2) {
+    if (_wizardStep === 1 && !_wizardGoalType) {
       await showAlertModal('Välj mål', 'Du måste välja en måltyp för att fortsätta.');
       return;
     }
@@ -4331,6 +4341,12 @@ async function submitPlanWizard() {
   const baseHours = parseFloat(document.getElementById('wiz-base-hours').value) || 3;
   const baseLongest = parseInt(document.getElementById('wiz-base-longest').value) || 60;
   const fitnessLevel = document.querySelector('#wiz-fitness-level .intensity-pill.active')?.dataset.value || 'intermediate';
+
+  const restingHr = parseInt(document.getElementById('wiz-resting-hr').value) || null;
+  const maxHr = parseInt(document.getElementById('wiz-max-hr').value) || null;
+  const recent5k = document.getElementById('wiz-recent-5k').value.trim() || null;
+  const recent10k = document.getElementById('wiz-recent-10k').value.trim() || null;
+  const easyPace = document.getElementById('wiz-easy-pace').value.trim() || null;
 
   const activityTypes = [];
   document.querySelectorAll('#wiz-activity-types .wiz-activity-check.active').forEach(b => activityTypes.push(b.dataset.type));
@@ -4373,6 +4389,11 @@ async function submitPlanWizard() {
       activity_mix: activityMix,
       fitness_level: fitnessLevel,
       longest_session_minutes: baseLongest,
+      resting_hr: restingHr,
+      max_hr: maxHr,
+      recent_5k: recent5k,
+      recent_10k: recent10k,
+      easy_pace: easyPace,
     },
     preferences: {
       activity_types: activityTypes,
@@ -4419,7 +4440,7 @@ async function submitPlanWizard() {
     console.error('Plan generation error:', e);
     document.getElementById('wizard-step-loading').style.display = 'none';
     document.getElementById('wizard-nav').style.display = '';
-    _wizardStep = 3;
+    _wizardStep = 2;
     updateWizardUI();
     await showAlertModal('Fel', 'Kunde inte generera schema: ' + e.message);
   }
@@ -4726,10 +4747,37 @@ function toggleTopbarSearch() {
   }
 }
 
+async function refreshAllProfiles() {
+  try {
+    const token = (await sb.auth.getSession()).data.session?.access_token;
+    if (token) allProfiles = await fetchProfilesDirect(token);
+  } catch (e) { console.error('refreshAllProfiles error:', e); }
+}
+
+async function updateFriendRequestBadge() {
+  if (!currentProfile) return;
+  try {
+    const { count } = await sb.from('friendships')
+      .select('id', { count: 'exact', head: true })
+      .eq('receiver_id', currentProfile.id)
+      .eq('status', 'pending');
+    const badge = document.getElementById('friend-request-badge');
+    if (!badge) return;
+    if (count > 0) {
+      badge.textContent = count > 9 ? '9+' : count;
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+  } catch (e) { console.error('updateFriendRequestBadge error:', e); }
+}
+
 async function topbarSearchUsers() {
   const q = document.getElementById('topbar-search-input').value.trim().toLowerCase();
   const resultsEl = document.getElementById('topbar-search-results');
   if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+
+  await refreshAllProfiles();
 
   const matches = allProfiles.filter(p =>
     p.id !== currentProfile.id &&
@@ -4812,6 +4860,8 @@ async function searchFriends() {
   const resultsEl = document.getElementById('friend-search-results');
   if (q.length < 2) { resultsEl.innerHTML = ''; return; }
 
+  await refreshAllProfiles();
+
   const matches = allProfiles.filter(p =>
     p.id !== currentProfile.id &&
     p.name.toLowerCase().includes(q)
@@ -4889,6 +4939,7 @@ async function respondFriendRequest(friendshipId, status) {
       .eq('id', friendshipId);
     await renderFriendRequests();
     await renderFriendList();
+    updateFriendRequestBadge();
     if (status === 'accepted') await renderSocialFeed(false);
   } catch (e) {
     console.error('Respond friend request error:', e);
