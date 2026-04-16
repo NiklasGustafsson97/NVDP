@@ -3611,6 +3611,36 @@ async function checkStravaConnection() {
     _stravaConnection = null;
   }
   updateStravaUI();
+  autoSyncStravaIfStale();
+}
+
+async function autoSyncStravaIfStale() {
+  if (!_stravaConnection || !currentProfile) return;
+  const lastSync = _stravaConnection.last_sync_at;
+  if (lastSync) {
+    const elapsed = Date.now() - new Date(lastSync).getTime();
+    if (elapsed < 3600_000) return;
+  }
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) return;
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/strava-sync', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ profile_id: currentProfile.id, since: _stravaConnection.last_sync_at || P1_START }),
+    });
+    if (res.ok) {
+      const result = await res.json();
+      _stravaConnection.last_sync_at = result.last_sync_at;
+      updateStravaUI();
+      if (result.imported > 0) navigate(currentView);
+    }
+  } catch (e) {
+    console.error('Auto-sync Strava failed:', e);
+  }
 }
 
 function updateStravaUI() {
@@ -3696,7 +3726,7 @@ async function syncStrava() {
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ profile_id: currentProfile.id, since: P1_START }),
+      body: JSON.stringify({ profile_id: currentProfile.id, since: _stravaConnection.last_sync_at || P1_START }),
     });
 
     const result = await res.json();
@@ -3708,7 +3738,7 @@ async function syncStrava() {
         ? `${result.imported} nya pass importerade.`
         : 'Inga nya pass att importera.';
       if (result.skipped > 0) msg += `\n${result.skipped} pass hoppades över.`;
-      if (result.debug?.firstError) msg += '\nVissa pass kunde inte sparas — kontakta admin om det upprepas.';
+      if (result.debug?.firstError) msg += `\n${result.skipped || 'Några'} pass kunde inte sparas. Testa synka igen.`;
       await showAlertModal('Synk klar', msg);
       navigate(currentView);
     } else {
@@ -3848,7 +3878,7 @@ async function syncGarmin() {
         ? `${result.imported} nya pass importerade.`
         : 'Inga nya pass att importera.';
       if (result.skipped > 0) msg += `\n${result.skipped} pass hoppades över.`;
-      if (result.debug?.firstError) msg += '\nVissa pass kunde inte sparas — kontakta admin om det upprepas.';
+      if (result.debug?.firstError) msg += `\n${result.skipped || 'Några'} pass kunde inte sparas. Testa synka igen.`;
       await showAlertModal('Synk klar', msg);
       navigate(currentView);
     } else {

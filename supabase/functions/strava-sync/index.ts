@@ -144,24 +144,14 @@ serve(async (req) => {
           if (zoneSeconds) workout.hr_zone_seconds = JSON.stringify(zoneSeconds);
         }
 
-        // Check if already imported
-        const { data: existing } = await db.from("workouts")
-          .select("id")
-          .eq("strava_activity_id", activity.id)
-          .maybeSingle();
+        const { error: upsertErr } = await db.from("workouts").upsert(workout, {
+          onConflict: "strava_activity_id",
+          ignoreDuplicates: false,
+        });
 
-        let insertErr;
-        if (existing) {
-          const { error } = await db.from("workouts").update(workout).eq("id", existing.id);
-          insertErr = error;
-        } else {
-          const { error } = await db.from("workouts").insert(workout);
-          insertErr = error;
-        }
-
-        if (insertErr) {
-          console.error("Workout insert error:", insertErr);
-          if (!firstError) firstError = JSON.stringify(insertErr);
+        if (upsertErr) {
+          console.error("Workout upsert error:", upsertErr);
+          if (!firstError) firstError = JSON.stringify(upsertErr);
           skipped++;
         } else {
           imported++;
