@@ -735,8 +735,31 @@
       <div class="wizard-step-dot" data-step="2"></div>
     </div>
 
-    <!-- Step 0: Current State -->
+    <!-- Step 0: Goal -->
     <div class="wizard-step active" id="wizard-step-0">
+      <div class="wizard-step-title">Ditt mål</div>
+      <div class="wizard-step-subtitle">Vad vill du uppnå?</div>
+      <div class="wizard-goal-grid" id="wizard-goal-grid"></div>
+      <div id="wizard-goal-fields" class="hidden">
+        <div class="form-group" id="wiz-goal-text-group">
+          <label>Beskriv ditt mål</label>
+          <input type="text" id="wiz-goal-text" placeholder="t.ex. Halvmarathon under 1:45">
+        </div>
+        <div class="form-row" id="wiz-race-fields" style="display:none">
+          <div class="form-group flex-1">
+            <label>Loppdatum</label>
+            <input type="date" id="wiz-goal-date">
+          </div>
+          <div class="form-group flex-1">
+            <label>Måltid (valfritt)</label>
+            <input type="text" id="wiz-goal-time" placeholder="1:45:00">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 1: Current State -->
+    <div class="wizard-step" id="wizard-step-1">
       <div class="wizard-step-title">Nuläge</div>
       <div class="wizard-step-subtitle">Var är du idag?</div>
       <div id="wiz-baseline-auto" class="wiz-baseline-auto hidden">
@@ -789,29 +812,6 @@
       <div class="form-group">
         <label>Nuvarande lugnt tempo (min/km)</label>
         <input type="text" id="wiz-easy-pace" placeholder="t.ex. 5:45">
-      </div>
-    </div>
-
-    <!-- Step 1: Target -->
-    <div class="wizard-step" id="wizard-step-1">
-      <div class="wizard-step-title">Ditt mål</div>
-      <div class="wizard-step-subtitle">Vad vill du uppnå?</div>
-      <div class="wizard-goal-grid" id="wizard-goal-grid"></div>
-      <div id="wizard-goal-fields" class="hidden">
-        <div class="form-group" id="wiz-goal-text-group">
-          <label>Beskriv ditt mål</label>
-          <input type="text" id="wiz-goal-text" placeholder="t.ex. Halvmarathon under 1:45">
-        </div>
-        <div class="form-row" id="wiz-race-fields" style="display:none">
-          <div class="form-group flex-1">
-            <label>Loppdatum</label>
-            <input type="date" id="wiz-goal-date">
-          </div>
-          <div class="form-group flex-1">
-            <label>Måltid (valfritt)</label>
-            <input type="text" id="wiz-goal-time" placeholder="1:45:00">
-          </div>
-        </div>
       </div>
     </div>
 
@@ -931,7 +931,7 @@
 </div>
 
 <script src="js/config.js?v=27"></script>
-<script src="js/app.js?v=53"></script>
+<script src="js/app.js?v=54"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {

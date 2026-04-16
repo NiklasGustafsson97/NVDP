@@ -2557,13 +2557,14 @@ function _elevationFactor(elevGainM, distKm) {
 }
 
 function _intensityMultiplier(w) {
+  const LO = 0.85, HI = 1.15;
   // Level 1: Edwards HR zone distribution (best accuracy)
   const zs = w.hr_zone_seconds;
   if (zs && Array.isArray(zs) && zs.length >= 5) {
     const total = zs.reduce((a, b) => a + b, 0);
     if (total > 0) {
       const wi = zs.reduce((s, sec, i) => s + (sec / total) * (i + 1), 0);
-      return Math.max(0.7, Math.min(1.5, 0.7 + (wi - 1.0) * 0.2));
+      return Math.max(LO, Math.min(HI, LO + (wi - 1.0) * 0.075));
     }
   }
   // Level 2: average HR (use profile max HR if available, else workout max HR)
@@ -2571,14 +2572,18 @@ function _intensityMultiplier(w) {
     ? currentProfile.user_max_hr : w.max_hr;
   if (w.avg_hr && w.avg_hr >= 30 && maxHr && maxHr >= 100) {
     const pctMax = w.avg_hr / maxHr;
-    return Math.max(0.7, Math.min(1.5, 0.7 + (pctMax - 0.5) * 1.6));
+    return Math.max(LO, Math.min(HI, LO + (pctMax - 0.5) * 0.6));
   }
-  // Level 3: Strava perceived exertion (direct RPE 1-10)
+  // Level 3a: Strava perceived exertion (direct RPE 1-10)
   if (w.perceived_exertion && w.perceived_exertion >= 1) {
     const rpe = Math.min(10, w.perceived_exertion);
-    return Math.max(0.7, Math.min(1.5, 0.7 + (rpe - 1) * (0.8 / 9)));
+    return Math.max(LO, Math.min(HI, LO + (rpe - 1) * (0.3 / 9)));
   }
-  // Text labels (Z2, Kvalitet) skipped -- too coarse to be reliable
+  // Level 3b: intensity label (Z2, Kvalitet, etc.)
+  if (w.intensity && INTENSITY_TO_RPE[w.intensity] != null) {
+    const rpe = INTENSITY_TO_RPE[w.intensity];
+    return Math.max(LO, Math.min(HI, LO + (rpe - 1) * (0.3 / 9)));
+  }
   return 1.0;
 }
 
@@ -4252,7 +4257,7 @@ function wizardPrev() {
 
 async function wizardNext() {
   if (_wizardStep < 2) {
-    if (_wizardStep === 1 && !_wizardGoalType) {
+    if (_wizardStep === 0 && !_wizardGoalType) {
       await showAlertModal('Välj mål', 'Du måste välja en måltyp för att fortsätta.');
       return;
     }
