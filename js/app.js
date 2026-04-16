@@ -20,7 +20,7 @@ let allProfiles = [];
 let currentView = 'dashboard';
 let schemaPersonIdx = 0;
 let schemaWeekOffset = 0;
-let trendMode = 'cardio';
+let trendMode = 'total';
 let selectedWorkout = null;
 let editingWorkoutId = null;
 
@@ -826,6 +826,8 @@ async function _loadDashboard() {
 
 const _DASH_DAY_LETTER = ['S', 'M', 'T', 'O', 'T', 'F', 'L'];
 
+let _dashLegacyPlans = null;
+
 async function _renderDashCalendar(stripStart) {
   const track = document.getElementById('cal-strip-track');
   const monthLabel = document.getElementById('cal-strip-month');
@@ -843,6 +845,14 @@ async function _renderDashCalendar(stripStart) {
   _dashWeekWorkouts = await fetchWorkouts(currentProfile?.id, startStr, endStr);
   _calStripWorkouts = _dashWeekWorkouts;
   _calStripRange = { start: startStr, end: endStr };
+
+  // Pre-fetch legacy plans for the week so day taps are instant
+  _dashLegacyPlans = null;
+  try {
+    const periods = await fetchPeriods();
+    const period = periods.find(p => startStr >= p.start_date && endStr <= p.end_date);
+    if (period) _dashLegacyPlans = await fetchPlans(period.id);
+  } catch (e) { /* ignore */ }
 
   const workoutDates = new Set(_dashWeekWorkouts.map(w => w.workout_date));
 
@@ -905,15 +915,8 @@ async function _renderDashDayCard(dateStr) {
 
   let useAiPlan = !!(_activePlan && dateStr >= _activePlan.start_date && dateStr <= _activePlan.end_date);
   let legacyPlan = null;
-  if (!useAiPlan) {
-    try {
-      const periods = await fetchPeriods();
-      const period = periods.find(p => dateStr >= p.start_date && dateStr <= p.end_date);
-      if (period) {
-        const plans = await fetchPlans(period.id);
-        legacyPlan = plans.find(p => p.day_of_week === dayOfWeek);
-      }
-    } catch (e) { /* ignore */ }
+  if (!useAiPlan && _dashLegacyPlans) {
+    legacyPlan = _dashLegacyPlans.find(p => p.day_of_week === dayOfWeek) || null;
   }
 
   const plan = planWorkout || legacyPlan;
@@ -946,11 +949,11 @@ async function _renderDashDayCard(dateStr) {
     html += '</div>';
 
     const kmMatch = desc.match(/(\d+(?:[–\-]\d+)?)\s*km/);
-    const minMatch = desc.match(/(\d+(?:[–\-]\d+)?)\s*min/);
-    if (kmMatch || minMatch) {
+    const estMin = estimateDurationFromDescription(desc, plan.target_duration_minutes);
+    if (kmMatch || estMin > 0) {
       html += '<div class="ddc-plan-meta">';
       if (kmMatch) html += `<span class="ddc-meta-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"/></svg>${kmMatch[1]} km</span>`;
-      if (minMatch) html += `<span class="ddc-meta-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${minMatch[1]} min</span>`;
+      if (estMin > 0) html += `<span class="ddc-meta-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${estMin} min</span>`;
       html += '</div>';
     }
     if (desc) html += `<div class="ddc-plan-desc">${desc}</div>`;
@@ -1735,6 +1738,42 @@ function stripProgressionText(desc) {
     .trim();
 }
 
+function estimateDurationFromDescription(description, storedMinutes) {
+  if (!description) return storedMinutes || 0;
+  const desc = description.toLowerCase();
+  let total = 0;
+
+  const intervalRe = /(\d+)\s*[×x]\s*(\d+)\s*min/g;
+  const matched = new Set();
+  let m;
+  let lastReps = 0;
+  while ((m = intervalRe.exec(desc)) !== null) {
+    const reps = parseInt(m[1]);
+    const dur = parseInt(m[2]);
+    total += reps * dur;
+    lastReps = reps;
+    for (let i = m.index; i < m.index + m[0].length; i++) matched.add(i);
+  }
+
+  const plainRe = /(\d+)\s*min/g;
+  while ((m = plainRe.exec(desc)) !== null) {
+    let overlap = false;
+    for (let i = m.index; i < m.index + m[0].length; i++) {
+      if (matched.has(i)) { overlap = true; break; }
+    }
+    if (overlap) continue;
+    const val = parseInt(m[1]);
+    const after = desc.slice(m.index + m[0].length, m.index + m[0].length + 20);
+    if (lastReps > 1 && /^\s*(vila|återhämtning|jogg|lugn|mellan|paus|rest)/i.test(after)) {
+      total += val * (lastReps - 1);
+    } else {
+      total += val;
+    }
+  }
+
+  return (total > 0 && total > (storedMinutes || 0)) ? total : (storedMinutes || 0);
+}
+
 function buildWorkoutBody(w, opts = {}) {
   const { showMap = false } = opts;
   let html = '';
@@ -1901,8 +1940,9 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
         : '';
       const lbl = planWo.label || planWo.activity_type;
       const desc = stripProgressionText(planWo.description || '');
-      const durStr = planWo.target_duration_minutes > 0 ? `${planWo.target_duration_minutes} min` : '';
-      const meta = (planWo.target_duration_minutes > 0 || planWo.target_distance_km)
+      const estMin = estimateDurationFromDescription(planWo.description, planWo.target_duration_minutes);
+      const durStr = estMin > 0 ? `${estMin} min` : '';
+      const meta = (estMin > 0 || planWo.target_distance_km)
         ? `<span class="sr-target">${durStr}${planWo.target_distance_km ? (durStr ? ' · ' : '') + planWo.target_distance_km + ' km' : ''}</span>`
         : '';
       planText = `<div class="sr-plan-label">${lbl}${zoneBadge} ${meta}</div>`;
@@ -2557,14 +2597,14 @@ function _elevationFactor(elevGainM, distKm) {
 }
 
 function _intensityMultiplier(w) {
-  const LO = 0.85, HI = 1.15;
+  const LO = 0.8, HI = 1.2;
   // Level 1: Edwards HR zone distribution (best accuracy)
   const zs = w.hr_zone_seconds;
   if (zs && Array.isArray(zs) && zs.length >= 5) {
     const total = zs.reduce((a, b) => a + b, 0);
     if (total > 0) {
       const wi = zs.reduce((s, sec, i) => s + (sec / total) * (i + 1), 0);
-      return Math.max(LO, Math.min(HI, LO + (wi - 1.0) * 0.075));
+      return Math.max(LO, Math.min(HI, LO + (wi - 1.0) * 0.1));
     }
   }
   // Level 2: average HR (use profile max HR if available, else workout max HR)
@@ -2572,18 +2612,14 @@ function _intensityMultiplier(w) {
     ? currentProfile.user_max_hr : w.max_hr;
   if (w.avg_hr && w.avg_hr >= 30 && maxHr && maxHr >= 100) {
     const pctMax = w.avg_hr / maxHr;
-    return Math.max(LO, Math.min(HI, LO + (pctMax - 0.5) * 0.6));
+    return Math.max(LO, Math.min(HI, LO + (pctMax - 0.5) * 0.8));
   }
-  // Level 3a: Strava perceived exertion (direct RPE 1-10)
+  // Level 3: Strava perceived exertion (direct RPE 1-10)
   if (w.perceived_exertion && w.perceived_exertion >= 1) {
     const rpe = Math.min(10, w.perceived_exertion);
-    return Math.max(LO, Math.min(HI, LO + (rpe - 1) * (0.3 / 9)));
+    return Math.max(LO, Math.min(HI, LO + (rpe - 1) * (0.4 / 9)));
   }
-  // Level 3b: intensity label (Z2, Kvalitet, etc.)
-  if (w.intensity && INTENSITY_TO_RPE[w.intensity] != null) {
-    const rpe = INTENSITY_TO_RPE[w.intensity];
-    return Math.max(LO, Math.min(HI, LO + (rpe - 1) * (0.3 / 9)));
-  }
+  // Text labels (Z2, Kvalitet) skipped -- too coarse to be reliable
   return 1.0;
 }
 
@@ -2805,7 +2841,7 @@ function calcStreak(workouts, profileId) {
 // ═══════════════════════
 //  GROUP
 // ═══════════════════════
-let grpChartMode = 'cardio';
+let grpChartMode = 'total';
 let grpEffortMode = 'absolute';
 let chartGroupWeekly = null;
 let _cachedGroupWorkouts = [];

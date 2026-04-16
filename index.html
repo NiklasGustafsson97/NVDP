@@ -401,17 +401,6 @@
         <p>Personliga trender och statistik</p>
       </div>
 
-      <div class="trends-toggle-wrap" role="group" aria-label="Grafinställningar">
-        <div class="ios-toggle-row ios-toggle-inline">
-          <span class="ios-toggle-label">Cardio</span>
-          <label class="ios-switch" id="trend-mode-toggle">
-            <input type="checkbox" onchange="setTrendMode(this.checked?'total':'cardio')">
-            <span class="ios-slider"></span>
-          </label>
-          <span class="ios-toggle-label">+ Gym</span>
-        </div>
-      </div>
-
       <div id="volume-delta"></div>
 
       <div class="card" id="effort-card">
@@ -554,14 +543,6 @@
             <span class="card-title" id="grp-chart-title">Timmar per vecka</span>
           </div>
           <div class="trends-toggle-wrap trends-toggle-wrap--sm" role="group" aria-label="Gruppgrafer">
-            <div class="ios-toggle-row ios-toggle-inline">
-              <span class="ios-toggle-label sm-lab">Cardio</span>
-              <label class="ios-switch ios-switch-sm" id="grp-chart-toggle">
-                <input type="checkbox" onchange="setGrpChartMode(this.checked?'total':'cardio')">
-                <span class="ios-slider"></span>
-              </label>
-              <span class="ios-toggle-label sm-lab">+ Gym</span>
-            </div>
             <div class="ios-toggle-row ios-toggle-inline">
               <span class="ios-toggle-label sm-lab">Absolut</span>
               <label class="ios-switch ios-switch-sm" id="grp-effort-toggle">
@@ -931,7 +912,7 @@
 </div>
 
 <script src="js/config.js?v=27"></script>
-<script src="js/app.js?v=55"></script>
+<script src="js/app.js?v=56"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {
