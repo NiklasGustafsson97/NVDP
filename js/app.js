@@ -1240,6 +1240,7 @@ async function renderWeeklySummary(weekWorkouts, plans, monday, profile) {
   const prevMins = (prevWorkouts || []).reduce((s, w) => s + w.duration_minutes, 0);
   const prevSessions = (prevWorkouts || []).length;
   const prevDist = (prevWorkouts || []).reduce((s, w) => s + (w.distance_km || 0), 0);
+  const prevLongest = (prevWorkouts || []).reduce((max, w) => w.duration_minutes > (max?.duration_minutes || 0) ? w : max, null);
 
   function deltaHTML(cur, prev, unit) {
     if (prev === 0 && cur === 0) return '';
@@ -1251,11 +1252,14 @@ async function renderWeeklySummary(weekWorkouts, plans, monday, profile) {
     return `<span class="ws-delta ${cls}">${sign}${val}${unit}</span>`;
   }
 
+  const longestMin = longest?.duration_minutes || 0;
+  const prevLongestMin = prevLongest?.duration_minutes || 0;
+
   let items = [];
   items.push(`<div class="ws-stat"><span class="ws-val">${totalHours}h</span><span class="ws-label">total tid</span>${deltaHTML(totalMins, prevMins, 'h')}</div>`);
   items.push(`<div class="ws-stat"><span class="ws-val">${sessionCount}</span><span class="ws-label">pass</span>${deltaHTML(sessionCount, prevSessions, '')}</div>`);
   items.push(`<div class="ws-stat"><span class="ws-val">${totalDist > 0 ? totalDist.toFixed(1) : '0'}km</span><span class="ws-label">distans</span>${deltaHTML(totalDist, prevDist, 'km')}</div>`);
-  items.push(`<div class="ws-stat"><span class="ws-val">${longest ? longest.duration_minutes + "'" : '—'}</span><span class="ws-label">längsta</span></div>`);
+  items.push(`<div class="ws-stat"><span class="ws-val">${longest ? longest.duration_minutes + "'" : '—'}</span><span class="ws-label">längsta</span>${deltaHTML(longestMin, prevLongestMin, "'")}</div>`);
 
   el.innerHTML = `<div class="ws-grid">${items.join('')}</div>`;
   card.classList.remove('hidden');
@@ -2378,6 +2382,7 @@ async function _loadTrends() {
     const prevMins = prevWk.reduce((s, w) => s + w.duration_minutes, 0);
     const prevSessions = prevWk.length;
     const prevDist = prevWk.reduce((s, w) => s + (w.distance_km || 0), 0);
+    const prevLongest = prevWk.reduce((max, w) => w.duration_minutes > (max?.duration_minutes || 0) ? w : max, null);
 
     function absDelta(cur, prev, unit, decimals) {
       if (prev === 0 && cur === 0) return '';
@@ -2389,11 +2394,13 @@ async function _loadTrends() {
     }
 
     const curHours = (curMins / 60).toFixed(1);
+    const curLongestMin = curLongest?.duration_minutes || 0;
+    const prevLongestMin = prevLongest?.duration_minutes || 0;
     let items = '';
     items += `<div class="ws-stat"><span class="ws-val">${curHours}h</span><span class="ws-label">total tid</span>${absDelta(curMins / 60, prevMins / 60, 'h', 1)}</div>`;
     items += `<div class="ws-stat"><span class="ws-val">${curSessions}</span><span class="ws-label">pass</span>${absDelta(curSessions, prevSessions, '', 0)}</div>`;
     items += `<div class="ws-stat"><span class="ws-val">${curDist > 0 ? curDist.toFixed(1) : '0'}km</span><span class="ws-label">distans</span>${absDelta(curDist, prevDist, 'km', 1)}</div>`;
-    items += `<div class="ws-stat"><span class="ws-val">${curLongest ? curLongest.duration_minutes + "'" : '—'}</span><span class="ws-label">längsta</span></div>`;
+    items += `<div class="ws-stat"><span class="ws-val">${curLongest ? curLongest.duration_minutes + "'" : '—'}</span><span class="ws-label">längsta</span>${absDelta(curLongestMin, prevLongestMin, "'", 0)}</div>`;
 
     deltaEl.innerHTML = `<div class="card"><div class="ws-header">VECKOSUMMERING</div><div class="ws-grid">${items}</div></div>`;
   }
