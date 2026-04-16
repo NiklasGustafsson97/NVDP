@@ -693,7 +693,6 @@ select option { background: #1a1a2e; color: var(--text); }
     text-align: left;
   }
 
-  .trends-toggle-wrap { gap: 10px 14px; justify-content: center; }
 }
 
 @media (max-width: 380px) {
@@ -1846,13 +1845,6 @@ input.code-input {
 }
 .dash-schema-empty-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 12px; }
 
-.trends-toggle-wrap {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
-  gap: 16px 24px; margin-bottom: 16px;
-}
-.trends-toggle-wrap .ios-toggle-row { margin-bottom: 0; }
-.trends-toggle-wrap--sm { gap: 12px 20px; margin-bottom: 12px; justify-content: flex-start; }
-.trends-toggle-wrap--sm .sm-lab { font-size: 0.72rem; }
 .card-header--stack { margin-bottom: 10px; flex-direction: column; align-items: flex-start; gap: 4px; }
 
 .effort-help-btn {

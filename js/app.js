@@ -20,7 +20,7 @@ let allProfiles = [];
 let currentView = 'dashboard';
 let schemaPersonIdx = 0;
 let schemaWeekOffset = 0;
-let trendMode = 'total';
+let trendMode = 'total'; // fixed: no toggle
 let selectedWorkout = null;
 let editingWorkoutId = null;
 
@@ -2228,19 +2228,8 @@ async function respondToInvitation(invitationId, accept) {
 let chartMixPersonal = null;
 let effortMode = 'absolute';
 
-function setTrendMode(mode) {
-  trendMode = mode;
-  const toggle = document.querySelector('#trend-mode-toggle input');
-  if (toggle) toggle.checked = mode === 'total';
-  loadTrends();
-}
-
-function setEffortMode(mode) {
-  effortMode = mode;
-  const toggle = document.querySelector('#effort-mode-toggle input');
-  if (toggle) toggle.checked = mode === 'normalized';
-  loadTrends();
-}
+function setTrendMode(mode) { trendMode = mode; loadTrends(); }
+function setEffortMode(mode) { effortMode = mode; loadTrends(); }
 
 async function loadTrends() {
   if (!currentProfile) return;
@@ -2640,8 +2629,6 @@ function durationWeightedHours(w) {
 let _seasonBarMode = 'hours';
 function setSeasonBarMode(mode) {
   _seasonBarMode = mode;
-  const toggle = document.querySelector('#season-bar-toggle input');
-  if (toggle) toggle.checked = mode === 'km';
   if (window._lastSeasonWorkouts) renderSeasonActivityBars(window._lastSeasonWorkouts, mode);
 }
 
@@ -2941,24 +2928,15 @@ async function _loadGroup() {
 
 function setGrpChartMode(mode) {
   grpChartMode = mode;
-  const toggle = document.querySelector('#grp-chart-toggle input');
-  if (toggle) toggle.checked = mode === 'total';
   if (_cachedGroupWorkouts.length > 0 && _cachedGroupMembers.length > 0) {
     renderGroupChart(_cachedGroupWorkouts, _cachedGroupMembers);
-  } else {
-    loadGroup();
-  }
+  } else { loadGroup(); }
 }
-
 function setGrpEffortMode(mode) {
   grpEffortMode = mode;
-  const toggle = document.querySelector('#grp-effort-toggle input');
-  if (toggle) toggle.checked = mode === 'normalized';
   if (_cachedGroupWorkouts.length > 0 && _cachedGroupMembers.length > 0) {
     renderGroupChart(_cachedGroupWorkouts, _cachedGroupMembers);
-  } else {
-    loadGroup();
-  }
+  } else { loadGroup(); }
 }
 
 function renderGroupChart(allWorkouts, members) {

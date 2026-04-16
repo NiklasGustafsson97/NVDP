@@ -427,14 +427,6 @@
       <div class="card" id="season-activity-card">
         <div class="card-header">
           <span class="card-title">Per aktivitet</span>
-          <div class="ios-toggle-row" style="margin:0;gap:6px;">
-            <span class="ios-toggle-label" style="font-size:0.75rem;">h</span>
-            <label class="ios-switch ios-switch-sm" id="season-bar-toggle">
-              <input type="checkbox" onchange="setSeasonBarMode(this.checked?'km':'hours')">
-              <span class="ios-slider"></span>
-            </label>
-            <span class="ios-toggle-label" style="font-size:0.75rem;">km</span>
-          </div>
         </div>
         <div id="season-activity-bars"></div>
       </div>
@@ -524,18 +516,8 @@
         </div>
 
         <div class="card">
-          <div class="card-header card-header--stack">
+          <div class="card-header">
             <span class="card-title" id="grp-chart-title">Timmar per vecka</span>
-          </div>
-          <div class="trends-toggle-wrap trends-toggle-wrap--sm" role="group" aria-label="Gruppgrafer">
-            <div class="ios-toggle-row ios-toggle-inline">
-              <span class="ios-toggle-label sm-lab">Absolut</span>
-              <label class="ios-switch ios-switch-sm" id="grp-effort-toggle">
-                <input type="checkbox" onchange="setGrpEffortMode(this.checked?'normalized':'absolute')">
-                <span class="ios-slider"></span>
-              </label>
-              <span class="ios-toggle-label sm-lab">Normaliserad</span>
-            </div>
           </div>
           <div class="chart-container"><canvas id="chart-group-weekly"></canvas></div>
         </div>
