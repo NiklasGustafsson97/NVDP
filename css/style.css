@@ -1010,6 +1010,12 @@ input.code-input {
   background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px;
   color: var(--text); padding: 6px 8px; font-size: 0.85rem;
 }
+.sm-locked-value { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text); font-weight: 600; }
+.sm-edit-btn {
+  background: none; border: none; color: var(--text-dim); cursor: pointer;
+  font-size: 0.85rem; padding: 2px 4px; border-radius: 4px; line-height: 1;
+}
+.sm-edit-btn:hover { color: var(--accent); background: rgba(255,255,255,0.06); }
 
 /* ── Reactions ── */
 .wm-reactions { margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.06); }

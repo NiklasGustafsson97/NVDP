@@ -424,8 +424,19 @@ function updateSideMenuContent() {
   if (currentUser) smEmail.textContent = currentUser.email;
 
   const maxHrInput = document.getElementById('sm-max-hr');
+  const maxHrDisplay = document.getElementById('sm-max-hr-display');
+  const maxHrText = document.getElementById('sm-max-hr-text');
+  const maxHrEdit = document.getElementById('sm-max-hr-edit');
   if (maxHrInput && currentProfile?.user_max_hr) {
     maxHrInput.value = currentProfile.user_max_hr;
+    if (maxHrDisplay && maxHrText && maxHrEdit) {
+      maxHrText.textContent = currentProfile.user_max_hr + ' bpm';
+      maxHrDisplay.classList.remove('hidden');
+      maxHrEdit.classList.add('hidden');
+    }
+  } else if (maxHrDisplay && maxHrEdit) {
+    maxHrDisplay.classList.add('hidden');
+    maxHrEdit.classList.remove('hidden');
   }
 
   updateGroupSettingsCard();
@@ -510,6 +521,16 @@ async function saveMaxHR(val) {
     body: JSON.stringify({ user_max_hr: hr })
   });
   currentProfile.user_max_hr = hr;
+  const d = document.getElementById('sm-max-hr-display');
+  const t = document.getElementById('sm-max-hr-text');
+  const e = document.getElementById('sm-max-hr-edit');
+  if (d && t && e) { t.textContent = hr + ' bpm'; d.classList.remove('hidden'); e.classList.add('hidden'); }
+}
+
+function unlockMaxHR() {
+  const d = document.getElementById('sm-max-hr-display');
+  const e = document.getElementById('sm-max-hr-edit');
+  if (d && e) { d.classList.add('hidden'); e.classList.remove('hidden'); document.getElementById('sm-max-hr')?.focus(); }
 }
 
 function showAuth() {

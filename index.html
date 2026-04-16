@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NVDP</title>
-  <link rel="stylesheet" href="css/style.css?v=3577ab9">
+  <link rel="stylesheet" href="css/style.css?v=maxhr-lock">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
@@ -222,8 +222,14 @@
         </label>
       </div>
       <div class="sm-setting-row">
-        <label class="sm-setting-label" for="sm-max-hr">Max puls (bpm)</label>
-        <input type="number" id="sm-max-hr" class="sm-setting-input" placeholder="t.ex. 195" min="100" max="230" style="width:80px;text-align:center;" onchange="saveMaxHR(this.value)" aria-describedby="sm-max-hr-hint">
+        <label class="sm-setting-label">Max puls (bpm)</label>
+        <span id="sm-max-hr-display" class="sm-locked-value hidden">
+          <span id="sm-max-hr-text"></span>
+          <button class="sm-edit-btn" onclick="unlockMaxHR()" aria-label="Redigera maxpuls">&#9998;</button>
+        </span>
+        <span id="sm-max-hr-edit">
+          <input type="number" id="sm-max-hr" class="sm-setting-input" placeholder="t.ex. 195" min="100" max="230" style="width:80px;text-align:center;" onchange="saveMaxHR(this.value)" aria-describedby="sm-max-hr-hint">
+        </span>
       </div>
       <p id="sm-max-hr-hint" class="sm-hint">Används för intensitetsberäkning när zoner saknas.</p>
     </div>
@@ -888,8 +894,8 @@
   </div>
 </div>
 
-<script src="js/config.js?v=3577ab9"></script>
-<script src="js/app.js?v=3577ab9"></script>
+<script src="js/config.js?v=maxhr-lock"></script>
+<script src="js/app.js?v=maxhr-lock"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {
