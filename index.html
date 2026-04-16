@@ -410,7 +410,17 @@
       </div>
 
       <div class="card">
-        <div class="card-title mb-8" id="trends-mix-title">Aktivitetsmix (timmar)</div>
+        <div class="card-header">
+          <span class="card-title" id="trends-mix-title">Aktivitetsmix (timmar)</span>
+          <div class="ios-toggle-row" style="margin:0;gap:6px;">
+            <span class="ios-toggle-label" style="font-size:0.75rem;">Tid</span>
+            <label class="ios-switch ios-switch-sm" id="mix-unit-toggle">
+              <input type="checkbox" onchange="setMixUnit(this.checked?'km':'hours')">
+              <span class="ios-slider"></span>
+            </label>
+            <span class="ios-toggle-label" style="font-size:0.75rem;">Distans</span>
+          </div>
+        </div>
         <div class="chart-container chart-container--skeleton" id="chart-mix-wrap"><div class="chart-skeleton" id="chart-skeleton-mix"></div><canvas id="chart-mix-personal"></canvas></div>
       </div>
 

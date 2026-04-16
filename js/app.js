@@ -55,6 +55,58 @@ function ensureLeafletLoaded() {
   return _leafletPromise;
 }
 
+function getMapTileUrl() {
+  const theme = document.documentElement.getAttribute('data-theme') || 'dark';
+  return theme === 'light'
+    ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+    : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+}
+
+const _mapObserver = typeof IntersectionObserver !== 'undefined'
+  ? new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const el = entry.target;
+        _mapObserver.unobserve(el);
+        _initLeafletMap(el);
+      });
+    }, { rootMargin: '200px' })
+  : null;
+
+function _initLeafletMap(el) {
+  if (el.dataset.leaflet) return;
+  el.dataset.leaflet = '1';
+  try {
+    const coords = decodePolyline(el.dataset.polyline);
+    if (coords.length < 2) { el.style.display = 'none'; return; }
+    const map = L.map(el, {
+      zoomControl: false, attributionControl: false,
+      dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
+      touchZoom: false, boxZoom: false, keyboard: false, tap: false
+    });
+    L.tileLayer(getMapTileUrl(), { maxZoom: 18 }).addTo(map);
+    const line = L.polyline(coords, {
+      color: '#3B9DFF', weight: 3.5, opacity: 0.9,
+      lineCap: 'round', lineJoin: 'round'
+    }).addTo(map);
+    map.fitBounds(line.getBounds(), { padding: [20, 20], animate: false });
+    el._leafletMap = map;
+    el._leafletTile = map._layers && Object.values(map._layers).find(l => l._url);
+  } catch (e) { el.style.display = 'none'; }
+}
+
+async function initMapThumbnails() {
+  try { await ensureLeafletLoaded(); } catch { return; }
+  if (typeof L === 'undefined') return;
+  document.querySelectorAll('.wo-map[data-polyline]:not([data-leaflet])').forEach(el => {
+    if (_mapObserver) {
+      _mapObserver.observe(el);
+    } else {
+      _initLeafletMap(el);
+    }
+  });
+}
+
 let _toastTimer = null;
 function showToast(msg) {
   const el = document.getElementById('app-toast');
@@ -967,7 +1019,7 @@ async function _renderDashDayCard(dateStr) {
     html += `<div class="ddc-done-label">${dayWorkouts.length > 1 ? dayWorkouts.length + ' genomförda pass' : 'Genomfört'}</div>`;
     dayWorkouts.forEach(w => {
       html += `<div class="ddc-done-item clickable" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
-        ${buildWorkoutBody(w)}
+        ${buildWorkoutBody(w, { showMap: true })}
       </div>`;
     });
     html += '</div>';
@@ -1105,8 +1157,9 @@ function showMoreRecent() {
   const html = batch.map(w => {
     const distStr = w.distance_km ? ` | ${w.distance_km} km` : '';
     const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
+    const mapThumb = w.map_polyline ? `<div class="wo-map wo-map-mini" data-polyline="${w.map_polyline}"></div>` : '';
     return `
-    <div class="workout-item clickable" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
+    <div class="workout-item clickable${w.map_polyline ? ' workout-item-with-map' : ''}" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
       <div class="workout-icon" style="background:${ACTIVITY_COLORS[w.activity_type] || '#555'}22;">
         ${activityEmoji(w.activity_type)}
       </div>
@@ -1115,6 +1168,7 @@ function showMoreRecent() {
         <div class="meta">${formatDate(w.workout_date)}${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? ' — ' + w.notes : ''}</div>
       </div>
       <div class="workout-info duration">${w.duration_minutes} min${distStr}</div>
+      ${mapThumb}
     </div>`;
   }).join('');
   _recentShown += batch.length;
@@ -1405,28 +1459,6 @@ function decodePolyline(encoded) {
     coords.push([lat / 1e5, lng / 1e5]);
   }
   return coords;
-}
-
-function polylineToSvg(coords, width, height) {
-  if (!coords || coords.length < 2) return '';
-  const pad = 8;
-  const w = width || 120;
-  const h = height || 120;
-  const lats = coords.map(c => c[0]);
-  const lngs = coords.map(c => c[1]);
-  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
-  const dLat = maxLat - minLat || 0.001;
-  const dLng = maxLng - minLng || 0.001;
-  const scale = Math.min((w - pad * 2) / dLng, (h - pad * 2) / dLat);
-  const points = coords.map(([lat, lng]) => {
-    const x = pad + (lng - minLng) * scale;
-    const y = pad + (maxLat - lat) * scale;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ');
-  const svgW = Math.ceil(dLng * scale + pad * 2);
-  const svgH = Math.ceil(dLat * scale + pad * 2);
-  return `<svg viewBox="0 0 ${svgW} ${svgH}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="max-width:${w}px;max-height:${h}px;"><polyline points="${points}" fill="none" stroke="#3498db" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/></svg>`;
 }
 
 function timeAgo(isoStr) {
@@ -1872,7 +1904,7 @@ function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchem
     if (dayWorkouts.length > 0) {
       mainContent = dayWorkouts.map(w => {
         return `<div class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
-          ${buildWorkoutBody(w)}
+          ${buildWorkoutBody(w, { showMap: true })}
         </div>`;
       }).join('');
     } else {
@@ -1963,7 +1995,7 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
     if (dayWorkouts.length > 0) {
       mainContent = dayWorkouts.map(w => {
         return `<div class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
-          ${buildWorkoutBody(w)}
+          ${buildWorkoutBody(w, { showMap: true })}
         </div>`;
       }).join('');
     } else {
@@ -2227,9 +2259,11 @@ async function respondToInvitation(invitationId, accept) {
 // ═══════════════════════
 let chartMixPersonal = null;
 let effortMode = 'absolute';
+let _mixUnit = 'hours';
 
 function setTrendMode(mode) { trendMode = mode; loadTrends(); }
 function setEffortMode(mode) { effortMode = mode; loadTrends(); }
+function setMixUnit(unit) { _mixUnit = unit; loadTrends(); }
 
 async function loadTrends() {
   if (!currentProfile) return;
@@ -2273,9 +2307,7 @@ async function _loadTrends() {
   if (weeklyTitleEl) {
     weeklyTitleEl.textContent = isNorm ? 'Belastning per vecka (n·h)' : 'Timmar per vecka';
   }
-  if (mixTitleEl) {
-    mixTitleEl.textContent = isNorm ? 'Aktivitetsmix (n·h)' : 'Aktivitetsmix (timmar)';
-  }
+  // mix title is set later when chart renders (respects _mixUnit toggle)
 
   const myData = weeks.map(w => {
     const types = trendMode === 'cardio' ? CARDIO_TYPES : [...CARDIO_TYPES, 'Gym'];
@@ -4989,25 +5021,7 @@ function buildSocialStatsRow(w) {
 }
 
 async function initSocialFeedMaps() {
-  try {
-    await ensureLeafletLoaded();
-  } catch (e) {
-    return;
-  }
-  if (typeof L === 'undefined') return;
-  document.querySelectorAll('.wo-map[data-polyline]').forEach(el => {
-    if (el.dataset.init) return;
-    el.dataset.init = '1';
-    try {
-      const coords = decodePolyline(el.dataset.polyline);
-      if (coords.length < 2) { el.style.display = 'none'; return; }
-      const svgHtml = polylineToSvg(coords, el.offsetWidth || 120, el.offsetHeight || 120);
-      el.innerHTML = svgHtml;
-      el.style.display = 'flex';
-      el.style.alignItems = 'center';
-      el.style.justifyContent = 'center';
-    } catch (e) { el.style.display = 'none'; }
-  });
+  await initMapThumbnails();
 }
 
 async function renderSocialFeed(append) {
