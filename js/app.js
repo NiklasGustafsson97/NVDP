@@ -350,6 +350,14 @@ function setTheme(theme) {
   const toggle = document.querySelector('#theme-toggle input');
   if (toggle) toggle.checked = theme === 'light';
   if (window._chartSeasonPie) { window._chartSeasonPie.update(); }
+  const newUrl = getMapTileUrl();
+  document.querySelectorAll('.wo-map[data-leaflet]').forEach(el => {
+    if (el._leafletMap) {
+      el._leafletMap.eachLayer(layer => {
+        if (layer._url) { layer.setUrl(newUrl); }
+      });
+    }
+  });
 }
 
 function setUnit(unit) {
@@ -1028,6 +1036,7 @@ async function _renderDashDayCard(dateStr) {
   }
 
   el.innerHTML = html;
+  requestAnimationFrame(() => initMapThumbnails());
 }
 
 function _getPhaseForDate(dateStr) {
@@ -1185,6 +1194,7 @@ function showMoreRecent() {
       `<button class="recent-more-btn btn-show-more" onclick="showMoreRecent()">Visa fler (${remaining} kvar)</button>`
     );
   }
+  requestAnimationFrame(() => initMapThumbnails());
 }
 
 function isRestDay(dayIdx, plans) {
@@ -1354,9 +1364,13 @@ async function openWorkoutModal(w) {
         const coords = decodePolyline(w.map_polyline);
         if (coords.length === 0) return;
         const map = L.map(mapEl, { zoomControl: false, attributionControl: false });
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
-        const line = L.polyline(coords, { color: '#2E86C1', weight: 3, opacity: 0.8 }).addTo(map);
-        map.fitBounds(line.getBounds(), { padding: [20, 20] });
+        L.tileLayer(getMapTileUrl(), { maxZoom: 18 }).addTo(map);
+        L.polyline(coords, { color: '#3B9DFF', weight: 4, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+        const shadow = L.polyline(coords, { color: '#000', weight: 7, opacity: 0.15, lineCap: 'round', lineJoin: 'round' });
+        shadow.addTo(map);
+        shadow.bringToBack();
+        const line = L.polyline(coords, { color: '#3B9DFF', weight: 4, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+        map.fitBounds(line.getBounds(), { padding: [30, 30] });
       }, 100);
     }).catch(() => {});
   }
@@ -1932,6 +1946,7 @@ function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchem
   }
 
   container.innerHTML = html;
+  requestAnimationFrame(() => initMapThumbnails());
 }
 
 // ── AI Plan Schema Renderer ──
@@ -2024,6 +2039,7 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
   }
 
   container.innerHTML = html;
+  requestAnimationFrame(() => initMapThumbnails());
 }
 
 // ═══════════════════════
@@ -4020,19 +4036,22 @@ async function openMemberProfile(memberId) {
     recentSlice.forEach(w => {
       const distStr = w.distance_km ? ` | ${w.distance_km} km` : '';
       const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
-      html += `<div class="workout-item clickable" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
+      const mapThumb = w.map_polyline ? `<div class="wo-map wo-map-mini" data-polyline="${w.map_polyline}"></div>` : '';
+      html += `<div class="workout-item clickable${w.map_polyline ? ' workout-item-with-map' : ''}" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
         <div class="workout-icon" style="background:${ACTIVITY_COLORS[w.activity_type] || '#555'}22;">${activityEmoji(w.activity_type)}</div>
         <div class="workout-info">
           <div class="name">${w.activity_type}${intBadge}</div>
           <div class="meta">${formatDate(w.workout_date)}</div>
         </div>
         <div class="workout-info duration">${w.duration_minutes} min${distStr}</div>
+        ${mapThumb}
       </div>`;
     });
     html += '</div>';
   }
 
   bodyEl.innerHTML = html;
+  requestAnimationFrame(() => initMapThumbnails());
 }
 
 function closeMemberProfile() {

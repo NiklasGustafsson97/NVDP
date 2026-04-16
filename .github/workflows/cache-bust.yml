@@ -8,6 +8,9 @@ on:
       - 'js/**'
       - 'index.html'
 
+permissions:
+  contents: write
+
 jobs:
   cache-bust:
     runs-on: ubuntu-latest
@@ -15,6 +18,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       - name: Replace version strings with commit hash
         run: |
