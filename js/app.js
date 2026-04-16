@@ -1231,8 +1231,6 @@ async function renderWeeklySummary(weekWorkouts, plans, monday, profile) {
   const totalDist = weekWorkouts.reduce((s, w) => s + (w.distance_km || 0), 0);
   const longest = weekWorkouts.reduce((max, w) => w.duration_minutes > (max?.duration_minutes || 0) ? w : max, null);
 
-  const now = new Date();
-  const todayDow = (now.getDay() + 6) % 7;
   const prevMonday = addDays(monday, -7);
   const prevEnd = addDays(prevMonday, todayDow);
   const { data: prevWorkouts } = await sb.from('workouts').select('*')
