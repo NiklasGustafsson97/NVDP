@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NVDP</title>
-  <link rel="stylesheet" href="css/style.css?v=0350c92">
+  <link rel="stylesheet" href="css/style.css?v=a808529">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
@@ -888,8 +888,8 @@
   </div>
 </div>
 
-<script src="js/config.js?v=0350c92"></script>
-<script src="js/app.js?v=0350c92"></script>
+<script src="js/config.js?v=a808529"></script>
+<script src="js/app.js?v=a808529"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {
@@ -917,8 +917,12 @@ async function checkGate() {
 function bootApp() {
   document.getElementById("auth-view").style.display = "flex";
 }
-if (typeof gateOpen === "function" && gateOpen()) {
+// Skip gate if already passed OR if a Supabase session exists in localStorage
+const hasSupabaseSession = Object.keys(localStorage).some(k => k.startsWith('sb-') && k.endsWith('-auth-token'));
+if ((typeof gateOpen === "function" && gateOpen()) || hasSupabaseSession) {
   document.getElementById("gate").style.display = "none";
+  localStorage.setItem("nvdp_gate_passed", "1");
+  sessionStorage.setItem("gate_passed", "1");
   bootApp();
 }
 </script>
