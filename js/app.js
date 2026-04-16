@@ -1158,23 +1158,26 @@ async function renderWeeklySummary(weekWorkouts, plans, monday, profile) {
   const totalDist = weekWorkouts.reduce((s, w) => s + (w.distance_km || 0), 0);
   const longest = weekWorkouts.reduce((max, w) => w.duration_minutes > (max?.duration_minutes || 0) ? w : max, null);
 
+  const now = new Date();
+  const todayDow = (now.getDay() + 6) % 7;
   const prevMonday = addDays(monday, -7);
-  const prevSunday = addDays(prevMonday, 6);
+  const prevEnd = addDays(prevMonday, todayDow);
   const { data: prevWorkouts } = await sb.from('workouts').select('*')
     .eq('profile_id', profile?.id)
     .gte('workout_date', isoDate(prevMonday))
-    .lte('workout_date', isoDate(prevSunday));
+    .lte('workout_date', isoDate(prevEnd));
   const prevMins = (prevWorkouts || []).reduce((s, w) => s + w.duration_minutes, 0);
   const prevSessions = (prevWorkouts || []).length;
   const prevDist = (prevWorkouts || []).reduce((s, w) => s + (w.distance_km || 0), 0);
 
   function deltaHTML(cur, prev, unit) {
-    if (prev === 0) return '';
+    if (prev === 0 && cur === 0) return '';
     const diff = cur - prev;
-    const pct = Math.round((diff / prev) * 100);
     const sign = diff > 0 ? '+' : '';
     const cls = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
-    return `<span class="ws-delta ${cls}">${sign}${pct}%</span>`;
+    const decimals = unit === 'h' || unit === 'km' ? 1 : 0;
+    const val = decimals ? diff.toFixed(decimals) : Math.round(diff);
+    return `<span class="ws-delta ${cls}">${sign}${val}${unit}</span>`;
   }
 
   let items = [];
@@ -2302,69 +2305,53 @@ async function _loadTrends() {
     return prev > 0 ? ((val - prev) / prev) * 100 : null;
   });
 
-  // Week-over-week volume delta (same-day comparison).
-  // Use calendar "this week" Monday — not weeks.at(-1), so an empty post-deload week does not stick to deload as "current".
-  // Baseline = previous calendar Monday; if that week is deload, compare to the Monday before deload.
+  // Week summary card with same-day comparison to previous week
   const deltaEl = document.getElementById('volume-delta');
   if (deltaEl) {
     const now = new Date();
     const todayDow = (now.getDay() + 6) % 7; // 0=Mon
     const thisWeekMon = mondayOfWeek(now);
     const thisMonday = isoDate(thisWeekMon);
-    const baselineMon = calendarBaselineMonday(thisWeekMon);
-    const baselineMonday = isoDate(baselineMon);
-    const wnB = weekNumber(baselineMon);
-    const vsLabel = isDeloadWeek(baselineMon) ? `V${wnB} (D)` : `V${wnB}`;
-    const types = trendMode === 'cardio' ? CARDIO_TYPES : [...CARDIO_TYPES, 'Gym'];
+    const prevWeekMon = addDays(thisWeekMon, -7);
+    const prevMonday = isoDate(prevWeekMon);
 
-    const accumTo = (mondayStr, maxDow) => {
-      const filtered = myWorkouts.filter(w => {
+    const filterPeriod = (mondayStr, maxDow) =>
+      myWorkouts.filter(w => {
         const wMon = isoDate(mondayOfWeek(new Date(w.workout_date)));
         if (wMon !== mondayStr) return false;
-        if (!types.includes(w.activity_type)) return false;
         const wDow = (new Date(w.workout_date).getDay() + 6) % 7;
         return wDow <= maxDow;
       });
-      return isNorm
-        ? effortRawToDisplay(filtered.reduce((s, w) => s + calcWorkoutEffort(w), 0))
-        : filtered.reduce((s, w) => s + durationWeightedHours(w), 0);
-    };
 
-    const curr = accumTo(thisMonday, todayDow);
-    const prev = accumTo(baselineMonday, todayDow);
-    const pctChange = prev > 0 ? ((curr - prev) / prev) * 100 : null;
-    const deload = isDeloadWeek(mondayOfWeek(now));
-    const dayLabel = DAY_NAMES[todayDow].toLowerCase();
+    const thisWk = filterPeriod(thisMonday, todayDow);
+    const prevWk = filterPeriod(prevMonday, todayDow);
 
-    if (pctChange === null || (prev <= 0 && curr <= 0)) {
-      deltaEl.innerHTML = '';
-    } else {
-      const sign = pctChange >= 0 ? '+' : '';
-      let colorClass = 'delta-neutral';
-      let msg = '';
-      if (deload) {
-        colorClass = pctChange <= -20 ? 'delta-good' : 'delta-warn';
-        msg = pctChange <= -20 ? 'Bra deload' : 'Sänk mer';
-      } else if (pctChange > 10) {
-        colorClass = 'delta-high';
-        msg = 'Hög ökning';
-      } else if (pctChange >= 0) {
-        colorClass = 'delta-good';
-        msg = 'Bra progression';
-      } else {
-        colorClass = 'delta-warn';
-        msg = 'Minskad volym';
-      }
+    const curMins = thisWk.reduce((s, w) => s + w.duration_minutes, 0);
+    const curSessions = thisWk.length;
+    const curDist = thisWk.reduce((s, w) => s + (w.distance_km || 0), 0);
+    const curLongest = thisWk.reduce((max, w) => w.duration_minutes > (max?.duration_minutes || 0) ? w : max, null);
 
-      const valFmt = (v) => v.toFixed(1);
-      deltaEl.innerHTML = `
-      <div class="vd-compact ${colorClass}">
-        <span class="vd-pct">${sign}${Math.round(pctChange)}%</span>
-        <span class="vd-detail">vs ${vsLabel} samma period (mån–${dayLabel})</span>
-        <span class="vd-val">${valFmt(curr)}${yUnit} / ${valFmt(prev)}${yUnit}</span>
-        <span class="vd-msg">${msg}</span>
-      </div>`;
+    const prevMins = prevWk.reduce((s, w) => s + w.duration_minutes, 0);
+    const prevSessions = prevWk.length;
+    const prevDist = prevWk.reduce((s, w) => s + (w.distance_km || 0), 0);
+
+    function absDelta(cur, prev, unit, decimals) {
+      if (prev === 0 && cur === 0) return '';
+      const diff = cur - prev;
+      const sign = diff > 0 ? '+' : '';
+      const cls = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
+      const val = decimals ? diff.toFixed(decimals) : Math.round(diff);
+      return `<span class="ws-delta ${cls}">${sign}${val}${unit}</span>`;
     }
+
+    const curHours = (curMins / 60).toFixed(1);
+    let items = '';
+    items += `<div class="ws-stat"><span class="ws-val">${curHours}h</span><span class="ws-label">total tid</span>${absDelta(curMins / 60, prevMins / 60, 'h', 1)}</div>`;
+    items += `<div class="ws-stat"><span class="ws-val">${curSessions}</span><span class="ws-label">pass</span>${absDelta(curSessions, prevSessions, '', 0)}</div>`;
+    items += `<div class="ws-stat"><span class="ws-val">${curDist > 0 ? curDist.toFixed(1) : '0'}km</span><span class="ws-label">distans</span>${absDelta(curDist, prevDist, 'km', 1)}</div>`;
+    items += `<div class="ws-stat"><span class="ws-val">${curLongest ? curLongest.duration_minutes + "'" : '—'}</span><span class="ws-label">längsta</span></div>`;
+
+    deltaEl.innerHTML = `<div class="card"><div class="ws-header">VECKOSUMMERING</div><div class="ws-grid">${items}</div></div>`;
   }
 
   // Activity mix stacked bar

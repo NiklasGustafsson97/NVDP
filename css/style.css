@@ -249,6 +249,7 @@ select option { background: #1a1a2e; color: var(--text); }
 }
 
 /* ── Weekly Summary ── */
+.ws-header { font-size: 0.65rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
 .ws-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 4px 0; }
 .ws-stat { text-align: center; }
 .ws-val { display: block; font-size: 1.1rem; font-weight: 700; color: var(--text); }
