@@ -149,6 +149,7 @@ Z1, Z2, Z3, Z4, Z5, mixed
 - Every week must have exactly 7 workouts (day_of_week 0=Monday through 6=Sunday).
 - Rest days: activity_type="Vila", is_rest=true, target_duration_minutes=0.
 - All text in Swedish.
+- target_duration_minutes = TOTAL session time including warm-up, work intervals, recovery jogs, and cool-down. For example an interval session with 15 min warm-up, 4×5 min intervals, 3 min recovery ×3, and 10 min cool-down = 54 min, not 15.
 - target_hours = sum of durations / 60. target_sessions = count of non-rest days.
 - For gym: label the type ("Styrka överkropp", etc.), intensity_zone=null, no individual exercises.
 - target_distance_km: set for all running workouts (including warm-up + cool-down distance). null for cycling/gym.
