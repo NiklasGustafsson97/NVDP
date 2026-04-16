@@ -2573,17 +2573,12 @@ function _intensityMultiplier(w) {
     const pctMax = w.avg_hr / maxHr;
     return Math.max(0.7, Math.min(1.5, 0.7 + (pctMax - 0.5) * 1.6));
   }
-  // Level 3a: Strava perceived exertion (direct RPE 1-10)
+  // Level 3: Strava perceived exertion (direct RPE 1-10)
   if (w.perceived_exertion && w.perceived_exertion >= 1) {
     const rpe = Math.min(10, w.perceived_exertion);
     return Math.max(0.7, Math.min(1.5, 0.7 + (rpe - 1) * (0.8 / 9)));
   }
-  // Level 3b: intensity string → RPE
-  if (w.intensity && INTENSITY_TO_RPE[w.intensity] != null) {
-    const rpe = INTENSITY_TO_RPE[w.intensity];
-    return Math.max(0.7, Math.min(1.5, 0.7 + (rpe - 1) * (0.8 / 9)));
-  }
-  // Level 4: no intensity data
+  // Text labels (Z2, Kvalitet) skipped -- too coarse to be reliable
   return 1.0;
 }
 
@@ -2594,7 +2589,8 @@ function calcWorkoutEffort(w) {
   const rpe = w.intensity ? (INTENSITY_TO_RPE[w.intensity] ?? null) : null;
   const met = _lookupMET(sport, speedMps, rpe);
   const elev = _elevationFactor(w.elevation_gain_m, w.distance_km);
-  return w.duration_minutes * met * elev;
+  const im = _intensityMultiplier(w);
+  return w.duration_minutes * met * elev * im;
 }
 
 /** Rå effort → visningsvärde (n·h) så veckosummor hamnar nära faktiska träningstimmar. */
