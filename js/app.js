@@ -2594,8 +2594,7 @@ function calcWorkoutEffort(w) {
   const rpe = w.intensity ? (INTENSITY_TO_RPE[w.intensity] ?? null) : null;
   const met = _lookupMET(sport, speedMps, rpe);
   const elev = _elevationFactor(w.elevation_gain_m, w.distance_km);
-  const im = _intensityMultiplier(w);
-  return w.duration_minutes * met * elev * im;
+  return w.duration_minutes * met * elev;
 }
 
 /** Rå effort → visningsvärde (n·h) så veckosummor hamnar nära faktiska träningstimmar. */
