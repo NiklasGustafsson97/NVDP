@@ -1058,16 +1058,90 @@ async function _renderDashCalendar() {
   }
   track.innerHTML = html;
 
+  _updateCalStripCellSize();
+
   // Default view: Yesterday, Today, Tomorrow, Day-after-tomorrow (yesterday as leftmost)
   requestAnimationFrame(() => {
+    _updateCalStripCellSize();
     _scrollCalToDate(isoDate(addDays(now, -1)), { behavior: 'auto' });
     _updateCalStripHeader();
   });
 
   if (!_calStripScrollHandlerAttached) {
     scrollArea.addEventListener('scroll', _onCalStripScroll, { passive: true });
+    _attachCalStripDragAndWheel(scrollArea);
+    window.addEventListener('resize', _updateCalStripCellSize);
     _calStripScrollHandlerAttached = true;
   }
+}
+
+function _updateCalStripCellSize() {
+  const scrollArea = document.getElementById('cal-strip-scroll-area');
+  if (!scrollArea) return;
+  const w = scrollArea.clientWidth;
+  if (w > 0) scrollArea.style.setProperty('--cal-strip-area-width', `${w}px`);
+}
+
+function _attachCalStripDragAndWheel(scrollArea) {
+  // Vertical wheel -> horizontal scroll (desktop mice have no horizontal axis)
+  scrollArea.addEventListener('wheel', (e) => {
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+    e.preventDefault();
+    scrollArea.scrollLeft += e.deltaY;
+  }, { passive: false });
+
+  // Pointer drag-to-scroll (desktop)
+  let dragging = false;
+  let dragMoved = false;
+  let startX = 0;
+  let startScroll = 0;
+  let pointerId = null;
+  const DRAG_THRESHOLD = 5;
+
+  scrollArea.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse') return;
+    if (e.button !== 0) return;
+    dragging = true;
+    dragMoved = false;
+    startX = e.clientX;
+    startScroll = scrollArea.scrollLeft;
+    pointerId = e.pointerId;
+  });
+
+  scrollArea.addEventListener('pointermove', (e) => {
+    if (!dragging || e.pointerId !== pointerId) return;
+    const dx = e.clientX - startX;
+    if (!dragMoved && Math.abs(dx) > DRAG_THRESHOLD) {
+      dragMoved = true;
+      scrollArea.classList.add('cal-strip-dragging');
+      try { scrollArea.setPointerCapture(pointerId); } catch (_) {}
+    }
+    if (dragMoved) {
+      e.preventDefault();
+      scrollArea.scrollLeft = startScroll - dx;
+    }
+  });
+
+  const endDrag = (e) => {
+    if (!dragging) return;
+    if (e && e.pointerId !== pointerId) return;
+    dragging = false;
+    scrollArea.classList.remove('cal-strip-dragging');
+    try { scrollArea.releasePointerCapture(pointerId); } catch (_) {}
+    pointerId = null;
+  };
+  scrollArea.addEventListener('pointerup', endDrag);
+  scrollArea.addEventListener('pointercancel', endDrag);
+  scrollArea.addEventListener('pointerleave', endDrag);
+
+  // Swallow the click that follows a drag so it doesn't select a day
+  scrollArea.addEventListener('click', (e) => {
+    if (dragMoved) {
+      e.stopPropagation();
+      e.preventDefault();
+      dragMoved = false;
+    }
+  }, true);
 }
 
 function _scrollCalToDate(dateStr, { behavior = 'auto' } = {}) {
@@ -5372,20 +5446,61 @@ async function saveLegacyPeriodEditor(periodId) {
         description: description || null,
       });
     }
-    // Skip totally empty non-rest rows
   });
+
+  // Safeguard: block saving a completely empty schedule (no passes, no rest)
+  if (upserts.length === 0) {
+    await showAlertModal('Tomt schema', 'Du har inte fyllt i några pass eller vilodagar. Lägg till minst ett pass eller markera minst en dag som Vila innan du sparar.');
+    return;
+  }
+
+  // Extra safeguard: if all rows are rest → confirm
+  const nonRest = upserts.filter(u => !u.is_rest);
+  if (nonRest.length === 0) {
+    const ok = await showConfirmModal('Endast vilodagar', 'Alla dagar är markerade som Vila. Vill du spara ändå?', 'Spara', false);
+    if (!ok) return;
+  }
 
   try {
     await sb.from('period_plans').delete().eq('period_id', periodId);
-    if (upserts.length) {
-      const { error } = await sb.from('period_plans').insert(upserts);
-      if (error) throw error;
-    }
+    const { error } = await sb.from('period_plans').insert(upserts);
+    if (error) throw error;
     closeLegacyPeriodEditor();
     openPlanManager();
   } catch (e) {
     console.error('Save legacy period error:', e);
     await showAlertModal('Fel', 'Kunde inte spara: ' + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  RECOVERY: restore Niklas' original Period 1 base schedule
+// ═══════════════════════════════════════════════════════════════════
+async function restoreNiklasBaseSchedule(periodId) {
+  const ok = await showConfirmModal(
+    'Återställ basschema',
+    'Detta återställer veckoschemat till: Vila/Distans Z2/Cykel Z2/Tröskelpass/Lätt+strides/Långpass/Vila. Befintligt schema för perioden ersätts.',
+    'Återställ'
+  );
+  if (!ok) return;
+  const rows = [
+    { day_of_week: 0, is_rest: true,  label: 'Vila',           description: null },
+    { day_of_week: 1, is_rest: false, label: 'Distans Z2',     description: '7–8 km lugn löpning Z2 (5:45–6:00/km). Konversationstempo hela vägen.' },
+    { day_of_week: 2, is_rest: false, label: 'Cykel Z2',       description: '45–60 min cykel Z2, jämn watt. Som aktiv återhämtning mellan löppass.' },
+    { day_of_week: 3, is_rest: false, label: 'Tröskelpass',    description: '15 min uppvärm Z2 → 4×5 min i tröskel Z4 (1 min jogg mellan) → 10 min nedjogg.' },
+    { day_of_week: 4, is_rest: false, label: 'Lätt + strides', description: '5–6 km mycket lugn Z1 (6:00–6:15/km) + 6×20 sek strides med full återhämtning.' },
+    { day_of_week: 5, is_rest: false, label: 'Långpass Z2',    description: '12–14 km lugn Z2 (5:45–6:15/km). Veckans viktigaste pass.' },
+    { day_of_week: 6, is_rest: true,  label: 'Vila',           description: null },
+  ].map(r => ({ ...r, period_id: periodId }));
+  try {
+    await sb.from('period_plans').delete().eq('period_id', periodId);
+    const { error } = await sb.from('period_plans').insert(rows);
+    if (error) throw error;
+    await showAlertModal('Klart', 'Basschemat är återställt. Öppna Hantera schema för att se det.');
+    openPlanManager();
+  } catch (e) {
+    console.error('Restore schedule error:', e);
+    await showAlertModal('Fel', 'Kunde inte återställa: ' + e.message);
   }
 }
 

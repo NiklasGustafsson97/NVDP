@@ -554,22 +554,38 @@ select option { background: #1a1a2e; color: var(--text); }
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x mandatory;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
+  cursor: grab;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
-.cal-strip-scroll-area::-webkit-scrollbar { display: none; }
+.cal-strip-scroll-area.cal-strip-dragging { cursor: grabbing; }
+.cal-strip-scroll-area::-webkit-scrollbar { height: 6px; }
+.cal-strip-scroll-area::-webkit-scrollbar-track { background: transparent; }
+.cal-strip-scroll-area::-webkit-scrollbar-thumb {
+  background: var(--border); border-radius: 3px;
+}
+@media (hover: none) and (pointer: coarse) {
+  .cal-strip-scroll-area { scrollbar-width: none; cursor: default; }
+  .cal-strip-scroll-area::-webkit-scrollbar { display: none; }
+}
 
 .cal-strip-track {
   display: flex;
+  width: max-content;
   gap: var(--cal-cell-gap, 8px);
 }
 
 .cal-cell {
+  --cal-visible-cells: 4;
   display: flex; flex-direction: column; align-items: center;
   justify-content: center;
-  flex: 0 0 calc((100% - 3 * var(--cal-cell-gap, 8px)) / 4);
+  flex: 0 0 auto;
+  width: calc(
+    (var(--cal-strip-area-width, 100vw) - (var(--cal-visible-cells) - 1) * var(--cal-cell-gap, 8px))
+    / var(--cal-visible-cells)
+  );
   scroll-snap-align: start;
   padding: 4px 0; border-radius: 10px;
   transition: background 0.15s; gap: 3px;
