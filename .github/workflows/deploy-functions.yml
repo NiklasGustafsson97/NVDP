@@ -67,26 +67,44 @@ jobs:
       - name: Deploy weekly-checkin-reminder
         run: supabase functions deploy weekly-checkin-reminder --no-verify-jwt
 
-      # ── User-facing endpoints: Supabase now rejects anonymous calls at the
-      #    edge. Each function additionally re-validates the JWT so the
-      #    defence-in-depth layering is intact.
+      # ── User-facing endpoints.
+      #
+      # NOTE (2026-04-18 — Supabase ES256 gateway limitation):
+      #   This project uses Supabase's new asymmetric JWT signing keys (ES256 /
+      #   `sb_publishable_…` publishable keys). The Edge Functions gateway's
+      #   built-in `--verify-jwt` implementation only supports the legacy
+      #   HS256 symmetric secret and therefore rejects every valid access
+      #   token with "UNAUTHORIZED_UNSUPPORTED_TOKEN_ALGORITHM: Unsupported
+      #   JWT algorithm ES256".
+      #
+      #   Until Supabase ships ES256 support in the gateway, we deploy these
+      #   functions WITH `--no-verify-jwt`. Security is still enforced:
+      #   each of these functions immediately calls
+      #   `createClient(…, { global: { headers: { Authorization } } }).auth.getUser()`
+      #   (or the equivalent) as its first step and returns 401 if the JWT
+      #   is missing/invalid/expired — and that path goes through Supabase
+      #   Auth, which understands ES256. The gateway check was defence-in-
+      #   depth, not the primary gate.
+      #
+      #   When Supabase adds ES256 support, remove the --no-verify-jwt flag
+      #   from the lines below and redeploy.
       - name: Deploy strava-sync
-        run: supabase functions deploy strava-sync
+        run: supabase functions deploy strava-sync --no-verify-jwt
 
       - name: Deploy garmin-sync
-        run: supabase functions deploy garmin-sync
+        run: supabase functions deploy garmin-sync --no-verify-jwt
 
       - name: Deploy generate-plan
-        run: supabase functions deploy generate-plan
+        run: supabase functions deploy generate-plan --no-verify-jwt
 
       - name: Deploy weekly-template-ai
-        run: supabase functions deploy weekly-template-ai
+        run: supabase functions deploy weekly-template-ai --no-verify-jwt
 
       - name: Deploy send-nudge-email
-        run: supabase functions deploy send-nudge-email
+        run: supabase functions deploy send-nudge-email --no-verify-jwt
 
       - name: Deploy weekly-checkin
-        run: supabase functions deploy weekly-checkin
+        run: supabase functions deploy weekly-checkin --no-verify-jwt
 
       - name: Deploy oauth-state
-        run: supabase functions deploy oauth-state
+        run: supabase functions deploy oauth-state --no-verify-jwt
