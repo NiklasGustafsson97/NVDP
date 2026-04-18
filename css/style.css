@@ -1470,9 +1470,12 @@ input.code-input {
 .pib-progress-label { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); }
 
 /* ── Generate Plan Button ── */
+.schema-pill-row {
+  display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;
+}
 .schema-plan-pill {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 14px; margin-bottom: 14px;
+  padding: 8px 14px;
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: 20px; color: var(--text); font-size: 0.82rem;
   font-weight: 600; cursor: pointer; transition: all 0.2s;
@@ -1481,6 +1484,8 @@ input.code-input {
 .schema-plan-pill:hover {
   border-color: var(--accent); background: rgba(214,99,158,0.06);
 }
+.schema-plan-pill--create { border-style: dashed; opacity: 0.85; }
+.schema-plan-pill--create:hover { opacity: 1; }
 .schema-plan-pill svg { flex-shrink: 0; opacity: 0.5; }
 .schema-pill-label { display: inline-flex; align-items: center; gap: 4px; }
 .schema-pill-ai {
