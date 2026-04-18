@@ -702,7 +702,7 @@ async function initApp(user, accessToken) {
 // ═══════════════════════
 //  NAVIGATION
 // ═══════════════════════
-function navigate(view) {
+function navigate(view, param) {
   // NAV-02: bottennav data-view="progress" → vy-element #view-trends ("Din progress"). Håll mappningen synkad.
   currentView = view;
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -711,7 +711,9 @@ function navigate(view) {
   const viewId = view === 'progress' ? 'trends' : view;
   const viewEl = document.getElementById('view-' + viewId);
   if (viewEl) viewEl.classList.add('active');
-  const navEl = document.querySelector(`.nav-item[data-view="${view}"]`);
+  // Friend profile reached via the Social tab — keep that nav item highlighted.
+  const navKey = view === 'friend-profile' ? 'social' : view;
+  const navEl = document.querySelector(`.nav-item[data-view="${navKey}"]`);
   if (navEl) navEl.classList.add('active');
 
   if (view === 'dashboard' || view === 'progress') {
@@ -727,6 +729,7 @@ function navigate(view) {
   else if (view === 'progress') loadTrends();
   else if (view === 'group') loadGroup();
   else if (view === 'social') loadSocial();
+  else if (view === 'friend-profile') loadFriendProfile(param);
 }
 
 // ═══════════════════════
@@ -6316,13 +6319,13 @@ async function renderSocialFeed(append) {
   }
 
   const workoutIds = workouts.map(w => w.id);
-  const { data: likes } = await sb.from('workout_likes').select('*').in('workout_id', workoutIds);
+  const reactions = await fetchReactionsBulk(workoutIds);
   const comments = await fetchCommentsBulk(workoutIds);
 
-  const likesByWorkout = {};
-  (likes || []).forEach(l => {
-    if (!likesByWorkout[l.workout_id]) likesByWorkout[l.workout_id] = [];
-    likesByWorkout[l.workout_id].push(l);
+  const reactionsByWorkout = {};
+  (reactions || []).forEach(r => {
+    if (!reactionsByWorkout[r.workout_id]) reactionsByWorkout[r.workout_id] = [];
+    reactionsByWorkout[r.workout_id].push(r);
   });
 
   const commentsByWorkout = {};
@@ -6340,8 +6343,11 @@ async function renderSocialFeed(append) {
     const wDate = new Date(w.workout_date).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' });
     const intBadge = w.intensity ? ` <span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
     const distText = w.distance_km ? ` · ${w.distance_km} km` : '';
-    const wLikes = likesByWorkout[w.id] || [];
-    const myLike = wLikes.find(l => l.profile_id === currentProfile.id);
+    const wReactions = reactionsByWorkout[w.id] || [];
+    const wLikes = wReactions.filter(r => r.reaction === 'like');
+    const wDislikes = wReactions.filter(r => r.reaction === 'dislike');
+    const myReaction = wReactions.find(r => r.profile_id === currentProfile.id);
+    const isOwnWorkout = w.profile_id === currentProfile.id;
     const wComments = commentsByWorkout[w.id] || [];
 
     // SECURITY (assessment H1): comment author name and body are DB-sourced;
@@ -6358,10 +6364,31 @@ async function renderSocialFeed(append) {
 
     // SECURITY: pass workout id via data-attribute and look up the full object
     // on click rather than serialising DB-sourced fields into an inline handler.
+    const likeActive = myReaction?.reaction === 'like' ? ' liked' : '';
+    const dislikeActive = myReaction?.reaction === 'dislike' ? ' liked' : '';
+    const reactBtns = isOwnWorkout
+      ? `<span class="sf-action-btn sf-action-static" title="Du kan inte reagera p\u00e5 ditt eget pass">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+          ${wLikes.length > 0 ? wLikes.length : ''}
+        </span>
+        <span class="sf-action-btn sf-action-static">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
+          ${wDislikes.length > 0 ? wDislikes.length : ''}
+        </span>`
+      : `<button class="sf-action-btn${likeActive}" onclick="toggleSocialReaction('${escapeHTML(w.id)}','like')" title="Bra pass">
+          <svg viewBox="0 0 24 24" fill="${myReaction?.reaction === 'like' ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+          ${wLikes.length > 0 ? wLikes.length : ''}
+        </button>
+        <button class="sf-action-btn${dislikeActive}" onclick="toggleSocialReaction('${escapeHTML(w.id)}','dislike')" title="Hmm \u2026">
+          <svg viewBox="0 0 24 24" fill="${myReaction?.reaction === 'dislike' ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
+          ${wDislikes.length > 0 ? wDislikes.length : ''}
+        </button>`;
+    const profileClick = isOwnWorkout ? '' : `onclick="event.stopPropagation();openFriendProfile('${escapeHTML(w.profile_id)}')"`;
+    const profileCursor = isOwnWorkout ? '' : 'cursor:pointer;';
     return `<div class="social-feed-item" data-workout-id="${escapeHTML(w.id)}">
       <div class="sf-header">
-        <div class="sf-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1rem' : '0.75rem'};">${escapeHTML(avatar)}</div>
-        <span class="sf-name">${escapeHTML(name)}</span>
+        <div class="sf-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1rem' : '0.75rem'};${profileCursor}" ${profileClick}>${escapeHTML(avatar)}</div>
+        <span class="sf-name" style="${profileCursor}" ${profileClick}>${escapeHTML(name)}</span>
         <span class="sf-date">${escapeHTML(wDate)}</span>
       </div>
       <div class="sf-body sf-body-clickable${w.map_polyline ? ' sf-body-with-map' : ''}" data-workout-open-id="${escapeHTML(w.id)}">
@@ -6372,10 +6399,7 @@ async function renderSocialFeed(append) {
         ${mapHtml}
       </div>
       <div class="sf-actions">
-        <button class="sf-action-btn${myLike ? ' liked' : ''}" onclick="toggleSocialLike('${escapeHTML(w.id)}', this)">
-          <svg viewBox="0 0 24 24" fill="${myLike ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-          ${wLikes.length > 0 ? wLikes.length : ''}
-        </button>
+        ${reactBtns}
         <button class="sf-action-btn" onclick="toggleSocialComments('${escapeHTML(w.id)}')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           ${wComments.length > 0 ? wComments.length : ''}
@@ -6425,37 +6449,277 @@ async function loadMoreSocialFeed() {
   await renderSocialFeed(true);
 }
 
-async function toggleSocialLike(workoutId, btn) {
+async function toggleSocialReaction(workoutId, reactionType) {
   try {
-    const { data: existing } = await sb.from('workout_likes')
-      .select('*')
-      .eq('workout_id', workoutId)
-      .eq('profile_id', currentProfile.id)
-      .maybeSingle();
+    await toggleReaction(workoutId, reactionType);
+    await refreshSocialFeedReactionButtons(workoutId);
+  } catch (e) {
+    console.error('Toggle reaction error:', e);
+  }
+}
 
-    if (existing) {
-      await sb.from('workout_likes').delete().eq('id', existing.id);
-    } else {
-      await sb.from('workout_likes').insert({
-        workout_id: workoutId,
-        profile_id: currentProfile.id,
-      });
+async function refreshSocialFeedReactionButtons(workoutId) {
+  const reactions = await fetchReactions(workoutId);
+  const likes = reactions.filter(r => r.reaction === 'like');
+  const dislikes = reactions.filter(r => r.reaction === 'dislike');
+  const myReaction = reactions.find(r => r.profile_id === currentProfile.id);
+
+  const item = document.querySelector(`.social-feed-item[data-workout-id="${CSS.escape(workoutId)}"]`);
+  if (!item) return;
+  const actionBtns = item.querySelectorAll('.sf-action-btn');
+  actionBtns.forEach(btn => {
+    const handler = btn.getAttribute('onclick') || '';
+    if (handler.includes("'like'")) {
+      btn.classList.toggle('liked', myReaction?.reaction === 'like');
+      const svg = btn.querySelector('svg');
+      if (svg) svg.setAttribute('fill', myReaction?.reaction === 'like' ? 'currentColor' : 'none');
+      const countText = likes.length > 0 ? ' ' + likes.length : '';
+      btn.innerHTML = '';
+      if (svg) btn.appendChild(svg);
+      if (countText) btn.append(countText);
+    } else if (handler.includes("'dislike'")) {
+      btn.classList.toggle('liked', myReaction?.reaction === 'dislike');
+      const svg = btn.querySelector('svg');
+      if (svg) svg.setAttribute('fill', myReaction?.reaction === 'dislike' ? 'currentColor' : 'none');
+      const countText = dislikes.length > 0 ? ' ' + dislikes.length : '';
+      btn.innerHTML = '';
+      if (svg) btn.appendChild(svg);
+      if (countText) btn.append(countText);
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  FRIEND PROFILE PAGE
+// ═══════════════════════════════════════════════════════════════════
+
+let _currentFriendProfileId = null;
+
+function openFriendProfile(profileId) {
+  if (!profileId) return;
+  navigate('friend-profile', profileId);
+}
+
+async function loadFriendProfile(profileId) {
+  _currentFriendProfileId = profileId;
+
+  // Elements — reset to loading state.
+  const titleEl = document.getElementById('fp-title');
+  const avatarEl = document.getElementById('fp-avatar');
+  const nameEl = document.getElementById('fp-name');
+  const metaEl = document.getElementById('fp-meta');
+  const actionsEl = document.getElementById('fp-identity-actions');
+  const stats4wEl = document.getElementById('fp-stats-4w');
+  const statsSeasonEl = document.getElementById('fp-stats-season');
+  const recentEl = document.getElementById('fp-recent-workouts');
+  const prsEl = document.getElementById('fp-prs');
+
+  nameEl.textContent = 'Laddar...';
+  metaEl.textContent = '';
+  actionsEl.innerHTML = '';
+  stats4wEl.innerHTML = '<div class="fp-loading">Hämtar...</div>';
+  statsSeasonEl.innerHTML = '';
+  recentEl.innerHTML = '';
+  prsEl.innerHTML = '';
+
+  // If this is the current user, just send them to their own dashboard.
+  if (currentProfile && profileId === currentProfile.id) {
+    navigate('dashboard');
+    return;
+  }
+
+  try {
+    // Make sure we have the profile in allProfiles; if not, refresh.
+    let profile = allProfiles.find(p => p.id === profileId);
+    if (!profile) {
+      await refreshAllProfiles();
+      profile = allProfiles.find(p => p.id === profileId);
+    }
+    if (!profile) {
+      nameEl.textContent = 'Profilen är inte synlig';
+      metaEl.textContent = 'Ni måste vara vänner eller i samma grupp.';
+      return;
     }
 
-    const { data: allLikes } = await sb.from('workout_likes')
-      .select('*')
-      .eq('workout_id', workoutId);
-    const myLikeNow = (allLikes || []).find(l => l.profile_id === currentProfile.id);
-    const count = (allLikes || []).length;
+    // Header.
+    const isEmoji = profile.avatar && profile.avatar.length <= 2;
+    avatarEl.textContent = profile.avatar || (profile.name || '?')[0].toUpperCase();
+    avatarEl.style.background = isEmoji ? 'transparent' : (profile.color || '#2E86C1');
+    avatarEl.style.fontSize = isEmoji ? '2rem' : '1.2rem';
+    nameEl.textContent = profile.name || 'Okänd';
+    titleEl.textContent = profile.name || 'Profil';
 
-    btn.classList.toggle('liked', !!myLikeNow);
-    const svg = btn.querySelector('svg');
-    svg.setAttribute('fill', myLikeNow ? 'currentColor' : 'none');
-    btn.innerHTML = '';
-    btn.appendChild(svg);
-    if (count > 0) btn.append(' ' + count);
+    // Friendship status + action.
+    const { data: friendships } = await sb.from('friendships')
+      .select('*')
+      .or(`and(requester_id.eq.${currentProfile.id},receiver_id.eq.${profileId}),and(requester_id.eq.${profileId},receiver_id.eq.${currentProfile.id})`);
+    const friendship = (friendships || [])[0];
+    let friendStatusLabel = '';
+    if (friendship?.status === 'accepted') {
+      friendStatusLabel = 'Vän';
+      actionsEl.innerHTML = `<button class="btn btn-sm btn-ghost" onclick="removeFriendFromProfile('${escapeHTML(profileId)}')">Ta bort vän</button>`;
+    } else if (friendship?.status === 'pending') {
+      friendStatusLabel = friendship.requester_id === currentProfile.id ? 'Förfrågan skickad' : 'Vill vara vän';
+      if (friendship.receiver_id === currentProfile.id) {
+        actionsEl.innerHTML = `<button class="btn btn-sm btn-primary" onclick="acceptFriendRequestFromProfile('${escapeHTML(friendship.id)}','${escapeHTML(profileId)}')">Acceptera</button>`;
+      }
+    } else {
+      actionsEl.innerHTML = `<button class="btn btn-sm btn-primary" onclick="sendFriendRequestFromProfile('${escapeHTML(profileId)}')">Lägg till som vän</button>`;
+    }
+
+    const metaParts = [];
+    if (friendStatusLabel) metaParts.push(friendStatusLabel);
+    if (profile.group_id) {
+      const { data: grp } = await sb.from('groups').select('name').eq('id', profile.group_id).maybeSingle();
+      if (grp?.name) metaParts.push('Grupp: ' + grp.name);
+    }
+    metaEl.textContent = metaParts.join(' · ');
+
+    // Fetch workouts (RLS will only return what this user is allowed to see).
+    const today = new Date();
+    const fourWeeksAgo = new Date(); fourWeeksAgo.setDate(today.getDate() - 28);
+    const yearStart = new Date(today.getFullYear(), 0, 1);
+
+    const [recentWorkouts, seasonWorkouts] = await Promise.all([
+      fetchWorkouts(profileId, isoDate(fourWeeksAgo), isoDate(today)),
+      fetchWorkouts(profileId, isoDate(yearStart), isoDate(today)),
+    ]);
+
+    // 4-week stats.
+    stats4wEl.innerHTML = renderFpStats(recentWorkouts, 4);
+
+    // Season stats.
+    statsSeasonEl.innerHTML = renderFpStats(seasonWorkouts, null);
+
+    // Recent workouts list (most recent 20).
+    const recentSorted = [...seasonWorkouts].sort((a, b) => b.workout_date.localeCompare(a.workout_date)).slice(0, 20);
+    if (recentSorted.length === 0) {
+      recentEl.innerHTML = '<div class="empty-state"><p>Inga loggade pass att visa.</p></div>';
+    } else {
+      recentEl.innerHTML = recentSorted.map(w => {
+        const wDate = new Date(w.workout_date).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' });
+        const intBadge = w.intensity ? ` <span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
+        return `<div class="fp-workout-row" data-workout-open-id="${escapeHTML(w.id)}" style="cursor:pointer;">
+          <span class="fp-workout-icon">${activityEmoji(w.activity_type)}</span>
+          <div class="fp-workout-body">
+            <div class="fp-workout-title">${escapeHTML(w.activity_type)} · ${w.duration_minutes} min${w.distance_km ? ' · ' + w.distance_km + ' km' : ''}${intBadge}</div>
+            <div class="fp-workout-date">${escapeHTML(wDate)}</div>
+          </div>
+        </div>`;
+      }).join('');
+
+      // Delegation for opening workout modal.
+      recentEl.onclick = (ev) => {
+        const node = ev.target.closest && ev.target.closest('[data-workout-open-id]');
+        if (!node) return;
+        const wid = node.getAttribute('data-workout-open-id');
+        const wObj = recentSorted.find(x => x.id === wid);
+        if (wObj) openWorkoutModal(wObj);
+      };
+    }
+
+    // Personal records (best 5k, 10k, longest run).
+    prsEl.innerHTML = renderFpPRs(seasonWorkouts);
+
   } catch (e) {
-    console.error('Toggle like error:', e);
+    console.error('loadFriendProfile error:', e);
+    nameEl.textContent = 'Kunde inte ladda profilen';
+    metaEl.textContent = '';
+  }
+}
+
+function renderFpStats(workouts, weeks) {
+  const totalSessions = workouts.length;
+  const totalMin = workouts.reduce((s, w) => s + (w.duration_minutes || 0), 0);
+  const totalKm = workouts.reduce((s, w) => s + (w.distance_km || 0), 0);
+  const elevSum = workouts.reduce((s, w) => s + (w.elevation_gain_m || 0), 0);
+  const hoursStr = (totalMin / 60).toFixed(1);
+  const kmStr = totalKm > 0 ? totalKm.toFixed(1) : '—';
+  const avgPerWeek = weeks ? (totalSessions / weeks).toFixed(1) : null;
+
+  const items = [
+    { label: 'Pass', value: totalSessions },
+    { label: 'Timmar', value: hoursStr },
+    { label: 'Kilometer', value: kmStr },
+    { label: 'Höjdmeter', value: elevSum > 0 ? Math.round(elevSum) + ' m' : '—' },
+  ];
+  if (avgPerWeek !== null) items.unshift({ label: 'Pass/v', value: avgPerWeek });
+
+  return items.map(it => `<div class="fp-stat">
+    <div class="fp-stat-value">${escapeHTML(String(it.value))}</div>
+    <div class="fp-stat-label">${escapeHTML(it.label)}</div>
+  </div>`).join('');
+}
+
+function renderFpPRs(workouts) {
+  const runs = workouts.filter(w => w.activity_type === 'Löpning' && w.duration_minutes > 0 && w.distance_km > 0);
+  if (runs.length === 0) return '<div class="empty-state"><p>Inga löppass att räkna rekord från ännu.</p></div>';
+
+  // Best paces for distances within tolerance.
+  const byDist = (target, tol) => {
+    const candidates = runs.filter(w => Math.abs(w.distance_km - target) <= tol);
+    if (!candidates.length) return null;
+    return candidates.reduce((best, w) => (w.duration_minutes < best.duration_minutes ? w : best));
+  };
+
+  const best5k = byDist(5, 0.5);
+  const best10k = byDist(10, 0.8);
+  const longest = runs.reduce((best, w) => (w.distance_km > (best?.distance_km || 0) ? w : best), null);
+
+  const fmtTime = (minutes) => {
+    const h = Math.floor(minutes / 60);
+    const m = Math.floor(minutes % 60);
+    const s = Math.round((minutes - Math.floor(minutes)) * 60);
+    return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+  };
+
+  const rows = [];
+  if (best5k) rows.push({ label: 'Bästa 5 km', value: fmtTime(best5k.duration_minutes), date: best5k.workout_date });
+  if (best10k) rows.push({ label: 'Bästa 10 km', value: fmtTime(best10k.duration_minutes), date: best10k.workout_date });
+  if (longest) rows.push({ label: 'Längsta löppass', value: longest.distance_km.toFixed(1) + ' km', date: longest.workout_date });
+
+  if (!rows.length) return '<div class="empty-state"><p>Inga rekord att visa ännu.</p></div>';
+
+  return rows.map(r => `<div class="fp-pr-row">
+    <div class="fp-pr-label">${escapeHTML(r.label)}</div>
+    <div class="fp-pr-value">${escapeHTML(r.value)}</div>
+    <div class="fp-pr-date">${escapeHTML(formatDate(r.date))}</div>
+  </div>`).join('');
+}
+
+async function sendFriendRequestFromProfile(profileId) {
+  try {
+    await sb.from('friendships').insert({
+      requester_id: currentProfile.id,
+      receiver_id: profileId,
+      status: 'pending',
+    });
+    await loadFriendProfile(profileId);
+  } catch (e) {
+    console.error('sendFriendRequestFromProfile error:', e);
+    await showAlertModal('Fel', 'Kunde inte skicka vänförfrågan.');
+  }
+}
+
+async function acceptFriendRequestFromProfile(friendshipId, profileId) {
+  try {
+    await sb.from('friendships').update({ status: 'accepted' }).eq('id', friendshipId);
+    await loadFriendProfile(profileId);
+  } catch (e) {
+    console.error('acceptFriendRequestFromProfile error:', e);
+  }
+}
+
+async function removeFriendFromProfile(profileId) {
+  const ok = await showConfirmModal('Ta bort vän', 'Vill du ta bort denna vän?', 'Ta bort', true);
+  if (!ok) return;
+  try {
+    await sb.from('friendships')
+      .delete()
+      .or(`and(requester_id.eq.${currentProfile.id},receiver_id.eq.${profileId}),and(requester_id.eq.${profileId},receiver_id.eq.${currentProfile.id})`);
+    await loadFriendProfile(profileId);
+  } catch (e) {
+    console.error('removeFriendFromProfile error:', e);
   }
 }
 

@@ -549,6 +549,48 @@
       </div>
     </section>
 
+    <!-- ── FRIEND PROFILE ── -->
+    <section id="view-friend-profile" class="view">
+      <div class="page-header fp-page-header">
+        <button class="btn btn-ghost btn-sm fp-back-btn" onclick="navigate('social')" aria-label="Tillbaka">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16"><polyline points="15 18 9 12 15 6"/></svg>
+          Tillbaka
+        </button>
+        <h2 id="fp-title">Profil</h2>
+      </div>
+
+      <div class="card fp-identity-card">
+        <div class="fp-identity-row">
+          <div class="fp-avatar" id="fp-avatar">?</div>
+          <div class="fp-identity-text">
+            <div class="fp-name" id="fp-name">—</div>
+            <div class="fp-meta" id="fp-meta"></div>
+          </div>
+          <div class="fp-identity-actions" id="fp-identity-actions"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">Senaste 4 veckorna</span></div>
+        <div class="fp-stats-grid" id="fp-stats-4w"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">Säsong</span></div>
+        <div class="fp-stats-grid" id="fp-stats-season"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">Senaste pass</span></div>
+        <div id="fp-recent-workouts"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">Personliga rekord</span></div>
+        <div id="fp-prs"></div>
+      </div>
+    </section>
+
     <!-- ── GROUP ── -->
     <section id="view-group" class="view">
       <div class="page-header">
@@ -988,6 +1030,7 @@
       </div>
       <div class="form-group">
         <label>Nuvarande lugnt tempo (min/km)</label>
+        <div class="wiz-field-hint">Tempo du kan hålla i 60+ minuter utan att bli andfådd &mdash; du ska kunna föra ett samtal (pratvänligt tempo, ungefär puls-zon 2).</div>
         <input type="text" id="wiz-easy-pace" placeholder="t.ex. 5:45">
       </div>
     </div>
@@ -1049,13 +1092,6 @@
       <div class="form-group">
         <label>Vilka aktiviteter vill du ha?</label>
         <div class="wiz-activity-checks" id="wiz-activity-types"></div>
-      </div>
-      <div class="form-group">
-        <label>Inkludera gym/styrka?</label>
-        <div class="wiz-toggle-row">
-          <button type="button" class="intensity-pill active" id="wiz-gym-yes" onclick="setWizGym(true)">Ja</button>
-          <button type="button" class="intensity-pill" id="wiz-gym-no" onclick="setWizGym(false)">Nej</button>
-        </div>
       </div>
       <div class="form-group">
         <label>Skador / begränsningar (valfritt)</label>
