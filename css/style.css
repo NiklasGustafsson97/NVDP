@@ -1721,6 +1721,24 @@ input.code-input {
 }
 .friend-remove-btn:hover { color: var(--red); background: rgba(231,76,60,0.08); }
 
+.friends-summary-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+}
+.friends-summary-text { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.friends-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 22px; padding: 0 7px;
+  border-radius: 999px; font-size: 0.72rem; font-weight: 700;
+  background: rgba(214,99,158,0.12); color: var(--text);
+  border: 1px solid rgba(214,99,158,0.25);
+}
+.friends-summary-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+#friends-modal .modal-box .friend-list { margin-top: 8px; }
+@media (max-width: 380px) {
+  .friends-summary-actions .btn { padding-left: 8px; padding-right: 8px; }
+}
+
 .social-feed-item {
   padding: 14px 0; border-bottom: 1px solid var(--border);
 }
