@@ -4751,9 +4751,64 @@ async function pmPreviewWeek(planId, delta) {
   if (el) el.innerHTML = buildPlanPreviewHTML(plan, preview, _pmPreviewWeekIdx);
 }
 
+let _pmExpandedLegacyId = null;
+
+async function toggleLegacyPreview(periodId) {
+  const el = document.getElementById('pm-preview-legacy-' + periodId);
+  if (!el) return;
+  if (_pmExpandedLegacyId === periodId) {
+    _pmExpandedLegacyId = null;
+    el.classList.add('hidden');
+    return;
+  }
+  document.querySelectorAll('.pm-preview-panel').forEach(p => p.classList.add('hidden'));
+  _pmExpandedLegacyId = periodId;
+  _pmExpandedPlanId = null;
+  el.innerHTML = '<div class="pm-preview-loading"><span class="spinner-sm"></span></div>';
+  el.classList.remove('hidden');
+
+  const periods = await fetchPeriods();
+  const period = periods.find(p => p.id === periodId);
+  if (!period) return;
+  const plans = await fetchPlans(periodId);
+  const todayStr = isoDate(new Date());
+  const allPlans = await fetchAllPlansForProfile(currentProfile?.id);
+  const hasActivePlan = allPlans.some(p => p.status === 'active');
+  const isActive = !hasActivePlan && todayStr >= period.start_date && todayStr <= period.end_date;
+  el.innerHTML = buildLegacyPreviewHTML(period, plans, isActive);
+}
+
+function buildLegacyPreviewHTML(period, plans, isActive) {
+  const DAY = ['Mån', 'Tis', 'Ons', 'Tors', 'Fre', 'Lör', 'Sön'];
+  let grid = '';
+  for (let d = 0; d < 7; d++) {
+    const wo = plans.find(p => p.day_of_week === d);
+    if (wo?.is_rest) {
+      grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-rest">Vila</span></div>`;
+    } else if (wo) {
+      grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-label">${stripDayPrefix(wo.label || '')}</span><span class="pm-prev-meta">${wo.description ? wo.description.slice(0, 30) : ''}</span></div>`;
+    } else {
+      grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-rest">—</span></div>`;
+    }
+  }
+
+  return `
+    <div class="pm-preview-summary">
+      <div class="pm-preview-phases">Manuellt veckoschema</div>
+      <div class="pm-preview-weeks-label">${period.start_date} — ${period.end_date}</div>
+    </div>
+    <div class="pm-prev-grid">${grid}</div>
+    <div class="pm-preview-actions">
+      ${isActive
+        ? '<div class="pm-info-text">Detta är ditt aktiva schema. Logga pass mot dessa dagar i veckovyn.</div>'
+        : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();switchToLegacy()">Aktivera</button>`}
+    </div>`;
+}
+
 async function openPlanManager() {
   _pmPreviewCache = {};
   _pmExpandedPlanId = null;
+  _pmExpandedLegacyId = null;
   const plans = await fetchAllPlansForProfile(currentProfile?.id);
   const listEl = document.getElementById('plan-manager-list');
   const topEl = document.getElementById('pm-top-actions');
@@ -4776,14 +4831,16 @@ async function openPlanManager() {
     html += '<div class="pm-section-label">Manuella scheman</div>';
     legacyPeriods.forEach(p => {
       const active = isLegacyActive && todayStr >= p.start_date && todayStr <= p.end_date;
-      html += `<div class="plan-manager-item${active ? ' active' : ''}" onclick="${active ? '' : `switchToLegacy()`}">
+      html += `<div class="plan-manager-item${active ? ' active' : ''}" onclick="toggleLegacyPreview('${p.id}')">
         <span style="font-size:1.1rem;">📋</span>
         <div class="pm-info">
           <div class="pm-name">${p.name || 'Manuellt schema'}</div>
           <div class="pm-meta">${p.start_date} — ${p.end_date}</div>
         </div>
         <span class="pm-status-badge ${active ? 'active' : 'archived'}">${active ? 'Aktiv' : 'Tillgänglig'}</span>
-      </div>`;
+        <svg class="pm-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="pm-preview-panel hidden" id="pm-preview-legacy-${p.id}"></div>`;
     });
   }
 

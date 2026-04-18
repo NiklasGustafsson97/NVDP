@@ -1851,6 +1851,7 @@ input.code-input {
 .pm-preview-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .pm-preview-actions .btn { flex: 1; min-width: 0; font-size: 0.72rem; padding: 6px 8px; }
 .pm-preview-empty { text-align: center; padding: 12px 0; color: var(--text-dim); font-size: 0.8rem; }
+.pm-info-text { font-size: 0.78rem; color: var(--text-dim); padding: 6px 8px; line-height: 1.4; }
 
 /* ── Plan Workout Edit ── */
 .pwe-divider { border-top: 1px solid var(--border); margin: 16px 0 12px; }
