@@ -2099,7 +2099,7 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
       <div class="sr-main">
         ${mainContent}
       </div>
-      <div class="sr-right-status">${rightContent}</div>
+      <div class="sr-right-status">${rightContent}${editIcon}</div>
     </div>`;
   }
 

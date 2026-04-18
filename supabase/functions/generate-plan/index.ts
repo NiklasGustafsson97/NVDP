@@ -419,7 +419,17 @@ serve(async (req) => {
     }
 
     // 2. Parse input
-    const body: (PlanRequest & { profile_id: string; mode?: string; plan_id?: string; instruction?: string; current_plan?: unknown }) = await req.json();
+    const body: (PlanRequest & {
+      profile_id: string;
+      mode?: string;
+      plan_id?: string;
+      instruction?: string;
+      current_plan?: unknown;
+      workout_id?: string;
+      current_workout?: unknown;
+      conversation_history?: { role: string; content: string }[];
+      proposed_plan?: unknown;
+    }) = await req.json();
     const { profile_id } = body;
     if (!profile_id) {
       return new Response(JSON.stringify({ error: "Missing profile_id" }), {
@@ -430,7 +440,107 @@ serve(async (req) => {
 
     const db = supabaseAdmin();
 
-    // ── EDIT MODE: modify existing plan via AI chat ──
+    // ── EDIT_SINGLE MODE: AI modifies one workout ──
+    if (body.mode === "edit_single" && body.workout_id && body.instruction && body.current_workout) {
+      const singlePrompt = `You are modifying a SINGLE workout in a training plan. Return ONLY a JSON object with the modified workout fields.
+
+CURRENT WORKOUT:
+${JSON.stringify(body.current_workout, null, 2)}
+
+USER INSTRUCTION: "${body.instruction}"
+
+Return ONLY a JSON object with these fields: activity_type, label, description, target_duration_minutes, target_distance_km, intensity_zone, is_rest. Use Swedish text. Follow the training philosophy rules. Wrap it in {"plan_name":"edit","summary":"","weeks":[{"week_number":1,"phase":"base","target_hours":0,"target_sessions":0,"notes":"","workouts":[YOUR_WORKOUT]}]}`;
+
+      const rawResult = await generatePlan(singlePrompt);
+      const workout = rawResult.weeks?.[0]?.workouts?.[0] || rawResult;
+
+      return new Response(
+        JSON.stringify({ workout }),
+        { status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── EDIT_APPLY MODE: apply a previously previewed plan ──
+    if (body.mode === "edit_apply" && body.plan_id && body.proposed_plan) {
+      const editedPlan = body.proposed_plan as LLMPlan;
+
+      const { data: oldWeeks } = await db.from("plan_weeks").select("id").eq("plan_id", body.plan_id);
+      if (oldWeeks) {
+        for (const w of oldWeeks) {
+          await db.from("plan_workouts").delete().eq("plan_week_id", w.id);
+        }
+        await db.from("plan_weeks").delete().eq("plan_id", body.plan_id);
+      }
+
+      const { data: planData } = await db.from("training_plans").select("start_date").eq("id", body.plan_id).single();
+      const applyStartDate = planData?.start_date || new Date().toISOString().split("T")[0];
+      const applyNumWeeks = editedPlan.weeks.length;
+      const applyEndDate = new Date(applyStartDate);
+      applyEndDate.setDate(applyEndDate.getDate() + applyNumWeeks * 7 - 1);
+
+      await db.from("training_plans").update({
+        name: editedPlan.plan_name,
+        end_date: applyEndDate.toISOString().split("T")[0],
+      }).eq("id", body.plan_id);
+
+      for (const week of editedPlan.weeks) {
+        const { data: weekData, error: weekErr } = await db.from("plan_weeks").insert({
+          plan_id: body.plan_id,
+          week_number: week.week_number,
+          phase: week.phase,
+          target_hours: week.target_hours,
+          target_sessions: week.target_sessions,
+          notes: week.notes,
+        }).select("id").single();
+        if (weekErr) continue;
+
+        const weekStartDate = new Date(applyStartDate);
+        weekStartDate.setDate(weekStartDate.getDate() + (week.week_number - 1) * 7);
+        const workoutRows = week.workouts.map((w: LLMPlan["weeks"][0]["workouts"][0], idx: number) => {
+          const wDate = new Date(weekStartDate);
+          wDate.setDate(wDate.getDate() + w.day_of_week);
+          return {
+            plan_week_id: weekData.id,
+            workout_date: wDate.toISOString().split("T")[0],
+            day_of_week: w.day_of_week,
+            activity_type: w.activity_type,
+            label: w.label,
+            description: w.description,
+            target_duration_minutes: w.target_duration_minutes || 0,
+            target_distance_km: w.target_distance_km || null,
+            intensity_zone: w.intensity_zone || null,
+            is_rest: w.is_rest,
+            sort_order: idx,
+          };
+        });
+        await db.from("plan_workouts").insert(workoutRows);
+      }
+
+      return new Response(
+        JSON.stringify({ plan_id: body.plan_id, plan_name: editedPlan.plan_name, applied: true }),
+        { status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── EDIT_PREVIEW MODE: return proposed plan without writing to DB ──
+    if (body.mode === "edit_preview" && body.plan_id && body.instruction) {
+      let editPromptPreview: string;
+      const history = body.conversation_history || [];
+      if (history.length > 0) {
+        editPromptPreview = history.map((m: { role: string; content: string }) => `${m.role === 'user' ? 'USER' : 'ASSISTANT'}: ${m.content}`).join('\n\n') +
+          `\n\nUSER: "${body.instruction}"\n\nCURRENT PLAN:\n${JSON.stringify(body.current_plan, null, 2)}\n\nApply all the user's instructions. Return the COMPLETE modified plan as JSON.`;
+      } else {
+        editPromptPreview = `You have an existing training plan (JSON below). The user wants to modify it.\n\nUSER INSTRUCTION: "${body.instruction}"\n\nCURRENT PLAN:\n${JSON.stringify(body.current_plan, null, 2)}\n\nApply the user's instruction to the plan. Return the COMPLETE modified plan in the same JSON format. Keep everything the user didn't ask to change. Respond ONLY with valid JSON.`;
+      }
+
+      const previewPlan = await generatePlan(editPromptPreview);
+      return new Response(
+        JSON.stringify({ proposed_plan: previewPlan }),
+        { status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── EDIT MODE: modify existing plan via AI chat (legacy direct-apply) ──
     if (body.mode === "edit" && body.plan_id && body.instruction) {
       const editPrompt = `You have an existing training plan (JSON below). The user wants to modify it.
 

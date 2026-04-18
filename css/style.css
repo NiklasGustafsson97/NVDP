@@ -706,6 +706,29 @@ select option { background: #1a1a2e; color: var(--text); }
 .btn-today { background: var(--accent) !important; color: #fff !important; border-color: var(--accent) !important; font-weight: 600; font-size: 0.8rem !important; padding: 5px 12px !important; }
 .schema-week-label { font-weight: 600; font-size: 0.9rem; }
 
+/* ── Schema Edit Bar ── */
+.schema-edit-bar {
+  display: flex; gap: 8px; margin-bottom: 10px; align-items: center;
+}
+.schema-edit-toggle, .schema-edit-ai-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 12px; border-radius: 16px; font-size: 0.75rem; font-weight: 600;
+  cursor: pointer; transition: all 0.2s; font-family: var(--font);
+  border: 1px solid var(--border); background: transparent; color: var(--text-dim);
+}
+.schema-edit-toggle:hover, .schema-edit-ai-btn:hover { border-color: var(--accent); color: var(--text); }
+.schema-edit-toggle.active { background: rgba(214,99,158,0.12); border-color: var(--accent); color: var(--accent); }
+.schema-edit-ai-btn { border-style: dashed; }
+
+/* ── Schema Edit Mode Card Indicators ── */
+.sr-card.sr-edit-mode { border-style: dashed; }
+.sr-edit-icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 6px;
+  background: rgba(214,99,158,0.1); color: var(--accent);
+  margin-top: 2px;
+}
+
 /* ── Schema Cards ── */
 .sr-card {
   display: flex; align-items: flex-start; gap: 12px;
