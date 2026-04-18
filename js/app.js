@@ -524,13 +524,47 @@ async function saveProfileName() {
 
 async function saveMaxHR(val) {
   const hr = parseInt(val, 10);
-  if (!currentProfile || isNaN(hr) || hr < 100 || hr > 230) return;
+  if (!currentProfile || isNaN(hr) || hr < 100 || hr > 230) {
+    if (val) await showAlertModal('Ogiltigt värde', 'Maxpuls måste vara mellan 100 och 230 bpm.');
+    return;
+  }
   const token = (await sb.auth.getSession()).data.session.access_token;
-  await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + currentProfile.id, {
-    method: 'PATCH',
-    headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_max_hr: hr })
-  });
+  let res;
+  try {
+    res = await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + currentProfile.id, {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation',
+      },
+      body: JSON.stringify({ user_max_hr: hr })
+    });
+  } catch (e) {
+    console.error('saveMaxHR network error:', e);
+    await showAlertModal('Kunde inte spara', 'Nätverksfel — försök igen.');
+    return;
+  }
+  if (!res.ok) {
+    const body = await res.text();
+    console.error('saveMaxHR failed:', res.status, body);
+    let msg = `Kunde inte spara maxpuls (HTTP ${res.status}).`;
+    if (res.status === 400 && body.includes('user_max_hr')) {
+      msg += '\n\nKolumnen user_max_hr saknas i databasen. Kör SQL-migrationen 20260418_strava_enrichment_catchup.sql.';
+    } else if (body) {
+      msg += '\n\n' + body.substring(0, 200);
+    }
+    await showAlertModal('Fel', msg);
+    return;
+  }
+  const rows = await res.json().catch(() => null);
+  const saved = Array.isArray(rows) && rows[0]?.user_max_hr;
+  if (saved !== hr) {
+    console.error('saveMaxHR: server returned different value', rows);
+    await showAlertModal('Fel', 'Sparade men servern returnerade fel värde. Kontrollera RLS-policy på profiles.');
+    return;
+  }
   currentProfile.user_max_hr = hr;
   const d = document.getElementById('sm-max-hr-display');
   const t = document.getElementById('sm-max-hr-text');
