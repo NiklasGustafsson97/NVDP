@@ -4616,6 +4616,7 @@ let _activePlanWeeks = [];
 let _activePlanWorkouts = [];
 let _schemaEditMode = false;
 let _wizardStep = 0;
+let _wizardShowIntro = true;
 let _wizardGoalType = null;
 
 // ── Fetch active plan ──
@@ -4751,6 +4752,7 @@ function renderGenerateButton() {
 
 function openPlanWizard() {
   _wizardStep = 0;
+  _wizardShowIntro = true;
   _wizardGoalType = null;
 
   const grid = document.getElementById('wizard-goal-grid');
@@ -4838,22 +4840,36 @@ async function autoPopulateBaseline() {
 }
 
 function updateWizardUI() {
+  // Hide every wizard pane first, then activate the one matching our state.
   for (let i = 0; i <= 2; i++) {
+    const introEl = document.getElementById(`wizard-intro-${i}`);
     const stepEl = document.getElementById(`wizard-step-${i}`);
-    if (stepEl) stepEl.classList.toggle('active', i === _wizardStep);
+    if (introEl) introEl.classList.toggle('active', _wizardShowIntro && i === _wizardStep);
+    if (stepEl) stepEl.classList.toggle('active', !_wizardShowIntro && i === _wizardStep);
   }
 
+  // Progress dots: current step is active; earlier steps are done. On intro,
+  // the current step has not been completed yet, so use the same rule.
   document.querySelectorAll('.wizard-step-dot').forEach(dot => {
     const s = parseInt(dot.dataset.step);
     dot.classList.toggle('active', s === _wizardStep);
     dot.classList.toggle('done', s < _wizardStep);
   });
 
+  // Back button is hidden only on the very first intro screen.
   const prevBtn = document.getElementById('wiz-prev');
-  prevBtn.style.visibility = _wizardStep === 0 ? 'hidden' : 'visible';
+  const atFirstScreen = _wizardStep === 0 && _wizardShowIntro;
+  prevBtn.style.visibility = atFirstScreen ? 'hidden' : 'visible';
 
+  // Next button label reflects where we're going.
   const nextBtn = document.getElementById('wiz-next');
-  nextBtn.textContent = _wizardStep === 2 ? 'Generera schema' : 'Nästa';
+  if (_wizardShowIntro) {
+    nextBtn.textContent = 'Fortsätt';
+  } else if (_wizardStep === 2) {
+    nextBtn.textContent = 'Generera schema';
+  } else {
+    nextBtn.textContent = 'Nästa';
+  }
 
   const stepBanner = document.getElementById('wizard-step-banner');
   if (stepBanner) stepBanner.textContent = `Steg ${_wizardStep + 1} av 3`;
@@ -4871,16 +4887,34 @@ function updateWizardUI() {
 }
 
 function wizardPrev() {
-  if (_wizardStep > 0) { _wizardStep--; updateWizardUI(); }
+  // Flow backwards through: intro 0 → form 0 → intro 1 → form 1 → intro 2 → form 2
+  if (_wizardShowIntro) {
+    if (_wizardStep === 0) return; // already at the very start
+    _wizardStep--;
+    _wizardShowIntro = false;
+  } else {
+    _wizardShowIntro = true;
+  }
+  updateWizardUI();
 }
 
 async function wizardNext() {
+  // On an intro screen, just reveal the form for the current step.
+  if (_wizardShowIntro) {
+    _wizardShowIntro = false;
+    updateWizardUI();
+    return;
+  }
+
+  // On a form screen, validate then advance (or submit on the last step).
+  if (_wizardStep === 0 && !_wizardGoalType) {
+    await showAlertModal('Välj mål', 'Du måste välja en måltyp för att fortsätta.');
+    return;
+  }
+
   if (_wizardStep < 2) {
-    if (_wizardStep === 0 && !_wizardGoalType) {
-      await showAlertModal('Välj mål', 'Du måste välja en måltyp för att fortsätta.');
-      return;
-    }
     _wizardStep++;
+    _wizardShowIntro = true;
     updateWizardUI();
     return;
   }
@@ -4970,10 +5004,11 @@ async function submitPlanWizard() {
     start_date: startDate,
   };
 
-  // Show loading
+  // Show loading (hides all intros + form steps; starts fact rotation)
   document.querySelectorAll('.wizard-step').forEach(s => s.classList.remove('active'));
   document.getElementById('wizard-step-loading').style.display = 'block';
   document.getElementById('wizard-nav').style.display = 'none';
+  startWizRunLoader();
 
   try {
     const session = (await sb.auth.getSession()).data.session;
@@ -4993,6 +5028,7 @@ async function submitPlanWizard() {
       throw new Error(result.error || 'Generation failed');
     }
 
+    stopWizRunLoader();
     closePlanWizard();
     document.getElementById('wizard-step-loading').style.display = 'none';
     document.getElementById('wizard-nav').style.display = '';
@@ -5006,11 +5042,70 @@ async function submitPlanWizard() {
 
   } catch (e) {
     console.error('Plan generation error:', e);
+    stopWizRunLoader();
     document.getElementById('wizard-step-loading').style.display = 'none';
     document.getElementById('wizard-nav').style.display = '';
     _wizardStep = 2;
+    _wizardShowIntro = false;
     updateWizardUI();
     await showAlertModal('Fel', 'Kunde inte generera schema: ' + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  WIZARD RUN LOADER — rotating training curiosa during generation
+// ═══════════════════════════════════════════════════════════════════
+
+const WIZ_RUN_FACTS = [
+  "En maratonlöpare tar i snitt 40 000 steg.",
+  "Endorfiner börjar frigöras redan efter ca 20 minuters löpning.",
+  "Mjölksyra får oftast skulden, men det är vätejoner som gör musklerna sura.",
+  "Världsrekordet på maraton går i 2:35/km — i över två timmar.",
+  "Eliud Kipchoge sprang under 2 timmar på maraton (inofficiellt) — 21 km/h i snitt.",
+  "Elitlöpare gör ~80 % av sin träning i låg intensitet (Zon 1–2).",
+  "Uthållighetsträning kan göra hjärtats slagvolym 20–40 % större.",
+  "En 10 km löpning förbränner ungefär 600–700 kcal.",
+  "VO₂max kan öka 15–20 % på 12 veckor med rätt träning.",
+  "Redan 2 % vätskeförlust sänker prestationen märkbart.",
+  "Adaptationen sker under återhämtningen — inte under passet.",
+  "Zon 2-träning bygger mitokondrier — cellens kraftverk.",
+  "Stegfrekvens runt 170–180 steg/min minskar skaderisken för många.",
+  "Styrketräning 2 ggr/vecka ger mätbart bättre löpekonomi.",
+  "Sömn är den enskilt viktigaste återhämtningsfaktorn.",
+  "Höjdträning ökar EPO-produktionen och syreupptaget i blodet.",
+];
+
+let _wizRunFactTimer = null;
+let _wizRunFactIndex = -1;
+
+function showNextWizRunFact() {
+  const el = document.getElementById('wiz-run-fact-text');
+  if (!el) return;
+  // Pick a different fact from the previous one.
+  let next;
+  do {
+    next = Math.floor(Math.random() * WIZ_RUN_FACTS.length);
+  } while (WIZ_RUN_FACTS.length > 1 && next === _wizRunFactIndex);
+  _wizRunFactIndex = next;
+
+  el.style.opacity = '0';
+  setTimeout(() => {
+    el.textContent = WIZ_RUN_FACTS[next];
+    el.style.opacity = '1';
+  }, 220);
+}
+
+function startWizRunLoader() {
+  stopWizRunLoader();
+  _wizRunFactIndex = -1;
+  showNextWizRunFact();
+  _wizRunFactTimer = setInterval(showNextWizRunFact, 3800);
+}
+
+function stopWizRunLoader() {
+  if (_wizRunFactTimer) {
+    clearInterval(_wizRunFactTimer);
+    _wizRunFactTimer = null;
   }
 }
 
@@ -5775,7 +5870,7 @@ async function submitPlanWorkoutAI() {
       _pweZone = w.intensity_zone || '';
       document.getElementById('pwe-zone').value = _pweZone;
       document.querySelectorAll('#pwe-zone-pills .intensity-pill').forEach(b => b.classList.toggle('active', b.dataset.value === _pweZone));
-      statusEl.innerHTML = 'AI-forslag ifyllt. Granska och tryck Spara.';
+      statusEl.innerHTML = 'AI-förslag ifyllt. Granska och tryck Spara.';
       statusEl.style.color = 'var(--green)';
     }
   } catch (e) {
@@ -5796,7 +5891,7 @@ function openPlanEditModal() {
   _planEditProposal = null;
   _planEditCurrentPlan = null;
   const chatEl = document.getElementById('plan-edit-chat');
-  chatEl.innerHTML = `<div class="plan-edit-msg bot">Beskriv vilka andringar du vill gora i schemat, t.ex. "byt torsdagens pass mot tempo" eller "minska volymen vecka 3". Du far granska forslaget innan det sparas.</div>`;
+  chatEl.innerHTML = `<div class="plan-edit-msg bot">Beskriv vilka ändringar du vill göra i schemat, t.ex. "byt torsdagens pass mot tempo" eller "minska volymen vecka 3". Du får granska förslaget innan det sparas.</div>`;
   document.getElementById('plan-edit-input').value = '';
   document.getElementById('plan-edit-modal').classList.remove('hidden');
 }
@@ -5831,7 +5926,7 @@ function _buildDiffSummary(oldPlan, newPlan) {
       }
     }
   }
-  return changes.length > 0 ? changes : ['Inga synliga andringar.'];
+  return changes.length > 0 ? changes : ['Inga synliga ändringar.'];
 }
 
 async function _loadCurrentPlanForEdit() {
@@ -5874,7 +5969,7 @@ async function submitPlanEdit() {
   const chatEl = document.getElementById('plan-edit-chat');
   const sendBtn = document.getElementById('plan-edit-send');
   chatEl.innerHTML += `<div class="plan-edit-msg user">${escapeHTML(instruction)}</div>`;
-  chatEl.innerHTML += `<div class="plan-edit-msg bot" id="plan-edit-loading"><span class="spinner-sm"></span> Genererar forslag...</div>`;
+  chatEl.innerHTML += `<div class="plan-edit-msg bot" id="plan-edit-loading"><span class="spinner-sm"></span> Genererar förslag...</div>`;
   input.value = '';
   sendBtn.disabled = true;
   chatEl.scrollTop = chatEl.scrollHeight;
@@ -5912,7 +6007,7 @@ async function submitPlanEdit() {
     const diffHtml = diff.map(d => `<div class="pe-diff-line">${escapeHTML(d)}</div>`).join('');
 
     chatEl.innerHTML += `<div class="plan-edit-msg bot">
-      <div class="pe-diff-title">Foreslagna andringar:</div>
+      <div class="pe-diff-title">Föreslagna ändringar:</div>
       <div class="pe-diff-list">${diffHtml}</div>
       <div class="pe-diff-actions">
         <button class="btn btn-primary btn-sm" onclick="approvePlanEdit()">Godkann</button>
@@ -5933,7 +6028,7 @@ async function submitPlanEdit() {
 async function approvePlanEdit() {
   if (!_planEditProposal || !_activePlan) return;
   const chatEl = document.getElementById('plan-edit-chat');
-  chatEl.innerHTML += `<div class="plan-edit-msg bot" id="plan-edit-applying"><span class="spinner-sm"></span> Sparar andringar...</div>`;
+  chatEl.innerHTML += `<div class="plan-edit-msg bot" id="plan-edit-applying"><span class="spinner-sm"></span> Sparar ändringar...</div>`;
   chatEl.scrollTop = chatEl.scrollHeight;
 
   try {
