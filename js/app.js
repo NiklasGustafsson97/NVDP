@@ -4792,6 +4792,7 @@ function buildLegacyPreviewHTML(period, plans, isActive) {
     }
   }
 
+  const safeName = (period.name || 'Manuellt schema').replace(/'/g, "\\'");
   return `
     <div class="pm-preview-summary">
       <div class="pm-preview-phases">Manuellt veckoschema</div>
@@ -4800,8 +4801,10 @@ function buildLegacyPreviewHTML(period, plans, isActive) {
     <div class="pm-prev-grid">${grid}</div>
     <div class="pm-preview-actions">
       ${isActive
-        ? '<div class="pm-info-text">Detta är ditt aktiva schema. Logga pass mot dessa dagar i veckovyn.</div>'
-        : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();switchToLegacy()">Aktivera</button>`}
+        ? `<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();editLegacyPeriod('${period.id}')">Redigera dagar</button>`
+        : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();activateLegacyPeriod('${period.id}')">Aktivera</button>`}
+      <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();renameLegacyPeriod('${period.id}','${safeName}')">Byt namn</button>
+      <button class="btn btn-danger-text btn-sm" onclick="event.stopPropagation();deleteLegacyPeriod('${period.id}')">Ta bort</button>
     </div>`;
 }
 
@@ -4948,6 +4951,155 @@ async function deletePlan(planId) {
   } catch (e) {
     console.error('Delete plan error:', e);
     await showAlertModal('Fel', 'Kunde inte ta bort schema: ' + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  LEGACY (MANUAL) PERIOD ACTIONS
+// ═══════════════════════════════════════════════════════════════════
+
+async function activateLegacyPeriod(periodId) {
+  const ok = await showConfirmModal('Aktivera manuellt schema', 'Vill du aktivera detta manuella schema? Eventuellt aktivt AI-schema arkiveras.', 'Aktivera');
+  if (!ok) return;
+  try {
+    await sb.from('training_plans')
+      .update({ status: 'archived' })
+      .eq('profile_id', currentProfile.id)
+      .eq('status', 'active');
+    _activePlan = null;
+    _activePlanWeeks = [];
+    _activePlanWorkouts = [];
+    closePlanManager();
+    navigate('dashboard');
+  } catch (e) {
+    console.error('Activate legacy error:', e);
+    await showAlertModal('Fel', 'Kunde inte aktivera schema: ' + e.message);
+  }
+}
+
+async function renameLegacyPeriod(periodId, currentName) {
+  const newName = prompt('Nytt namn:', currentName);
+  if (!newName || newName.trim() === currentName) return;
+  try {
+    await sb.from('periods').update({ name: newName.trim() }).eq('id', periodId);
+    openPlanManager();
+  } catch (e) {
+    console.error('Rename period error:', e);
+    await showAlertModal('Fel', 'Kunde inte byta namn: ' + e.message);
+  }
+}
+
+async function deleteLegacyPeriod(periodId) {
+  const ok = await showConfirmModal('Ta bort manuellt schema', 'Är du säker? Period och tillhörande dagsplan raderas permanent. Loggade pass påverkas inte.', 'Ta bort', true);
+  if (!ok) return;
+  try {
+    await sb.from('period_plans').delete().eq('period_id', periodId);
+    await sb.from('periods').delete().eq('id', periodId);
+    openPlanManager();
+  } catch (e) {
+    console.error('Delete period error:', e);
+    await showAlertModal('Fel', 'Kunde inte ta bort schema: ' + e.message);
+  }
+}
+
+async function editLegacyPeriod(periodId) {
+  const periods = await fetchPeriods();
+  const period = periods.find(p => p.id === periodId);
+  if (!period) return;
+  const plans = await fetchPlans(periodId);
+
+  const DAY = ['Måndag', 'Tisdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lördag', 'Söndag'];
+  const byDay = {};
+  plans.forEach(p => { byDay[p.day_of_week] = p; });
+
+  let rows = '';
+  for (let d = 0; d < 7; d++) {
+    const wo = byDay[d] || {};
+    const isRest = !!wo.is_rest;
+    rows += `
+      <div class="lpe-day" data-day="${d}">
+        <div class="lpe-day-head">
+          <span class="lpe-day-name">${DAY[d]}</span>
+          <label class="lpe-rest-toggle">
+            <input type="checkbox" class="lpe-rest" ${isRest ? 'checked' : ''} onchange="_lpeToggleRest(${d}, this.checked)"/>
+            <span>Vila</span>
+          </label>
+        </div>
+        <input type="text" class="lpe-label" placeholder="Pass-namn (t.ex. Distans Z2)" value="${(wo.label || '').replace(/"/g, '&quot;')}" ${isRest ? 'disabled' : ''}/>
+        <textarea class="lpe-desc" rows="2" placeholder="Beskrivning (km, tempo, beskrivning)" ${isRest ? 'disabled' : ''}>${(wo.description || '').replace(/</g, '&lt;')}</textarea>
+      </div>`;
+  }
+
+  let modal = document.getElementById('legacy-period-editor');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'legacy-period-editor';
+    modal.className = 'modal hidden';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `
+    <div class="modal-content lpe-modal">
+      <div class="modal-header">
+        <h3>Redigera ${period.name || 'manuellt schema'}</h3>
+        <button class="modal-close" onclick="closeLegacyPeriodEditor()">×</button>
+      </div>
+      <div class="lpe-body">
+        ${rows}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeLegacyPeriodEditor()">Avbryt</button>
+        <button class="btn btn-primary" onclick="saveLegacyPeriodEditor('${periodId}')">Spara</button>
+      </div>
+    </div>`;
+  modal.classList.remove('hidden');
+}
+
+function _lpeToggleRest(day, isRest) {
+  const row = document.querySelector(`#legacy-period-editor .lpe-day[data-day="${day}"]`);
+  if (!row) return;
+  const lbl = row.querySelector('.lpe-label');
+  const desc = row.querySelector('.lpe-desc');
+  if (lbl) lbl.disabled = isRest;
+  if (desc) desc.disabled = isRest;
+  if (isRest) {
+    if (lbl) lbl.value = '';
+    if (desc) desc.value = '';
+  }
+}
+
+function closeLegacyPeriodEditor() {
+  const modal = document.getElementById('legacy-period-editor');
+  if (modal) modal.classList.add('hidden');
+}
+
+async function saveLegacyPeriodEditor(periodId) {
+  const rows = document.querySelectorAll('#legacy-period-editor .lpe-day');
+  const upserts = [];
+  rows.forEach(row => {
+    const d = parseInt(row.dataset.day, 10);
+    const isRest = row.querySelector('.lpe-rest').checked;
+    const label = row.querySelector('.lpe-label').value.trim();
+    const description = row.querySelector('.lpe-desc').value.trim();
+    upserts.push({
+      period_id: periodId,
+      day_of_week: d,
+      is_rest: isRest,
+      label: isRest ? null : (label || null),
+      description: isRest ? null : (description || null),
+    });
+  });
+
+  try {
+    await sb.from('period_plans').delete().eq('period_id', periodId);
+    if (upserts.length) {
+      const { error } = await sb.from('period_plans').insert(upserts);
+      if (error) throw error;
+    }
+    closeLegacyPeriodEditor();
+    openPlanManager();
+  } catch (e) {
+    console.error('Save legacy period error:', e);
+    await showAlertModal('Fel', 'Kunde inte spara: ' + e.message);
   }
 }
 
