@@ -1208,6 +1208,16 @@ function showMoreRecent() {
     const distStr = w.distance_km ? ` | ${w.distance_km} km` : '';
     const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
     const mapThumb = w.map_polyline ? `<div class="wo-map wo-map-mini" data-polyline="${w.map_polyline}"></div>` : '';
+    const secondary = [];
+    if (w.avg_hr) secondary.push(`\u2665 ${w.avg_hr} bpm`);
+    if (w.elevation_gain_m) secondary.push(`\u25B2 ${Math.round(w.elevation_gain_m)} m`);
+    if (w.avg_speed_kmh && w.activity_type === 'Löpning') {
+      const pace = 60 / w.avg_speed_kmh;
+      const pMin = Math.floor(pace);
+      const pSec = String(Math.round((pace - pMin) * 60)).padStart(2, '0');
+      secondary.push(`${pMin}:${pSec}/km`);
+    }
+    const secondaryHtml = secondary.length ? `<div class="meta wo-secondary-meta">${secondary.join(' · ')}</div>` : '';
     return `
     <div class="workout-item clickable${w.map_polyline ? ' workout-item-with-map' : ''}" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
       <div class="workout-icon" style="background:${ACTIVITY_COLORS[w.activity_type] || '#555'}22;">
@@ -1216,8 +1226,9 @@ function showMoreRecent() {
       <div class="workout-info">
         <div class="name">${w.activity_type}${intBadge}</div>
         <div class="meta">${formatDate(w.workout_date)}${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? ' — ' + w.notes : ''}</div>
+        <div class="meta wo-primary-meta">${w.duration_minutes} min${distStr}</div>
+        ${secondaryHtml}
       </div>
-      <div class="workout-info duration">${w.duration_minutes} min${distStr}</div>
       ${mapThumb}
     </div>`;
   }).join('');
@@ -1728,9 +1739,11 @@ async function _loadSchema() {
 
     updatePlanInfoBar(_activePlan, _activePlanWeeks);
     renderGenerateButton();
+    updateSchemaEditBar();
     renderSchemaPlan(workouts, planWorkouts, targetMonday, invitations, isOwnSchema, profile, phase);
   } else {
     // Legacy mode (period_plans)
+    _schemaEditMode = false;
     const deload = isDeloadWeek(targetMonday);
     document.getElementById('schema-week-label').textContent =
       `V${wk}${deload ? ' (Deload)' : ''} — ${formatDate(targetMonday)} till ${formatDate(targetSunday)}`;
@@ -1739,6 +1752,7 @@ async function _loadSchema() {
       updatePlanInfoBar(null, []);
     }
     renderGenerateButton();
+    updateSchemaEditBar();
 
     const periods = await fetchPeriods();
     const mondayStr = isoDate(targetMonday);
@@ -2066,10 +2080,18 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
     }
 
     const fakePlan = planWo ? { label: planWo.label, description: planWo.description, is_rest: planWo.is_rest, day_of_week: planWo.day_of_week } : {};
-    const canClick = isOwnSchema && (isFuture || isToday) && !planWo?.is_rest && dayWorkouts.length === 0;
-    const clickAttr = canClick ? ` onclick="openPlanModal('${dayStr}', ${JSON.stringify(fakePlan).replace(/"/g, '&quot;')}, '${DAY_NAMES_FULL[i]}')" style="cursor:pointer;"` : '';
 
-    html += `<div class="sr-card${isToday ? ' sr-today' : ''} sr-${statusClass}"${clickAttr}>
+    let clickAttr = '';
+    const editIcon = _schemaEditMode && planWo && dayWorkouts.length === 0 ? '<div class="sr-edit-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>' : '';
+
+    if (_schemaEditMode && planWo && dayWorkouts.length === 0) {
+      clickAttr = ` onclick="openPlanWorkoutEdit(${escapeHTML(JSON.stringify(planWo)).replace(/"/g, '&quot;')})" style="cursor:pointer;"`;
+    } else {
+      const canClick = isOwnSchema && (isFuture || isToday) && !planWo?.is_rest && dayWorkouts.length === 0;
+      clickAttr = canClick ? ` onclick="openPlanModal('${dayStr}', ${JSON.stringify(fakePlan).replace(/"/g, '&quot;')}, '${DAY_NAMES_FULL[i]}')" style="cursor:pointer;"` : '';
+    }
+
+    html += `<div class="sr-card${isToday ? ' sr-today' : ''}${_schemaEditMode ? ' sr-edit-mode' : ''} sr-${statusClass}"${clickAttr}>
       <div class="sr-left">
         <div class="sr-day">${DAY_NAMES[i]}</div>
         <div class="sr-date">${dayDate.getDate()}/${dayDate.getMonth() + 1}</div>
@@ -2385,57 +2407,11 @@ async function _loadTrends() {
     return prev > 0 ? ((val - prev) / prev) * 100 : null;
   });
 
-  // Week summary card with same-day comparison to previous week
+  // Week summary card moved to dashboard - clear here to avoid duplication
   const deltaEl = document.getElementById('volume-delta');
-  if (deltaEl) {
-    const now = new Date();
-    const todayDow = (now.getDay() + 6) % 7; // 0=Mon
-    const thisWeekMon = mondayOfWeek(now);
-    const thisMonday = isoDate(thisWeekMon);
-    const prevWeekMon = addDays(thisWeekMon, -7);
-    const prevMonday = isoDate(prevWeekMon);
-
-    const filterPeriod = (mondayStr, maxDow) =>
-      myWorkouts.filter(w => {
-        const wMon = isoDate(mondayOfWeek(new Date(w.workout_date)));
-        if (wMon !== mondayStr) return false;
-        const wDow = (new Date(w.workout_date).getDay() + 6) % 7;
-        return wDow <= maxDow;
-      });
-
-    const thisWk = filterPeriod(thisMonday, todayDow);
-    const prevWk = filterPeriod(prevMonday, todayDow);
-
-    const curMins = thisWk.reduce((s, w) => s + w.duration_minutes, 0);
-    const curSessions = thisWk.length;
-    const curDist = thisWk.reduce((s, w) => s + (w.distance_km || 0), 0);
-    const curLongest = thisWk.reduce((max, w) => w.duration_minutes > (max?.duration_minutes || 0) ? w : max, null);
-
-    const prevMins = prevWk.reduce((s, w) => s + w.duration_minutes, 0);
-    const prevSessions = prevWk.length;
-    const prevDist = prevWk.reduce((s, w) => s + (w.distance_km || 0), 0);
-    const prevLongest = prevWk.reduce((max, w) => w.duration_minutes > (max?.duration_minutes || 0) ? w : max, null);
-
-    function absDelta(cur, prev, unit, decimals) {
-      if (prev === 0 && cur === 0) return '';
-      const diff = cur - prev;
-      const sign = diff > 0 ? '+' : '';
-      const cls = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
-      const val = decimals ? diff.toFixed(decimals) : Math.round(diff);
-      return `<span class="ws-delta ${cls}">${sign}${val}${unit}</span>`;
-    }
-
-    const curHours = (curMins / 60).toFixed(1);
-    const curLongestMin = curLongest?.duration_minutes || 0;
-    const prevLongestMin = prevLongest?.duration_minutes || 0;
-    let items = '';
-    items += `<div class="ws-stat"><span class="ws-val">${curHours}h</span><span class="ws-label">total tid</span>${absDelta(curMins / 60, prevMins / 60, 'h', 1)}</div>`;
-    items += `<div class="ws-stat"><span class="ws-val">${curSessions}</span><span class="ws-label">pass</span>${absDelta(curSessions, prevSessions, '', 0)}</div>`;
-    items += `<div class="ws-stat"><span class="ws-val">${curDist > 0 ? curDist.toFixed(1) : '0'}km</span><span class="ws-label">distans</span>${absDelta(curDist, prevDist, 'km', 1)}</div>`;
-    items += `<div class="ws-stat"><span class="ws-val">${curLongest ? curLongest.duration_minutes + "'" : '—'}</span><span class="ws-label">längsta</span>${absDelta(curLongestMin, prevLongestMin, "'", 0)}</div>`;
-
-    deltaEl.innerHTML = `<div class="card"><div class="ws-header">VECKOSUMMERING</div><div class="ws-grid">${items}</div></div>`;
-  }
+  if (deltaEl) deltaEl.innerHTML = '';
+  const wsCard = document.getElementById('weekly-summary-card');
+  if (wsCard) wsCard.classList.add('hidden');
 
   // Activity mix stacked bar
   const mixCanvas = document.getElementById('chart-mix-personal');
@@ -4197,6 +4173,7 @@ async function sendPushToUser(receiverId) {
 let _activePlan = null;
 let _activePlanWeeks = [];
 let _activePlanWorkouts = [];
+let _schemaEditMode = false;
 let _wizardStep = 0;
 let _wizardGoalType = null;
 let _wizardIncludeGym = true;
@@ -4283,6 +4260,23 @@ function updatePlanInfoBar(plan, planWeeks) {
 
   document.getElementById('pib-progress-fill').style.width = pct + '%';
   document.getElementById('pib-progress-label').textContent = `${elapsedWeeks}/${totalWeeks}v`;
+}
+
+// ── Edit mode toggle ──
+
+function toggleSchemaEditMode() {
+  _schemaEditMode = !_schemaEditMode;
+  const label = document.getElementById('schema-edit-label');
+  const toggle = document.getElementById('schema-edit-toggle');
+  if (label) label.textContent = _schemaEditMode ? 'Avsluta redigering' : 'Redigera pass';
+  if (toggle) toggle.classList.toggle('active', _schemaEditMode);
+  loadSchema();
+}
+
+function updateSchemaEditBar() {
+  const bar = document.getElementById('schema-edit-bar');
+  if (!bar) return;
+  bar.classList.toggle('hidden', !_activePlan);
 }
 
 // ── Generate button ──
@@ -4604,7 +4598,113 @@ async function fetchAllPlansForProfile(profileId) {
   }
 }
 
+let _pmExpandedPlanId = null;
+let _pmPreviewWeekIdx = 0;
+let _pmPreviewCache = {};
+
+async function fetchPlanPreview(planId) {
+  if (_pmPreviewCache[planId]) return _pmPreviewCache[planId];
+  const weeks = await fetchPlanWeeks(planId);
+  const allWo = [];
+  for (const w of weeks) {
+    const { data } = await sb.from('plan_workouts').select('*').eq('plan_week_id', w.id).order('day_of_week');
+    allWo.push(...(data || []));
+  }
+  const result = { weeks, workouts: allWo };
+  _pmPreviewCache[planId] = result;
+  return result;
+}
+
+function buildPlanPreviewHTML(plan, preview, weekIdx) {
+  const DAY = ['Mån', 'Tis', 'Ons', 'Tors', 'Fre', 'Lör', 'Sön'];
+  const weeks = preview.weeks;
+  if (!weeks.length) return '<div class="pm-preview-empty">Inga veckor i schemat.</div>';
+
+  const phases = {};
+  weeks.forEach(w => {
+    const p = PHASE_LABELS[w.phase] || w.phase || '?';
+    phases[p] = (phases[p] || 0) + 1;
+  });
+  const phaseStr = Object.entries(phases).map(([k, v]) => `${v}v ${k}`).join(', ');
+
+  const clampedIdx = Math.max(0, Math.min(weekIdx, weeks.length - 1));
+  const week = weeks[clampedIdx];
+  const weekWo = preview.workouts.filter(wo => wo.plan_week_id === week.id);
+
+  let grid = '';
+  for (let d = 0; d < 7; d++) {
+    const wo = weekWo.find(w => w.day_of_week === d);
+    if (wo?.is_rest) {
+      grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-rest">Vila</span></div>`;
+    } else if (wo) {
+      const zone = wo.intensity_zone ? `<span class="zone-badge zone-${wo.intensity_zone.toLowerCase()}" style="font-size:0.6rem;padding:1px 4px;">${wo.intensity_zone}</span>` : '';
+      const dur = wo.target_duration_minutes ? `${wo.target_duration_minutes}m` : '';
+      grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-label">${wo.label || wo.activity_type}</span><span class="pm-prev-meta">${zone} ${dur}</span></div>`;
+    } else {
+      grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-rest">—</span></div>`;
+    }
+  }
+
+  const isActive = plan.status === 'active';
+  const phaseLabel = PHASE_LABELS[week.phase] || week.phase || '';
+
+  return `
+    <div class="pm-preview-summary">
+      <div class="pm-preview-phases">${phaseStr}</div>
+      <div class="pm-preview-weeks-label">${weeks.length} veckor · ${plan.start_date} — ${plan.end_date}</div>
+    </div>
+    <div class="pm-preview-week-nav">
+      <button class="pm-prev-arrow" onclick="event.stopPropagation();pmPreviewWeek('${plan.id}',-1)" ${clampedIdx === 0 ? 'disabled' : ''}>‹</button>
+      <span class="pm-prev-week-label">Vecka ${week.week_number}${phaseLabel ? ' · ' + phaseLabel : ''}</span>
+      <button class="pm-prev-arrow" onclick="event.stopPropagation();pmPreviewWeek('${plan.id}',1)" ${clampedIdx >= weeks.length - 1 ? 'disabled' : ''}>›</button>
+    </div>
+    <div class="pm-prev-grid">${grid}</div>
+    <div class="pm-preview-actions">
+      ${isActive ? '' : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();activatePlan('${plan.id}')">Aktivera</button>`}
+      ${isActive ? `<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();closePlanManager();openPlanEditModal();">Redigera med AI</button>` : ''}
+      <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();renamePlan('${plan.id}','${(plan.name || plan.goal_text || '').replace(/'/g, "\\'")}')">Byt namn</button>
+      <button class="btn btn-danger-text btn-sm" onclick="event.stopPropagation();deletePlan('${plan.id}')">Ta bort</button>
+    </div>`;
+}
+
+async function togglePlanPreview(planId) {
+  if (_pmExpandedPlanId === planId) {
+    _pmExpandedPlanId = null;
+    const el = document.getElementById('pm-preview-' + planId);
+    if (el) el.classList.add('hidden');
+    return;
+  }
+  // Collapse any open preview
+  document.querySelectorAll('.pm-preview-panel').forEach(el => el.classList.add('hidden'));
+  _pmExpandedPlanId = planId;
+  _pmPreviewWeekIdx = 0;
+
+  const el = document.getElementById('pm-preview-' + planId);
+  if (el) {
+    el.innerHTML = '<div class="pm-preview-loading"><span class="spinner-sm"></span></div>';
+    el.classList.remove('hidden');
+    const plans = await fetchAllPlansForProfile(currentProfile?.id);
+    const plan = plans.find(p => p.id === planId);
+    if (!plan) return;
+    const preview = await fetchPlanPreview(planId);
+    el.innerHTML = buildPlanPreviewHTML(plan, preview, _pmPreviewWeekIdx);
+  }
+}
+
+async function pmPreviewWeek(planId, delta) {
+  _pmPreviewWeekIdx += delta;
+  const preview = _pmPreviewCache[planId];
+  if (!preview) return;
+  const plans = await fetchAllPlansForProfile(currentProfile?.id);
+  const plan = plans.find(p => p.id === planId);
+  if (!plan) return;
+  const el = document.getElementById('pm-preview-' + planId);
+  if (el) el.innerHTML = buildPlanPreviewHTML(plan, preview, _pmPreviewWeekIdx);
+}
+
 async function openPlanManager() {
+  _pmPreviewCache = {};
+  _pmExpandedPlanId = null;
   const plans = await fetchAllPlansForProfile(currentProfile?.id);
   const listEl = document.getElementById('plan-manager-list');
   const topEl = document.getElementById('pm-top-actions');
@@ -4613,15 +4713,8 @@ async function openPlanManager() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
     Skapa nytt AI-schema
   </button>`;
-  if (_activePlan) {
-    topHtml += `<button class="pm-action-secondary" onclick="closePlanManager();openPlanEditModal();">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-      Redigera aktivt schema med AI
-    </button>`;
-  }
   topEl.innerHTML = topHtml;
 
-  // Check for legacy period-based schema
   const periods = await fetchPeriods();
   const todayStr = isoDate(new Date());
   const hasActivePlan = plans.some(p => p.status === 'active');
@@ -4630,7 +4723,6 @@ async function openPlanManager() {
 
   let html = '';
 
-  // Show legacy schemas
   if (legacyPeriods.length > 0) {
     html += '<div class="pm-section-label">Manuella scheman</div>';
     legacyPeriods.forEach(p => {
@@ -4646,7 +4738,6 @@ async function openPlanManager() {
     });
   }
 
-  // Show AI-generated plans
   if (plans.length > 0) {
     html += '<div class="pm-section-label">AI-genererade scheman</div>';
     html += plans.map(p => {
@@ -4654,22 +4745,16 @@ async function openPlanManager() {
       const name = p.name || p.goal_text || 'Träningsplan';
       const dateRange = `${p.start_date} — ${p.end_date}`;
       const goalIcon = GOAL_TYPES.find(g => g.id === p.goal_type)?.icon || '';
-      return `<div class="plan-manager-item${isActive ? ' active' : ''}" onclick="${isActive ? '' : `activatePlan('${p.id}')`}">
+      return `<div class="plan-manager-item${isActive ? ' active' : ''}" onclick="togglePlanPreview('${p.id}')">
         ${goalIcon ? `<span style="font-size:1.1rem;">${goalIcon}</span>` : ''}
         <div class="pm-info">
           <div class="pm-name">${name}</div>
           <div class="pm-meta">${dateRange}</div>
         </div>
         <span class="pm-status-badge ${p.status}">${isActive ? 'Aktiv' : 'Arkiverad'}</span>
-        <div class="pm-actions">
-          <button class="pm-action-btn" onclick="event.stopPropagation();renamePlan('${p.id}','${name.replace(/'/g, "\\'")}')" title="Byt namn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-          </button>
-          <button class="pm-action-btn danger" onclick="event.stopPropagation();deletePlan('${p.id}')" title="Ta bort">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-          </button>
-        </div>
-      </div>`;
+        <svg class="pm-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="pm-preview-panel hidden" id="pm-preview-${p.id}"></div>`;
     }).join('');
   }
 
@@ -4764,16 +4849,223 @@ async function deletePlan(planId) {
 //  PLAN AI EDIT CHAT
 // ═══════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════
+//  PLAN WORKOUT EDIT (individual workout form + AI)
+// ═══════════════════════════════════════════════════════════════════
+
+let _pweWorkout = null; // the plan_workouts row being edited
+let _pweZone = '';
+
+function openPlanWorkoutEdit(wo) {
+  _pweWorkout = wo;
+  _pweZone = wo.intensity_zone || '';
+  document.getElementById('pwe-title').textContent = `Redigera: ${DAY_NAMES_FULL[wo.day_of_week] || ''}`;
+
+  const actSel = document.getElementById('pwe-activity');
+  if (actSel.options.length <= 1) {
+    actSel.innerHTML = '';
+    ACTIVITY_TYPES.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t; opt.textContent = t;
+      actSel.appendChild(opt);
+    });
+  }
+  actSel.value = wo.activity_type || 'Löpning';
+  document.getElementById('pwe-label').value = wo.label || '';
+  document.getElementById('pwe-duration').value = wo.target_duration_minutes || '';
+  document.getElementById('pwe-distance').value = wo.target_distance_km || '';
+  document.getElementById('pwe-desc').value = wo.description || '';
+  document.getElementById('pwe-rest').checked = !!wo.is_rest;
+  document.getElementById('pwe-zone').value = _pweZone;
+
+  document.querySelectorAll('#pwe-zone-pills .intensity-pill').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.value === _pweZone);
+    btn.onclick = () => {
+      const val = btn.dataset.value;
+      _pweZone = _pweZone === val ? '' : val;
+      document.getElementById('pwe-zone').value = _pweZone;
+      document.querySelectorAll('#pwe-zone-pills .intensity-pill').forEach(b => b.classList.toggle('active', b.dataset.value === _pweZone));
+    };
+  });
+
+  document.getElementById('pwe-ai-input').value = '';
+  document.getElementById('pwe-ai-status').classList.add('hidden');
+  document.getElementById('pwe-modal').classList.remove('hidden');
+}
+
+function closePlanWorkoutEdit() {
+  document.getElementById('pwe-modal').classList.add('hidden');
+  _pweWorkout = null;
+}
+
+async function savePlanWorkoutEdit() {
+  if (!_pweWorkout) return;
+  const isRest = document.getElementById('pwe-rest').checked;
+  const updates = {
+    activity_type: isRest ? 'Vila' : document.getElementById('pwe-activity').value,
+    label: isRest ? 'Vila' : document.getElementById('pwe-label').value.trim() || null,
+    target_duration_minutes: isRest ? 0 : (parseInt(document.getElementById('pwe-duration').value) || 0),
+    target_distance_km: isRest ? null : (parseFloat(document.getElementById('pwe-distance').value) || null),
+    intensity_zone: isRest ? null : (_pweZone || null),
+    description: isRest ? null : (document.getElementById('pwe-desc').value.trim() || null),
+    is_rest: isRest,
+  };
+
+  try {
+    const { error } = await sb.from('plan_workouts').update(updates).eq('id', _pweWorkout.id);
+    if (error) throw error;
+    closePlanWorkoutEdit();
+    _activePlan = null;
+    _activePlanWeeks = [];
+    _activePlanWorkouts = [];
+    loadSchema();
+  } catch (e) {
+    console.error('Save plan workout error:', e);
+    await showAlertModal('Fel', 'Kunde inte spara: ' + e.message);
+  }
+}
+
+async function submitPlanWorkoutAI() {
+  const input = document.getElementById('pwe-ai-input');
+  const instruction = input.value.trim();
+  if (!instruction || !_pweWorkout || !_activePlan) return;
+
+  const statusEl = document.getElementById('pwe-ai-status');
+  const sendBtn = document.getElementById('pwe-ai-send');
+  statusEl.innerHTML = '<span class="spinner-sm"></span> Genererar...';
+  statusEl.classList.remove('hidden');
+  sendBtn.disabled = true;
+
+  try {
+    const session = (await sb.auth.getSession()).data.session;
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/generate-plan', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        profile_id: currentProfile.id,
+        mode: 'edit_single',
+        plan_id: _activePlan.id,
+        workout_id: _pweWorkout.id,
+        instruction: instruction,
+        current_workout: {
+          day_of_week: _pweWorkout.day_of_week,
+          activity_type: _pweWorkout.activity_type,
+          label: _pweWorkout.label,
+          description: _pweWorkout.description,
+          target_duration_minutes: _pweWorkout.target_duration_minutes,
+          target_distance_km: _pweWorkout.target_distance_km,
+          intensity_zone: _pweWorkout.intensity_zone,
+          is_rest: _pweWorkout.is_rest,
+        },
+      }),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'AI edit failed');
+
+    // Fill form with AI result
+    if (result.workout) {
+      const w = result.workout;
+      document.getElementById('pwe-activity').value = w.activity_type || _pweWorkout.activity_type;
+      document.getElementById('pwe-label').value = w.label || '';
+      document.getElementById('pwe-duration').value = w.target_duration_minutes || '';
+      document.getElementById('pwe-distance').value = w.target_distance_km || '';
+      document.getElementById('pwe-desc').value = w.description || '';
+      document.getElementById('pwe-rest').checked = !!w.is_rest;
+      _pweZone = w.intensity_zone || '';
+      document.getElementById('pwe-zone').value = _pweZone;
+      document.querySelectorAll('#pwe-zone-pills .intensity-pill').forEach(b => b.classList.toggle('active', b.dataset.value === _pweZone));
+      statusEl.innerHTML = 'AI-forslag ifyllt. Granska och tryck Spara.';
+      statusEl.style.color = 'var(--green)';
+    }
+  } catch (e) {
+    statusEl.innerHTML = 'Fel: ' + e.message;
+    statusEl.style.color = 'var(--red)';
+  }
+  sendBtn.disabled = false;
+  input.value = '';
+}
+
+let _planEditHistory = [];
+let _planEditProposal = null;
+let _planEditCurrentPlan = null;
+
 function openPlanEditModal() {
   if (!_activePlan) return;
+  _planEditHistory = [];
+  _planEditProposal = null;
+  _planEditCurrentPlan = null;
   const chatEl = document.getElementById('plan-edit-chat');
-  chatEl.innerHTML = `<div class="plan-edit-msg bot">Hej! Beskriv vilka ändringar du vill göra i schemat, t.ex. "byt torsdagens pass mot tempo" eller "minska volymen vecka 3".</div>`;
+  chatEl.innerHTML = `<div class="plan-edit-msg bot">Beskriv vilka andringar du vill gora i schemat, t.ex. "byt torsdagens pass mot tempo" eller "minska volymen vecka 3". Du far granska forslaget innan det sparas.</div>`;
   document.getElementById('plan-edit-input').value = '';
   document.getElementById('plan-edit-modal').classList.remove('hidden');
 }
 
 function closePlanEditModal() {
   document.getElementById('plan-edit-modal').classList.add('hidden');
+  _planEditProposal = null;
+}
+
+function _buildDiffSummary(oldPlan, newPlan) {
+  const DAY = ['Man', 'Tis', 'Ons', 'Tors', 'Fre', 'Lor', 'Son'];
+  const changes = [];
+  const oldWeeks = oldPlan.weeks || [];
+  const newWeeks = newPlan.weeks || [];
+  const maxWeeks = Math.max(oldWeeks.length, newWeeks.length);
+
+  for (let wi = 0; wi < maxWeeks; wi++) {
+    const ow = oldWeeks[wi];
+    const nw = newWeeks[wi];
+    if (!nw) { changes.push(`Vecka ${wi + 1}: borttagen`); continue; }
+    if (!ow) { changes.push(`Vecka ${nw.week_number}: ny (${nw.phase})`); continue; }
+    const owWo = ow.workouts || [];
+    const nwWo = nw.workouts || [];
+    for (let d = 0; d < 7; d++) {
+      const o = owWo.find(w => w.day_of_week === d);
+      const n = nwWo.find(w => w.day_of_week === d);
+      if (!o && !n) continue;
+      const oLabel = o ? (o.is_rest ? 'Vila' : `${o.label || o.activity_type} ${o.target_duration_minutes || 0}min ${o.intensity_zone || ''}`.trim()) : '(tom)';
+      const nLabel = n ? (n.is_rest ? 'Vila' : `${n.label || n.activity_type} ${n.target_duration_minutes || 0}min ${n.intensity_zone || ''}`.trim()) : '(tom)';
+      if (oLabel !== nLabel) {
+        changes.push(`v${nw.week_number} ${DAY[d]}: ${oLabel} → ${nLabel}`);
+      }
+    }
+  }
+  return changes.length > 0 ? changes : ['Inga synliga andringar.'];
+}
+
+async function _loadCurrentPlanForEdit() {
+  if (_planEditCurrentPlan) return _planEditCurrentPlan;
+  const planWeeks = await fetchPlanWeeks(_activePlan.id);
+  const allWorkouts = [];
+  for (const w of planWeeks) {
+    const { data } = await sb.from('plan_workouts').select('*').eq('plan_week_id', w.id).order('day_of_week');
+    allWorkouts.push(...(data || []));
+  }
+  _planEditCurrentPlan = {
+    plan_name: _activePlan.name || _activePlan.goal_text,
+    summary: '',
+    weeks: planWeeks.map(pw => ({
+      week_number: pw.week_number,
+      phase: pw.phase,
+      target_hours: pw.target_hours,
+      target_sessions: pw.target_sessions,
+      notes: pw.notes,
+      workouts: allWorkouts.filter(wo => wo.plan_week_id === pw.id).map(wo => ({
+        day_of_week: wo.day_of_week,
+        activity_type: wo.activity_type,
+        label: wo.label,
+        description: wo.description,
+        target_duration_minutes: wo.target_duration_minutes,
+        target_distance_km: wo.target_distance_km,
+        intensity_zone: wo.intensity_zone,
+        is_rest: wo.is_rest,
+      }))
+    }))
+  };
+  return _planEditCurrentPlan;
 }
 
 async function submitPlanEdit() {
@@ -4784,41 +5076,15 @@ async function submitPlanEdit() {
   const chatEl = document.getElementById('plan-edit-chat');
   const sendBtn = document.getElementById('plan-edit-send');
   chatEl.innerHTML += `<div class="plan-edit-msg user">${escapeHTML(instruction)}</div>`;
-  chatEl.innerHTML += `<div class="plan-edit-msg bot" id="plan-edit-loading"><span class="spinner-sm"></span> Uppdaterar schemat...</div>`;
+  chatEl.innerHTML += `<div class="plan-edit-msg bot" id="plan-edit-loading"><span class="spinner-sm"></span> Genererar forslag...</div>`;
   input.value = '';
   sendBtn.disabled = true;
   chatEl.scrollTop = chatEl.scrollHeight;
 
+  _planEditHistory.push({ role: 'user', content: instruction });
+
   try {
-    const planWeeks = await fetchPlanWeeks(_activePlan.id);
-    const allWorkouts = [];
-    for (const w of planWeeks) {
-      const { data } = await sb.from('plan_workouts').select('*').eq('plan_week_id', w.id).order('day_of_week');
-      allWorkouts.push(...(data || []));
-    }
-
-    const currentPlan = {
-      plan_name: _activePlan.name || _activePlan.goal_text,
-      summary: '',
-      weeks: planWeeks.map(pw => ({
-        week_number: pw.week_number,
-        phase: pw.phase,
-        target_hours: pw.target_hours,
-        target_sessions: pw.target_sessions,
-        notes: pw.notes,
-        workouts: allWorkouts.filter(wo => wo.plan_week_id === pw.id).map(wo => ({
-          day_of_week: wo.day_of_week,
-          activity_type: wo.activity_type,
-          label: wo.label,
-          description: wo.description,
-          target_duration_minutes: wo.target_duration_minutes,
-          target_distance_km: wo.target_distance_km,
-          intensity_zone: wo.intensity_zone,
-          is_rest: wo.is_rest,
-        }))
-      }))
-    };
-
+    const currentPlan = await _loadCurrentPlanForEdit();
     const session = (await sb.auth.getSession()).data.session;
     const res = await fetch(SUPABASE_FUNCTIONS_URL + '/generate-plan', {
       method: 'POST',
@@ -4828,10 +5094,11 @@ async function submitPlanEdit() {
       },
       body: JSON.stringify({
         profile_id: currentProfile.id,
-        mode: 'edit',
+        mode: 'edit_preview',
         plan_id: _activePlan.id,
         instruction: instruction,
         current_plan: currentPlan,
+        conversation_history: _planEditHistory.slice(0, -1),
       }),
     });
 
@@ -4839,19 +5106,71 @@ async function submitPlanEdit() {
     const loadingEl = document.getElementById('plan-edit-loading');
     if (loadingEl) loadingEl.remove();
 
-    if (!res.ok) throw new Error(result.error || 'Edit failed');
+    if (!res.ok) throw new Error(result.error || 'Preview failed');
 
-    chatEl.innerHTML += `<div class="plan-edit-msg bot">Schemat har uppdaterats! ${result.plan_name || ''}</div>`;
-    _activePlan = null;
-    _activePlanWeeks = [];
-    _activePlanWorkouts = [];
-    loadSchema();
+    _planEditProposal = result.proposed_plan;
+    const diff = _buildDiffSummary(currentPlan, _planEditProposal);
+    const diffHtml = diff.map(d => `<div class="pe-diff-line">${escapeHTML(d)}</div>`).join('');
+
+    chatEl.innerHTML += `<div class="plan-edit-msg bot">
+      <div class="pe-diff-title">Foreslagna andringar:</div>
+      <div class="pe-diff-list">${diffHtml}</div>
+      <div class="pe-diff-actions">
+        <button class="btn btn-primary btn-sm" onclick="approvePlanEdit()">Godkann</button>
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('plan-edit-input').focus();">Andra</button>
+      </div>
+    </div>`;
+
+    _planEditHistory.push({ role: 'assistant', content: 'Proposed changes: ' + diff.join('; ') });
   } catch (e) {
     const loadingEl = document.getElementById('plan-edit-loading');
     if (loadingEl) loadingEl.remove();
     chatEl.innerHTML += `<div class="plan-edit-msg bot" style="color:var(--red);">Fel: ${e.message}</div>`;
   }
   sendBtn.disabled = false;
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+async function approvePlanEdit() {
+  if (!_planEditProposal || !_activePlan) return;
+  const chatEl = document.getElementById('plan-edit-chat');
+  chatEl.innerHTML += `<div class="plan-edit-msg bot" id="plan-edit-applying"><span class="spinner-sm"></span> Sparar andringar...</div>`;
+  chatEl.scrollTop = chatEl.scrollHeight;
+
+  try {
+    const session = (await sb.auth.getSession()).data.session;
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/generate-plan', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        profile_id: currentProfile.id,
+        mode: 'edit_apply',
+        plan_id: _activePlan.id,
+        proposed_plan: _planEditProposal,
+      }),
+    });
+
+    const result = await res.json();
+    const applyEl = document.getElementById('plan-edit-applying');
+    if (applyEl) applyEl.remove();
+
+    if (!res.ok) throw new Error(result.error || 'Apply failed');
+
+    chatEl.innerHTML += `<div class="plan-edit-msg bot" style="color:var(--green);">Schemat har uppdaterats!</div>`;
+    _planEditProposal = null;
+    _planEditCurrentPlan = null;
+    _activePlan = null;
+    _activePlanWeeks = [];
+    _activePlanWorkouts = [];
+    loadSchema();
+  } catch (e) {
+    const applyEl = document.getElementById('plan-edit-applying');
+    if (applyEl) applyEl.remove();
+    chatEl.innerHTML += `<div class="plan-edit-msg bot" style="color:var(--red);">Fel: ${e.message}</div>`;
+  }
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 

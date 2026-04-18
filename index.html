@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NVDP</title>
-  <link rel="stylesheet" href="css/style.css?v=e3655a5">
+  <link rel="stylesheet" href="css/style.css?v=progress-cleanup">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
@@ -315,6 +315,17 @@
           <button id="schema-today-btn" class="btn-today hidden" onclick="schemaWeekToday()">Idag</button>
           <button onclick="schemaWeekNext()">&#9654;</button>
         </div>
+      </div>
+
+      <div id="schema-edit-bar" class="schema-edit-bar hidden">
+        <button class="schema-edit-toggle" id="schema-edit-toggle" onclick="toggleSchemaEditMode()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          <span id="schema-edit-label">Redigera pass</span>
+        </button>
+        <button class="schema-edit-ai-btn" onclick="closePlanManager();openPlanEditModal();">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          Redigera med AI
+        </button>
       </div>
 
       <div id="schema-content"></div>
@@ -873,13 +884,74 @@
 
 <!-- ═══ PLAN MANAGER MODAL ═══ -->
 <div id="plan-manager" class="modal-overlay hidden" onclick="if(event.target===this)closePlanManager()">
-  <div class="modal-box" style="max-width:440px;">
+  <div class="modal-box" style="max-width:520px;max-height:85vh;overflow-y:auto;">
     <div class="modal-header">
       <h3>Hantera schema</h3>
       <button class="btn-close" onclick="closePlanManager()">&times;</button>
     </div>
     <div class="pm-top-actions" id="pm-top-actions"></div>
     <div id="plan-manager-list"></div>
+  </div>
+</div>
+
+<!-- ═══ PLAN WORKOUT EDIT MODAL ═══ -->
+<div id="pwe-modal" class="modal-overlay hidden" onclick="if(event.target===this)closePlanWorkoutEdit()">
+  <div class="modal-box" style="max-width:440px;">
+    <div class="modal-header">
+      <h3 id="pwe-title">Redigera pass</h3>
+      <button class="btn-close" onclick="closePlanWorkoutEdit()">&times;</button>
+    </div>
+    <form id="pwe-form" onsubmit="event.preventDefault();savePlanWorkoutEdit();">
+      <div class="form-group">
+        <label for="pwe-activity">Aktivitet</label>
+        <select id="pwe-activity" required></select>
+      </div>
+      <div class="form-group">
+        <label for="pwe-label">Rubrik</label>
+        <input type="text" id="pwe-label" placeholder="t.ex. Distans Z2" maxlength="60">
+      </div>
+      <div class="form-row">
+        <div class="form-group flex-1">
+          <label for="pwe-duration">Tid (min)</label>
+          <input type="number" id="pwe-duration" min="0" max="600" placeholder="45">
+        </div>
+        <div class="form-group flex-1">
+          <label for="pwe-distance">Distans (km)</label>
+          <input type="number" id="pwe-distance" min="0" max="999" step="0.1" placeholder="8.0">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Intensitetszon</label>
+        <div class="intensity-pills" id="pwe-zone-pills">
+          <button type="button" class="intensity-pill" data-value="Z1">Z1</button>
+          <button type="button" class="intensity-pill" data-value="Z2">Z2</button>
+          <button type="button" class="intensity-pill" data-value="Z3">Z3</button>
+          <button type="button" class="intensity-pill" data-value="Z4">Z4</button>
+          <button type="button" class="intensity-pill" data-value="Z5">Z5</button>
+          <button type="button" class="intensity-pill" data-value="mixed">Mix</button>
+        </div>
+        <input type="hidden" id="pwe-zone" value="">
+      </div>
+      <div class="form-group">
+        <label for="pwe-desc">Beskrivning</label>
+        <textarea id="pwe-desc" rows="3" placeholder="Detaljerad beskrivning av passet..."></textarea>
+      </div>
+      <div class="form-group">
+        <label class="pwe-rest-row">
+          <input type="checkbox" id="pwe-rest"> Vilodag
+        </label>
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%;">Spara</button>
+    </form>
+    <div class="pwe-divider"></div>
+    <div class="pwe-ai-section">
+      <label class="pwe-ai-label">Eller beskriv med AI</label>
+      <div class="pwe-ai-row">
+        <input type="text" id="pwe-ai-input" class="form-input" placeholder="t.ex. Gor om till tempopass med 4x5min Z4..." onkeydown="if(event.key==='Enter'){event.preventDefault();submitPlanWorkoutAI();}">
+        <button type="button" class="btn btn-primary btn-sm" onclick="submitPlanWorkoutAI()" id="pwe-ai-send">AI</button>
+      </div>
+      <div id="pwe-ai-status" class="pwe-ai-status hidden"></div>
+    </div>
   </div>
 </div>
 
@@ -894,8 +966,8 @@
   </div>
 </div>
 
-<script src="js/config.js?v=e3655a5"></script>
-<script src="js/app.js?v=e3655a5"></script>
+<script src="js/config.js?v=progress-cleanup"></script>
+<script src="js/app.js?v=progress-cleanup"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {
