@@ -705,7 +705,6 @@ function navigate(view) {
     _activePlanWorkouts = [];
   }
   if (view === 'dashboard') {
-    _dashWeekOffset = 0;
     _dashSelectedDate = null;
     loadDashboard();
   }
@@ -949,10 +948,21 @@ async function loadDashboard() {
   }
   hideViewLoading('view-dashboard');
 }
-let _dashWeekOffset = 0;
 let _dashSelectedDate = null;
 let _dashPlanWorkouts = [];
 let _dashWeekWorkouts = [];
+
+// Calendar strip config
+const CAL_STRIP_PAST_DAYS = 60;
+const CAL_STRIP_FUTURE_DAYS = 120;
+const CAL_STRIP_VISIBLE_CELLS = 4;
+const CAL_STRIP_INITIAL_DATA_RADIUS = 14;
+const CAL_STRIP_EXTEND_BUFFER = 7;
+const CAL_STRIP_EXTEND_RADIUS = 14;
+let _calStripAnchorDate = null;
+let _calStripLoadedRange = null;
+let _calStripScrollHandlerAttached = false;
+let _calStripRafPending = false;
 
 async function _loadDashboard() {
   const now = new Date();
@@ -969,9 +979,7 @@ async function _loadDashboard() {
     if (_activePlan) _activePlanWeeks = await fetchPlanWeeks(_activePlan.id);
   }
 
-  const centerDate = addDays(now, _dashWeekOffset * 7);
-  const stripStart = addDays(centerDate, -3);
-  await _renderDashCalendar(stripStart);
+  await _renderDashCalendar();
   await _renderDashDayCard(_dashSelectedDate);
 
   await _loadSchema();
@@ -981,51 +989,50 @@ const _DASH_DAY_LETTER = ['S', 'M', 'T', 'O', 'T', 'F', 'L'];
 
 let _dashLegacyPlans = null;
 
-async function _renderDashCalendar(stripStart) {
+async function _renderDashCalendar() {
   const track = document.getElementById('cal-strip-track');
-  const monthLabel = document.getElementById('cal-strip-month');
-  if (!track) return;
+  const scrollArea = document.getElementById('cal-strip-scroll-area');
+  if (!track || !scrollArea) return;
 
   const now = new Date();
   const todayStr = isoDate(now);
-  const stripEnd = addDays(stripStart, 6);
-  const startStr = isoDate(stripStart);
-  const endStr = isoDate(stripEnd);
+  const anchorDate = addDays(now, -CAL_STRIP_PAST_DAYS);
+  _calStripAnchorDate = anchorDate;
+  const totalDays = CAL_STRIP_PAST_DAYS + CAL_STRIP_FUTURE_DAYS + 1;
 
-  const centerDate = addDays(stripStart, 3);
-  const wk = weekNumber(centerDate);
+  // Initial data window: today ± CAL_STRIP_INITIAL_DATA_RADIUS days
+  const dataStart = addDays(now, -CAL_STRIP_INITIAL_DATA_RADIUS);
+  const dataEnd = addDays(now, CAL_STRIP_INITIAL_DATA_RADIUS);
+  const dataStartStr = isoDate(dataStart);
+  const dataEndStr = isoDate(dataEnd);
 
-  _dashWeekWorkouts = await fetchWorkouts(currentProfile?.id, startStr, endStr);
+  _dashWeekWorkouts = await fetchWorkouts(currentProfile?.id, dataStartStr, dataEndStr);
   _calStripWorkouts = _dashWeekWorkouts;
-  _calStripRange = { start: startStr, end: endStr };
+  _calStripRange = { start: dataStartStr, end: dataEndStr };
+  _calStripLoadedRange = { start: dataStartStr, end: dataEndStr };
 
-  // Pre-fetch legacy plans for the week so day taps are instant
+  // Pre-fetch legacy plans for the visible window so day taps are instant
   _dashLegacyPlans = null;
   try {
     const periods = await fetchPeriods();
-    const period = periods.find(p => startStr >= p.start_date && endStr <= p.end_date);
+    const period = periods.find(p => dataStartStr >= p.start_date && dataEndStr <= p.end_date);
     if (period) _dashLegacyPlans = await fetchPlans(period.id);
   } catch (e) { /* ignore */ }
 
-  const workoutDates = new Set(_dashWeekWorkouts.map(w => w.workout_date));
-
-  let planDates = new Set();
   _dashPlanWorkouts = [];
   if (_activePlan) {
     try {
-      const pw = await fetchPlanWorkoutsByDate(_activePlan.id, startStr, endStr);
-      _dashPlanWorkouts = pw;
-      pw.forEach(p => { if (!p.is_rest) planDates.add(p.workout_date); });
+      _dashPlanWorkouts = await fetchPlanWorkoutsByDate(_activePlan.id, dataStartStr, dataEndStr);
     } catch (e) { /* ignore */ }
   }
 
-  if (monthLabel) {
-    monthLabel.textContent = `V${wk} \u2014 ${centerDate.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' })}`;
-  }
+  const workoutDates = new Set(_dashWeekWorkouts.map(w => w.workout_date));
+  const planDates = new Set();
+  _dashPlanWorkouts.forEach(p => { if (!p.is_rest) planDates.add(p.workout_date); });
 
   let html = '';
-  for (let d = 0; d < 7; d++) {
-    const cellDate = addDays(stripStart, d);
+  for (let d = 0; d < totalDays; d++) {
+    const cellDate = addDays(anchorDate, d);
     const cellStr = isoDate(cellDate);
     const isToday = cellStr === todayStr;
     const isSelected = cellStr === _dashSelectedDate;
@@ -1043,13 +1050,139 @@ async function _renderDashCalendar(stripStart) {
     if (isSelected && !isToday) classes.push('cal-selected');
 
     const dayLetter = _DASH_DAY_LETTER[cellDate.getDay()];
-    html += `<div class="${classes.join(' ')}" onclick="dashCalSelectDay('${cellStr}')">
+    html += `<div class="${classes.join(' ')}" data-date="${cellStr}" onclick="dashCalSelectDay('${cellStr}')">
       <div class="cal-cell-day">${dayLetter}</div>
       <div class="cal-cell-num">${cellDate.getDate()}</div>
       <div class="cal-cell-dot ${dotClass}"></div>
     </div>`;
   }
   track.innerHTML = html;
+
+  // Default view: Yesterday, Today, Tomorrow, Day-after-tomorrow (yesterday as leftmost)
+  requestAnimationFrame(() => {
+    _scrollCalToDate(isoDate(addDays(now, -1)), { behavior: 'auto' });
+    _updateCalStripHeader();
+  });
+
+  if (!_calStripScrollHandlerAttached) {
+    scrollArea.addEventListener('scroll', _onCalStripScroll, { passive: true });
+    _calStripScrollHandlerAttached = true;
+  }
+}
+
+function _scrollCalToDate(dateStr, { behavior = 'auto' } = {}) {
+  const scrollArea = document.getElementById('cal-strip-scroll-area');
+  if (!scrollArea) return;
+  const cell = scrollArea.querySelector(`.cal-cell[data-date="${dateStr}"]`);
+  if (!cell) return;
+  scrollArea.scrollTo({ left: cell.offsetLeft, behavior });
+}
+
+function _getVisibleCalDates() {
+  const scrollArea = document.getElementById('cal-strip-scroll-area');
+  const track = document.getElementById('cal-strip-track');
+  if (!scrollArea || !track || !_calStripAnchorDate) return [];
+  const first = track.firstElementChild;
+  if (!first) return [];
+  const cellWidth = first.getBoundingClientRect().width;
+  if (cellWidth <= 0) return [];
+  const gapStr = getComputedStyle(track).columnGap || getComputedStyle(track).gap || '0';
+  const gap = parseFloat(gapStr) || 0;
+  const step = cellWidth + gap;
+  const startIdx = Math.max(0, Math.round(scrollArea.scrollLeft / step));
+  const dates = [];
+  for (let i = 0; i < CAL_STRIP_VISIBLE_CELLS; i++) {
+    dates.push(isoDate(addDays(_calStripAnchorDate, startIdx + i)));
+  }
+  return dates;
+}
+
+function _updateCalStripHeader() {
+  const monthLabel = document.getElementById('cal-strip-month');
+  const todayBtn = document.getElementById('cal-strip-today-btn');
+  const visible = _getVisibleCalDates();
+  if (visible.length === 0) return;
+
+  const firstVisible = new Date(visible[0] + 'T12:00:00');
+  const wk = weekNumber(firstVisible);
+  if (monthLabel) {
+    monthLabel.textContent = `V${wk} \u2014 ${firstVisible.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' })}`;
+  }
+
+  const todayStr = isoDate(new Date());
+  if (todayBtn) todayBtn.classList.toggle('hidden', visible.includes(todayStr));
+}
+
+function _onCalStripScroll() {
+  if (_calStripRafPending) return;
+  _calStripRafPending = true;
+  requestAnimationFrame(() => {
+    _calStripRafPending = false;
+    _updateCalStripHeader();
+    _maybeExtendCalStripData();
+  });
+}
+
+async function _maybeExtendCalStripData() {
+  if (!_calStripLoadedRange) return;
+  const visible = _getVisibleCalDates();
+  if (visible.length === 0) return;
+
+  const leftEdge = new Date(visible[0] + 'T12:00:00');
+  const rightEdge = new Date(visible[visible.length - 1] + 'T12:00:00');
+  const loadStartDate = new Date(_calStripLoadedRange.start + 'T12:00:00');
+  const loadEndDate = new Date(_calStripLoadedRange.end + 'T12:00:00');
+
+  let newStart = _calStripLoadedRange.start;
+  let newEnd = _calStripLoadedRange.end;
+  const dayMs = 86400000;
+
+  if ((leftEdge - loadStartDate) / dayMs < CAL_STRIP_EXTEND_BUFFER) {
+    newStart = isoDate(addDays(leftEdge, -CAL_STRIP_EXTEND_RADIUS));
+  }
+  if ((loadEndDate - rightEdge) / dayMs < CAL_STRIP_EXTEND_BUFFER) {
+    newEnd = isoDate(addDays(rightEdge, CAL_STRIP_EXTEND_RADIUS));
+  }
+
+  if (newStart === _calStripLoadedRange.start && newEnd === _calStripLoadedRange.end) return;
+
+  // Mark range optimistically to avoid parallel re-entry
+  _calStripLoadedRange = { start: newStart, end: newEnd };
+  try {
+    const [workouts, planWorkouts] = await Promise.all([
+      fetchWorkouts(currentProfile?.id, newStart, newEnd),
+      _activePlan ? fetchPlanWorkoutsByDate(_activePlan.id, newStart, newEnd) : Promise.resolve([]),
+    ]);
+    _dashWeekWorkouts = workouts;
+    _calStripWorkouts = workouts;
+    _calStripRange = { start: newStart, end: newEnd };
+    _dashPlanWorkouts = planWorkouts;
+    _repaintCalStripDots();
+  } catch (e) {
+    console.warn('cal-strip extend failed', e);
+  }
+}
+
+function _repaintCalStripDots() {
+  const now = new Date();
+  const workoutDates = new Set((_dashWeekWorkouts || []).map(w => w.workout_date));
+  const planDates = new Set();
+  (_dashPlanWorkouts || []).forEach(p => { if (!p.is_rest) planDates.add(p.workout_date); });
+  document.querySelectorAll('.cal-strip-track .cal-cell').forEach(cell => {
+    const cellStr = cell.getAttribute('data-date');
+    if (!cellStr) return;
+    const cellDate = new Date(cellStr + 'T12:00:00');
+    const isToday = cell.classList.contains('cal-today');
+    const isPast = cellDate < now && !isToday;
+    const hasDone = workoutDates.has(cellStr);
+    const hasPlanned = planDates.has(cellStr);
+    let dotClass = 'cal-dot-none';
+    if (hasDone) dotClass = 'cal-dot-done';
+    else if (isPast && hasPlanned) dotClass = 'cal-dot-missed';
+    else if (hasPlanned) dotClass = 'cal-dot-planned';
+    const dot = cell.querySelector('.cal-cell-dot');
+    if (dot) dot.className = `cal-cell-dot ${dotClass}`;
+  });
 }
 
 async function _renderDashDayCard(dateStr) {
@@ -1143,32 +1276,29 @@ function _getPhaseForDate(dateStr) {
   return null;
 }
 
-function dashCalPrev() {
-  _dashWeekOffset--;
+function dashCalGoToday() {
   const now = new Date();
-  const center = addDays(now, _dashWeekOffset * 7);
-  _dashSelectedDate = isoDate(addDays(center, -3));
-  loadDashboard();
+  const todayStr = isoDate(now);
+  _dashSelectedDate = todayStr;
+  _scrollCalToDate(isoDate(addDays(now, -1)), { behavior: 'smooth' });
+  _renderDashDayCard(todayStr);
+  _updateCalStripSelected();
+  _updateCalStripHeader();
 }
-function dashCalNext() {
-  _dashWeekOffset++;
-  const now = new Date();
-  const center = addDays(now, _dashWeekOffset * 7);
-  _dashSelectedDate = isoDate(addDays(center, -3));
-  loadDashboard();
-}
-function dashCalSelectDay(dateStr) {
-  _dashSelectedDate = dateStr;
-  _renderDashDayCard(dateStr);
+
+function _updateCalStripSelected() {
   const cells = document.querySelectorAll('#cal-strip-track .cal-cell');
   cells.forEach(c => {
     c.classList.remove('cal-selected');
-    const num = c.querySelector('.cal-cell-num');
-    if (!num) return;
-    const day = parseInt(num.textContent);
-    const selDay = new Date(dateStr + 'T12:00:00').getDate();
-    if (day === selDay && !c.classList.contains('cal-today')) c.classList.add('cal-selected');
+    if (c.classList.contains('cal-today')) return;
+    if (c.getAttribute('data-date') === _dashSelectedDate) c.classList.add('cal-selected');
   });
+}
+
+function dashCalSelectDay(dateStr) {
+  _dashSelectedDate = dateStr;
+  _renderDashDayCard(dateStr);
+  _updateCalStripSelected();
   if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 600px)').matches) {
     document.getElementById('dash-day-card')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
@@ -5225,13 +5355,24 @@ async function saveLegacyPeriodEditor(periodId) {
     const isRest = row.querySelector('.lpe-rest').checked;
     const label = row.querySelector('.lpe-label').value.trim();
     const description = row.querySelector('.lpe-desc').value.trim();
-    upserts.push({
-      period_id: periodId,
-      day_of_week: d,
-      is_rest: isRest,
-      label: isRest ? null : (label || null),
-      description: isRest ? null : (description || null),
-    });
+    if (isRest) {
+      upserts.push({
+        period_id: periodId,
+        day_of_week: d,
+        is_rest: true,
+        label: 'Vila',
+        description: null,
+      });
+    } else if (label || description) {
+      upserts.push({
+        period_id: periodId,
+        day_of_week: d,
+        is_rest: false,
+        label: label || 'Pass',
+        description: description || null,
+      });
+    }
+    // Skip totally empty non-rest rows
   });
 
   try {
