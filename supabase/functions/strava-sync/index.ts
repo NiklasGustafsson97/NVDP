@@ -15,7 +15,7 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders() });
+    return new Response("ok", { headers: corsHeaders(req) });
   }
 
   if (req.method !== "POST") {
@@ -27,7 +27,7 @@ serve(async (req) => {
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "No auth header" }), {
         status: 401,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -38,19 +38,30 @@ serve(async (req) => {
     if (userErr || !user) {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
-    const { profile_id, since } = await req.json();
-    if (!profile_id) {
-      return new Response(JSON.stringify({ error: "Missing profile_id" }), {
-        status: 400,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
-      });
-    }
+    const { since } = await req.json();
 
     const db = supabaseAdmin();
+
+    // Derive profile_id from the authenticated user (never from the body).
+    // This prevents a legit user from passing someone else's profile_id and
+    // reading/writing into another account via the service-role client below.
+    const { data: callerProfile, error: profErr } = await db
+      .from("profiles")
+      .select("id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (profErr || !callerProfile) {
+      console.error("strava-sync: profile lookup failed", profErr);
+      return new Response(JSON.stringify({ error: "profile_not_found" }), {
+        status: 404,
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+      });
+    }
+    const profile_id = callerProfile.id;
 
     const { data: conn, error: connErr } = await db
       .from("strava_connections")
@@ -61,7 +72,7 @@ serve(async (req) => {
     if (connErr || !conn) {
       return new Response(
         JSON.stringify({ error: "No Strava connection found" }),
-        { status: 404, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+        { status: 404, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -105,9 +116,10 @@ serve(async (req) => {
     });
     if (!athleteRes.ok) {
       const errBody = await athleteRes.text();
+      console.error("strava-sync: athlete endpoint error", athleteRes.status, errBody.slice(0, 500));
       return new Response(
-        JSON.stringify({ error: "Strava API error", status: athleteRes.status, detail: errBody }),
-        { status: 502, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+        JSON.stringify({ error: "strava_api_error" }),
+        { status: 502, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
       );
     }
     const athlete = await athleteRes.json();
@@ -123,7 +135,9 @@ serve(async (req) => {
 
       if (!activitiesRes.ok) {
         const errBody = await activitiesRes.text();
-        debug.activities_error = { status: activitiesRes.status, body: errBody };
+        console.error("strava-sync: activities endpoint error", activitiesRes.status, errBody.slice(0, 500));
+        // Record only status code client-side; never leak upstream body.
+        debug.activities_error = { status: activitiesRes.status };
         break;
       }
 
@@ -181,9 +195,9 @@ serve(async (req) => {
         });
 
         if (upsertErr) {
-          console.error("Workout upsert error:", upsertErr);
-          if (!firstError) firstError = JSON.stringify(upsertErr);
-          activityLog.push({ ...baseLog, action: "error", err: String(upsertErr.message || upsertErr) });
+          console.error("strava-sync: workout upsert error", upsertErr);
+          if (!firstError) firstError = "workout_upsert_failed";
+          activityLog.push({ ...baseLog, action: "error" });
           skippedError++;
           skipped++;
         } else {
@@ -219,14 +233,14 @@ serve(async (req) => {
       }),
       {
         status: 200,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       }
     );
   } catch (err) {
     console.error("strava-sync error:", err);
     return new Response(
       JSON.stringify({ error: "Internal error" }),
-      { status: 500, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+      { status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
     );
   }
 });

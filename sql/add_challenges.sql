@@ -10,7 +10,11 @@ create table if not exists public.challenges (
   created_at timestamptz not null default now()
 );
 
-alter table public.challenges disable row level security;
+-- SECURITY NOTE (assessment C6): previously this migration disabled RLS
+-- which would silently reopen the table on every re-run. RLS is now enabled
+-- here; policies live in migrations/20260330_fix_rls_security.sql and
+-- migrations/20260418_rls_lockdown.sql.
+alter table public.challenges enable row level security;
 
 -- Add avatar column to profiles
 alter table public.profiles add column if not exists avatar text;

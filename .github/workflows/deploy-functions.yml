@@ -1,11 +1,26 @@
 name: Deploy Supabase Edge Functions
 
+# SECURITY (assessment):
+#   * M3 / C-level: `--no-verify-jwt` was previously passed on EVERY function.
+#     That means any caller (including anonymous ones) could invoke user-
+#     authenticated endpoints like generate-plan / weekly-checkin with no
+#     bearer token — the functions only checked auth themselves by inspecting
+#     req.headers.authorization, which could be omitted.
+#   * Now the default is JWT-verified. Only functions that legitimately need
+#     to accept unauthenticated traffic (OAuth callbacks, provider webhooks,
+#     scheduled cron) keep `--no-verify-jwt`, and we document why.
+#   * CI hardening (assessment M10): actions pinned to commit SHAs, Supabase
+#     CLI pinned to a known version, minimal permissions block.
+
 on:
   push:
     branches: [main]
     paths:
       - 'supabase/functions/**'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
   SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -14,44 +29,61 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout@v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
-      - uses: supabase/setup-cli@v1
+      # supabase/setup-cli@v1.6.0 — pinned to a commit so a tag re-point
+      # can't silently introduce a malicious CLI into our deploy path.
+      - uses: supabase/setup-cli@2d1f2cfbeb9fca1e3b8fd2a69e0c1f4fcb52d4a3
         with:
-          version: latest
+          version: 1.200.3
 
       - name: Link project
         run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
 
+      # ── OAuth callbacks (called by Strava/Garmin redirecting the browser
+      #    back to us — the request carries a provider `code` + our DB-
+      #    verified `state`, never a Supabase JWT). Must stay --no-verify-jwt.
       - name: Deploy strava-auth
         run: supabase functions deploy strava-auth --no-verify-jwt
-
-      - name: Deploy strava-webhook
-        run: supabase functions deploy strava-webhook --no-verify-jwt
-
-      - name: Deploy strava-sync
-        run: supabase functions deploy strava-sync --no-verify-jwt
 
       - name: Deploy garmin-auth
         run: supabase functions deploy garmin-auth --no-verify-jwt
 
+      # ── Provider webhooks (Strava / Garmin POST directly to us; they
+      #    authenticate via a shared verify-token in the URL, not a JWT).
+      - name: Deploy strava-webhook
+        run: supabase functions deploy strava-webhook --no-verify-jwt
+
       - name: Deploy garmin-webhook
         run: supabase functions deploy garmin-webhook --no-verify-jwt
 
-      - name: Deploy garmin-sync
-        run: supabase functions deploy garmin-sync --no-verify-jwt
-
-      - name: Deploy generate-plan
-        run: supabase functions deploy generate-plan --no-verify-jwt
-
-      - name: Deploy weekly-template-ai
-        run: supabase functions deploy weekly-template-ai --no-verify-jwt
-
-      - name: Deploy send-nudge-email
-        run: supabase functions deploy send-nudge-email --no-verify-jwt
-
-      - name: Deploy weekly-checkin
-        run: supabase functions deploy weekly-checkin --no-verify-jwt
-
+      # ── Cron-triggered reminder (pg_cron invokes it with the service-role
+      #    key, not a user JWT). Keep --no-verify-jwt, but the function itself
+      #    checks a shared CRON_SECRET header before running.
       - name: Deploy weekly-checkin-reminder
         run: supabase functions deploy weekly-checkin-reminder --no-verify-jwt
+
+      # ── User-facing endpoints: Supabase now rejects anonymous calls at the
+      #    edge. Each function additionally re-validates the JWT so the
+      #    defence-in-depth layering is intact.
+      - name: Deploy strava-sync
+        run: supabase functions deploy strava-sync
+
+      - name: Deploy garmin-sync
+        run: supabase functions deploy garmin-sync
+
+      - name: Deploy generate-plan
+        run: supabase functions deploy generate-plan
+
+      - name: Deploy weekly-template-ai
+        run: supabase functions deploy weekly-template-ai
+
+      - name: Deploy send-nudge-email
+        run: supabase functions deploy send-nudge-email
+
+      - name: Deploy weekly-checkin
+        run: supabase functions deploy weekly-checkin
+
+      - name: Deploy oauth-state
+        run: supabase functions deploy oauth-state

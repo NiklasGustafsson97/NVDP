@@ -15,8 +15,13 @@ create table if not exists public.groups (
 -- Add group_id to profiles
 alter table public.profiles add column if not exists group_id uuid references public.groups(id);
 
--- Disable RLS (consistent with other tables in this app)
-alter table public.groups disable row level security;
+-- SECURITY NOTE (assessment C6): previously this migration ran
+--   alter table public.groups disable row level security;
+-- which would silently reopen the table on every re-run. RLS is now enabled
+-- here so the script is safe to re-apply; policies are defined in
+-- fix_groups_rls.sql and tightened further in
+-- migrations/20260418_rls_lockdown.sql.
+alter table public.groups enable row level security;
 
 -- Verify
 select 'Groups table created' as status;

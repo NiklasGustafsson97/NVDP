@@ -20,18 +20,27 @@ const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || "";
 const OPENAI_BASE_URL = Deno.env.get("OPENAI_BASE_URL") || "https://api.openai.com/v1";
 const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
 
-function corsHeaders() {
+// SECURITY (assessment M3): CORS was `*`. Restrict to an APP_ORIGINS
+// allowlist (comma-separated env var) so a malicious origin can't invoke
+// the endpoint with a user's credentials.
+const APP_ORIGINS = (Deno.env.get("APP_ORIGINS") ||
+  "https://niklasgustafsson97.github.io").split(",").map((o) => o.trim()).filter(Boolean);
+
+function corsHeaders(req?: Request) {
+  const origin = req?.headers.get("origin") || "";
+  const allow = APP_ORIGINS.includes(origin) ? origin : APP_ORIGINS[0] || "null";
   return {
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": allow,
+    "Vary": "Origin",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
   };
 }
 
-function json(status: number, body: unknown) {
+function json(status: number, body: unknown, req?: Request) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders(), "Content-Type": "application/json" },
+    headers: { ...corsHeaders(req), "Content-Type": "application/json" },
   });
 }
 
@@ -927,7 +936,7 @@ function pickWorkoutBody(w: PlanWorkout) {
 // ────────────────────────────────────────────────────────────────────────────
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders() });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
 
   try {

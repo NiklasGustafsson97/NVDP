@@ -14,7 +14,7 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders() });
+    return new Response("ok", { headers: corsHeaders(req) });
   }
 
   if (req.method !== "POST") {
@@ -26,7 +26,7 @@ serve(async (req) => {
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "No auth header" }), {
         status: 401,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -37,19 +37,29 @@ serve(async (req) => {
     if (userErr || !user) {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
-    const { profile_id } = await req.json();
-    if (!profile_id) {
-      return new Response(JSON.stringify({ error: "Missing profile_id" }), {
-        status: 400,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
-      });
-    }
+    // Body may be empty; we ignore any body-supplied profile_id and always
+    // derive the caller's profile_id from the JWT (see IDOR fix).
+    await req.json().catch(() => ({}));
 
     const db = supabaseAdmin();
+
+    const { data: callerProfile, error: profErr } = await db
+      .from("profiles")
+      .select("id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (profErr || !callerProfile) {
+      console.error("garmin-sync: profile lookup failed", profErr);
+      return new Response(JSON.stringify({ error: "profile_not_found" }), {
+        status: 404,
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+      });
+    }
+    const profile_id = callerProfile.id;
 
     const { data: conn, error: connErr } = await db
       .from("garmin_connections")
@@ -60,7 +70,7 @@ serve(async (req) => {
     if (connErr || !conn) {
       return new Response(
         JSON.stringify({ error: "No Garmin connection found" }),
-        { status: 404, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+        { status: 404, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -95,9 +105,10 @@ serve(async (req) => {
 
     if (!activitiesRes.ok) {
       const errBody = await activitiesRes.text();
+      console.error("garmin-sync: Garmin API error", activitiesRes.status, errBody.slice(0, 500));
       return new Response(
-        JSON.stringify({ error: "Garmin API error", status: activitiesRes.status, detail: errBody }),
-        { status: 502, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+        JSON.stringify({ error: "garmin_api_error" }),
+        { status: 502, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -127,8 +138,8 @@ serve(async (req) => {
       }
 
       if (insertErr) {
-        console.error("Workout insert error:", insertErr);
-        if (!firstError) firstError = JSON.stringify(insertErr);
+        console.error("garmin-sync: workout insert error", insertErr);
+        if (!firstError) firstError = "workout_insert_failed";
         skipped++;
       } else {
         imported++;
@@ -146,14 +157,14 @@ serve(async (req) => {
       JSON.stringify({ imported, skipped, totalFetched, last_sync_at: new Date().toISOString(), debug }),
       {
         status: 200,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       }
     );
   } catch (err) {
     console.error("garmin-sync error:", err);
     return new Response(
       JSON.stringify({ error: "Internal error" }),
-      { status: 500, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+      { status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
     );
   }
 });

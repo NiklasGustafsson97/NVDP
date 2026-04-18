@@ -4,10 +4,43 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NVDP</title>
-  <link rel="stylesheet" href="css/style.css?v=35afc72">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+  <!--
+    SECURITY (assessment M6 + M9):
+      * Content-Security-Policy restricts where scripts, styles, images and
+        network calls can originate. 'unsafe-inline' is currently required
+        because the app uses inline onclick/onkeydown handlers and a few
+        inline <style> blocks; removing those is tracked as a follow-up.
+      * Pinned CDN versions + Subresource Integrity hashes stop a compromised
+        jsDelivr / unpkg from swapping in malicious code.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com;
+    style-src 'self' 'unsafe-inline' https://unpkg.com;
+    img-src 'self' data: blob: https:;
+    font-src 'self' data:;
+    connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co;
+    frame-ancestors 'none';
+    base-uri 'self';
+    form-action 'self';
+    object-src 'none';
+  ">
+  <link rel="stylesheet" href="css/style.css?v=lpe-v6">
+  <script
+    src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"
+    integrity="sha384-GFr3yTh5lJznCbZfpTtXnwboFsxqtTQoeTZCRHhE0579KrRmlCzen5AA8ohaB5ug"
+    crossorigin="anonymous"
+    referrerpolicy="no-referrer"></script>
+  <script
+    src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"
+    integrity="sha384-vsrfeLOOY6KuIYKDlmVH5UiBmgIdB1oEf7p01YgWHuqmOHfZr374+odEv96n9tNC"
+    crossorigin="anonymous"
+    referrerpolicy="no-referrer"></script>
+  <script
+    src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"
+    integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws"
+    crossorigin="anonymous"
+    referrerpolicy="no-referrer"></script>
   <style>
     #gate {
       position: fixed; inset: 0; z-index: 99999;
@@ -283,6 +316,16 @@
 
       <button type="button" class="dash-log-fab" onclick="quickLogFromDashboard()" aria-label="Logga pass för vald dag">+ Logga pass</button>
 
+      <!-- ── Weekly coach check-in banner ── -->
+      <button type="button" id="coach-checkin-banner" class="coach-checkin-banner hidden" onclick="openCoachCheckin()">
+        <span class="cc-banner-icon" aria-hidden="true">🗓️</span>
+        <span class="cc-banner-text">
+          <span class="cc-banner-title">Dags för veckoavstämning med coachen</span>
+          <span class="cc-banner-sub">Tar ca 1 minut — vi tittar på veckan och justerar nästa</span>
+        </span>
+        <span class="cc-banner-chevron" aria-hidden="true">›</span>
+      </button>
+
       <!-- ── Veckoschema (merged from schema view) ── -->
       <button type="button" class="dash-schema-toggle" id="dash-schema-toggle" aria-expanded="true" aria-controls="dash-week-collapsible" onclick="toggleDashWeekSection()">
         <span class="dash-schema-toggle-label">Veckoschema</span>
@@ -455,6 +498,11 @@
           <span class="card-title">Per aktivitet</span>
         </div>
         <div id="season-activity-bars"></div>
+      </div>
+
+      <div id="trends-coach-history" class="card cc-hist-card hidden">
+        <div class="card-header"><span class="card-title">Coachen och veckorna</span></div>
+        <div id="trends-coach-history-body"></div>
       </div>
 
       <div id="weekly-summary-card" class="card hidden">
@@ -703,6 +751,145 @@
     <div class="plan-edit-input-row">
       <input type="text" id="plan-edit-input" class="form-input" placeholder="t.ex. Byt torsdagens pass mot tempo..." onkeydown="if(event.key==='Enter')submitPlanEdit()">
       <button class="btn btn-primary btn-sm" onclick="submitPlanEdit()" id="plan-edit-send">Skicka</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ WEEKLY COACH CHECK-IN MODAL ═══ -->
+<div id="coach-checkin-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeCoachCheckin()">
+  <div class="modal-box wizard-box" style="max-width:520px;">
+    <div class="modal-header">
+      <h3 id="cc-title">Veckoavstämning</h3>
+      <button class="btn-close" onclick="closeCoachCheckin()">&times;</button>
+    </div>
+
+    <div class="wizard-step-banner" id="cc-step-banner" aria-live="polite">Steg 1 av 5</div>
+    <div class="wizard-progress" id="cc-progress"></div>
+
+    <!-- Step 0: Overall feel -->
+    <div class="wizard-step active cc-step" data-step="0">
+      <div class="wizard-step-title">Hur kändes veckan?</div>
+      <div class="wizard-step-subtitle">Ett övergripande intryck — vi går in på detaljerna snart.</div>
+      <div class="cc-feel-grid" id="cc-feel-grid">
+        <button type="button" class="cc-feel-btn" data-value="1"><span class="cc-feel-emoji">😵‍💫</span><span>Helt slut</span></button>
+        <button type="button" class="cc-feel-btn" data-value="2"><span class="cc-feel-emoji">😮‍💨</span><span>Tungt</span></button>
+        <button type="button" class="cc-feel-btn" data-value="3"><span class="cc-feel-emoji">🙂</span><span>OK</span></button>
+        <button type="button" class="cc-feel-btn" data-value="4"><span class="cc-feel-emoji">😊</span><span>Bra</span></button>
+        <button type="button" class="cc-feel-btn" data-value="5"><span class="cc-feel-emoji">🔥</span><span>Superkänsla</span></button>
+      </div>
+    </div>
+
+    <!-- Step 1: Injury -->
+    <div class="wizard-step cc-step" data-step="1">
+      <div class="wizard-step-title">Skador eller krämpor?</div>
+      <div class="wizard-step-subtitle">Var ärlig — coachen anpassar planen efter det.</div>
+      <div class="cc-injury-grid" id="cc-injury-grid">
+        <button type="button" class="cc-injury-btn" data-value="none"><strong>Inget</strong><span>Kroppen mår bra</span></button>
+        <button type="button" class="cc-injury-btn" data-value="niggle"><strong>Småkänning</strong><span>Lite ömt, inget allvarligt</span></button>
+        <button type="button" class="cc-injury-btn" data-value="pain"><strong>Riktig värk</strong><span>Stör träningen</span></button>
+        <button type="button" class="cc-injury-btn" data-value="paused"><strong>Skada — pausar</strong><span>Måste vila helt</span></button>
+      </div>
+      <div id="cc-injury-details" class="cc-injury-details hidden">
+        <div class="form-group">
+          <label>Var? (t.ex. höger knä, vänster achilles)</label>
+          <input type="text" id="cc-injury-note" placeholder="Beskriv kort var det är">
+        </div>
+        <div class="form-group">
+          <label>Sida</label>
+          <div class="cc-side-row" id="cc-injury-side">
+            <button type="button" class="intensity-pill" data-value="left">Vänster</button>
+            <button type="button" class="intensity-pill" data-value="right">Höger</button>
+            <button type="button" class="intensity-pill" data-value="both">Båda</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Hardest session (conditional) -->
+    <div class="wizard-step cc-step" data-step="2">
+      <div class="wizard-step-title">Veckans tuffaste pass</div>
+      <div class="wizard-step-subtitle" id="cc-hardest-sub">Hur kändes det hårda passet?</div>
+      <div class="cc-option-list" id="cc-hardest-grid">
+        <button type="button" class="cc-option-btn" data-value="too_hard"><strong>För tungt</strong><span>Höll inte igenom som planerat</span></button>
+        <button type="button" class="cc-option-btn" data-value="just_right"><strong>Lagom</strong><span>Kontrollerat, genomfört</span></button>
+        <button type="button" class="cc-option-btn" data-value="had_more"><strong>Hade mer att ge</strong><span>Kunde pressat lite mer</span></button>
+      </div>
+      <div class="cc-skip-hint" id="cc-hardest-skip-hint">Hoppa över om du inte körde något kvalitetspass.</div>
+    </div>
+
+    <!-- Step 3: Long run (conditional) -->
+    <div class="wizard-step cc-step" data-step="3">
+      <div class="wizard-step-title">Långpasset</div>
+      <div class="wizard-step-subtitle" id="cc-longrun-sub">Hur gick veckans längsta pass?</div>
+      <div class="cc-option-list" id="cc-longrun-grid">
+        <button type="button" class="cc-option-btn" data-value="good"><strong>Fullföljde, kändes bra</strong><span>Hela distansen enligt plan</span></button>
+        <button type="button" class="cc-option-btn" data-value="tough_end"><strong>Fullföljde, tungt i slutet</strong><span>Klarade det men det sved</span></button>
+        <button type="button" class="cc-option-btn" data-value="cut_short"><strong>Kapade det</strong><span>Kortade ner distansen</span></button>
+        <button type="button" class="cc-option-btn" data-value="skipped"><strong>Hoppade över</strong><span>Blev aldrig av</span></button>
+      </div>
+      <div class="cc-skip-hint" id="cc-longrun-skip-hint">Hoppa över om du inte hade något långpass planerat.</div>
+    </div>
+
+    <!-- Step 4: Next week context + free text -->
+    <div class="wizard-step cc-step" data-step="4">
+      <div class="wizard-step-title">Nästa vecka</div>
+      <div class="wizard-step-subtitle">Dagar du inte kan träna, eller något speciellt att planera runt?</div>
+      <div class="form-group">
+        <label>Upptagna dagar nästa vecka</label>
+        <div class="wiz-day-toggles" id="cc-unavail-days">
+          <button type="button" class="wiz-day-btn" data-day="0">Mån</button>
+          <button type="button" class="wiz-day-btn" data-day="1">Tis</button>
+          <button type="button" class="wiz-day-btn" data-day="2">Ons</button>
+          <button type="button" class="wiz-day-btn" data-day="3">Tors</button>
+          <button type="button" class="wiz-day-btn" data-day="4">Fre</button>
+          <button type="button" class="wiz-day-btn" data-day="5">Lör</button>
+          <button type="button" class="wiz-day-btn" data-day="6">Sön</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Något speciellt nästa vecka? (valfritt)</label>
+        <input type="text" id="cc-next-context" placeholder="t.ex. resa onsdag, lopp på söndag">
+      </div>
+      <div class="form-group">
+        <label>Något annat coachen bör veta? (valfritt)</label>
+        <textarea id="cc-free-text" rows="3" placeholder="Sömn, stress, motivation, vad som helst"></textarea>
+      </div>
+    </div>
+
+    <!-- Loading state -->
+    <div class="wizard-step cc-step" id="cc-step-loading" style="display:none">
+      <div class="wiz-loading">
+        <div class="spinner"></div>
+        <p class="wiz-loading-text">Coachen tittar på veckan...</p>
+        <p class="wiz-loading-sub">Några sekunder bara</p>
+      </div>
+    </div>
+
+    <!-- Diff overview step -->
+    <div class="wizard-step cc-step" id="cc-step-diff" style="display:none">
+      <div class="cc-diff-header">
+        <div class="wizard-step-title">Coachens förslag</div>
+        <div class="cc-coach-note" id="cc-coach-note"></div>
+      </div>
+      <div id="cc-diff-list" class="cc-diff-list"></div>
+      <div class="cc-diff-empty hidden" id="cc-diff-empty">
+        <p>Coachen har inget att ändra den här veckan — kör på som planerat.</p>
+      </div>
+    </div>
+
+    <!-- Done state -->
+    <div class="wizard-step cc-step" id="cc-step-done" style="display:none">
+      <div class="wiz-loading">
+        <div class="cc-done-check" aria-hidden="true">✓</div>
+        <p class="wiz-loading-text" id="cc-done-text">Schemat uppdaterat!</p>
+        <p class="wiz-loading-sub" id="cc-done-sub">Lycka till med nästa vecka.</p>
+      </div>
+    </div>
+
+    <!-- Navigation -->
+    <div class="wizard-nav" id="cc-nav">
+      <button class="btn btn-ghost btn-sm" id="cc-prev" onclick="ccStepPrev()" style="visibility:hidden">Tillbaka</button>
+      <button class="btn btn-primary btn-sm" id="cc-next" onclick="ccStepNext()">Nästa</button>
     </div>
   </div>
 </div>
@@ -981,8 +1168,8 @@
   </div>
 </div>
 
-<script src="js/config.js?v=35afc72"></script>
-<script src="js/app.js?v=35afc72"></script>
+<script src="js/config.js?v=lpe-v4"></script>
+<script src="js/app.js?v=lpe-v5"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {

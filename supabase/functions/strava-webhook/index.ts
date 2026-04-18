@@ -18,7 +18,14 @@ serve(async (req) => {
     const token = url.searchParams.get("hub.verify_token");
     const challenge = url.searchParams.get("hub.challenge");
 
-    if (mode === "subscribe" && token === STRAVA_VERIFY_TOKEN && challenge) {
+    // SECURITY (assessment M2): fail closed if the verify token isn't
+    // configured — we must never approve a subscription with an empty token.
+    if (
+      STRAVA_VERIFY_TOKEN &&
+      mode === "subscribe" &&
+      token === STRAVA_VERIFY_TOKEN &&
+      challenge
+    ) {
       return new Response(JSON.stringify({ "hub.challenge": challenge }), {
         headers: { "Content-Type": "application/json" },
       });
@@ -27,7 +34,7 @@ serve(async (req) => {
   }
 
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders() });
+    return new Response("ok", { headers: corsHeaders(req) });
   }
 
   // Strava event webhook (POST)

@@ -1,5 +1,9 @@
 name: Auto cache-bust on deploy
 
+# SECURITY (assessment M10): pin third-party actions to commit SHAs so a
+# malicious tag move can't inject code into our release pipeline, and keep
+# the default GITHUB_TOKEN scope minimal.
+
 on:
   push:
     branches: [main]
@@ -15,7 +19,8 @@ jobs:
   cache-bust:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout@v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
         env:

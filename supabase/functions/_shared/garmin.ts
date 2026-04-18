@@ -111,10 +111,19 @@ export function garminActivityToWorkout(
   };
 }
 
-export function corsHeaders() {
+// SECURITY (assessment M3): see strava.ts — origin is restricted to
+// `APP_ORIGINS`. `*` would allow credentialed cross-origin access.
+const APP_ORIGINS = (Deno.env.get("APP_ORIGINS") ||
+  "https://niklasgustafsson97.github.io").split(",").map((o) => o.trim()).filter(Boolean);
+
+export function corsHeaders(req?: Request): Record<string, string> {
+  const origin = req?.headers.get("origin") || "";
+  const allow = APP_ORIGINS.includes(origin) ? origin : APP_ORIGINS[0] || "null";
   return {
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": allow,
+    "Vary": "Origin",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
   };
 }
 

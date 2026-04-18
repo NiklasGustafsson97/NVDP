@@ -17,5 +17,9 @@ create table if not exists public.workout_comments (
   created_at timestamptz not null default now()
 );
 
-alter table public.workout_reactions disable row level security;
-alter table public.workout_comments disable row level security;
+-- SECURITY NOTE (assessment C6): previously this migration disabled RLS
+-- which would silently reopen these tables on every re-run. RLS is now
+-- enabled here; policies live in migrations/20260330_fix_rls_security.sql
+-- and migrations/20260418_rls_lockdown.sql.
+alter table public.workout_reactions enable row level security;
+alter table public.workout_comments enable row level security;

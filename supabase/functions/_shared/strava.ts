@@ -4,7 +4,16 @@ export const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 export const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 export const STRAVA_CLIENT_ID = Deno.env.get("STRAVA_CLIENT_ID")!;
 export const STRAVA_CLIENT_SECRET = Deno.env.get("STRAVA_CLIENT_SECRET")!;
-export const STRAVA_VERIFY_TOKEN = Deno.env.get("STRAVA_VERIFY_TOKEN") || "nvdp_strava_verify";
+// SECURITY (assessment M2): the webhook verify token was shipped with a
+// hard-coded default ("nvdp_strava_verify"). Any attacker who read the
+// source could pass it and successfully "subscribe" at our webhook, which
+// would then attempt to trust spoofed activity events. We now REQUIRE
+// STRAVA_VERIFY_TOKEN to be set; the handler must fail closed otherwise.
+const _STRAVA_VERIFY_TOKEN_ENV = Deno.env.get("STRAVA_VERIFY_TOKEN") || "";
+if (!_STRAVA_VERIFY_TOKEN_ENV) {
+  console.error("_shared/strava.ts: STRAVA_VERIFY_TOKEN env var is not set");
+}
+export const STRAVA_VERIFY_TOKEN = _STRAVA_VERIFY_TOKEN_ENV;
 export const APP_URL = Deno.env.get("APP_URL") || "https://niklasgustafsson97.github.io/NVDP/";
 
 export function supabaseAdmin() {
@@ -222,9 +231,21 @@ export async function fetchHRZoneSeconds(
   }
 }
 
-export function corsHeaders() {
+// SECURITY (assessment M3): browser origins are restricted to an allowlist
+// configured via the `APP_ORIGINS` env var (comma-separated), rather than
+// `*` which would permit credentialed requests from any site. When the
+// caller's origin is not in the allowlist we fall back to the first
+// configured origin so CORS is denied.
+const APP_ORIGINS = (Deno.env.get("APP_ORIGINS") ||
+  "https://niklasgustafsson97.github.io").split(",").map((o) => o.trim()).filter(Boolean);
+
+export function corsHeaders(req?: Request): Record<string, string> {
+  const origin = req?.headers.get("origin") || "";
+  const allow = APP_ORIGINS.includes(origin) ? origin : APP_ORIGINS[0] || "null";
   return {
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": allow,
+    "Vary": "Origin",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
   };
 }

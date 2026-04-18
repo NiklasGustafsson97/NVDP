@@ -1,17 +1,35 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import {
-  GARMIN_CLIENT_ID,
   supabaseAdmin,
   refreshGarminToken,
   garminActivityToWorkout,
   corsHeaders,
-  GARMIN_API_BASE,
   type GarminActivity,
 } from "../_shared/garmin.ts";
 
+// SECURITY (assessment C5): the webhook payload's `callbackURL` is
+// attacker-controllable. Following it with the user's Garmin access token
+// attached would exfiltrate the token to any URL an attacker POSTs.
+// We now refuse any callbackURL whose hostname is not on this allowlist.
+const ALLOWED_CALLBACK_HOSTS = new Set<string>([
+  "apis.garmin.com",
+  "healthapi.garmin.com",
+]);
+
+function isSafeGarminCallbackURL(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:") return false;
+  return ALLOWED_CALLBACK_HOSTS.has(u.hostname.toLowerCase());
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders() });
+    return new Response("ok", { headers: corsHeaders(req) });
   }
 
   // Garmin sends POST with activity data
@@ -33,7 +51,7 @@ serve(async (req) => {
         // Garmin includes userId in webhook payloads
         const garminUserId = String(activity.userId || (body as Record<string, unknown>).userId || "");
         if (!garminUserId) {
-          console.error("No Garmin userId in activity payload");
+          console.error("garmin-webhook: no userId in payload");
           continue;
         }
 
@@ -45,22 +63,30 @@ serve(async (req) => {
           .single();
 
         if (connErr || !conn) {
-          console.error("No connection found for Garmin user:", garminUserId);
+          console.error("garmin-webhook: no connection for Garmin user", garminUserId);
           continue;
         }
 
         // If the webhook payload contains full activity data (PUSH mode), use it directly.
-        // Otherwise we need to fetch it (PING mode with callbackURL).
+        // Otherwise we *may* fetch it (PING mode with callbackURL), but only if
+        // the hostname is on our allowlist (SSRF / token-exfil prevention).
         let activityData: GarminActivity = activity;
 
         if (!activity.durationInSeconds && activity.callbackURL) {
-          // PING mode: fetch activity data from callback URL
+          if (!isSafeGarminCallbackURL(activity.callbackURL)) {
+            console.error(
+              "garmin-webhook: refusing to fetch callbackURL (not on allowlist)",
+              activity.callbackURL,
+            );
+            continue;
+          }
           const accessToken = await refreshGarminToken(conn);
           const actRes = await fetch(activity.callbackURL, {
             headers: { Authorization: `Bearer ${accessToken}` },
+            redirect: "error", // prevent redirect to a non-allowlisted host
           });
           if (!actRes.ok) {
-            console.error("Failed to fetch Garmin activity from callback:", actRes.status);
+            console.error("garmin-webhook: callback fetch failed", actRes.status);
             continue;
           }
           activityData = await actRes.json();
@@ -88,7 +114,7 @@ serve(async (req) => {
         }
 
         if (insertErr) {
-          console.error("Workout insert error:", insertErr);
+          console.error("garmin-webhook: workout insert error", insertErr);
         } else {
           await db
             .from("garmin_connections")

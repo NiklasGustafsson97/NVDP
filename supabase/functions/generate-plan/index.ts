@@ -9,9 +9,20 @@ const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || "";
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") || "";
 const LLM_PROVIDER = Deno.env.get("LLM_PROVIDER") || "openai";
 
-function corsHeaders() {
+// SECURITY (assessment M3): CORS was `*`, which combined with credentialed
+// requests lets any origin invoke this function from a logged-in user's
+// browser. We allowlist origins via the APP_ORIGINS env var (comma-separated)
+// and fall back to the first configured origin when the request origin isn't
+// recognised so the browser denies the response.
+const APP_ORIGINS = (Deno.env.get("APP_ORIGINS") ||
+  "https://niklasgustafsson97.github.io").split(",").map((o) => o.trim()).filter(Boolean);
+
+function corsHeaders(req?: Request) {
+  const origin = req?.headers.get("origin") || "";
+  const allow = APP_ORIGINS.includes(origin) ? origin : APP_ORIGINS[0] || "null";
   return {
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": allow,
+    "Vary": "Origin",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
   };
@@ -200,7 +211,8 @@ async function callOpenAI(userPrompt: string): Promise<LLMPlan> {
   });
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`OpenAI API error ${res.status}: ${err}`);
+    console.error(`generate-plan: OpenAI ${res.status}`, err.slice(0, 500));
+    throw new Error("upstream_ai_error");
   }
   const data = await res.json();
   return JSON.parse(data.choices[0].message.content);
@@ -226,7 +238,8 @@ async function callAnthropic(userPrompt: string): Promise<LLMPlan> {
   });
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Anthropic API error ${res.status}: ${err}`);
+    console.error(`generate-plan: Anthropic ${res.status}`, err.slice(0, 500));
+    throw new Error("upstream_ai_error");
   }
   const data = await res.json();
   const text = data.content[0].text;
@@ -250,7 +263,8 @@ async function callGemini(userPrompt: string): Promise<LLMPlan> {
   });
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Gemini API error ${res.status}: ${err}`);
+    console.error(`generate-plan: Gemini ${res.status}`, err.slice(0, 500));
+    throw new Error("upstream_ai_error");
   }
   const data = await res.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -390,7 +404,7 @@ Generate the complete plan as JSON.`;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders() });
+    return new Response("ok", { headers: corsHeaders(req) });
   }
 
   if (req.method !== "POST") {
@@ -403,7 +417,7 @@ serve(async (req) => {
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "No auth header" }), {
         status: 401,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
@@ -414,13 +428,13 @@ serve(async (req) => {
     if (userErr || !user) {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       });
     }
 
     // 2. Parse input
     const body: (PlanRequest & {
-      profile_id: string;
+      profile_id?: string;
       mode?: string;
       plan_id?: string;
       instruction?: string;
@@ -430,15 +444,34 @@ serve(async (req) => {
       conversation_history?: { role: string; content: string }[];
       proposed_plan?: unknown;
     }) = await req.json();
-    const { profile_id } = body;
-    if (!profile_id) {
-      return new Response(JSON.stringify({ error: "Missing profile_id" }), {
-        status: 400,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
-      });
-    }
 
     const db = supabaseAdmin();
+
+    // SECURITY: derive profile_id from the JWT, never trust the body.
+    // Any body-supplied profile_id is ignored (prevents IDOR).
+    const { data: callerProfile, error: profErr } = await db
+      .from("profiles")
+      .select("id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (profErr || !callerProfile) {
+      console.error("generate-plan: profile lookup failed", profErr);
+      return new Response(JSON.stringify({ error: "profile_not_found" }), {
+        status: 404,
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+      });
+    }
+    const profile_id = callerProfile.id;
+
+    // Helper: assert that plan_id (if present) belongs to the caller.
+    async function assertPlanOwnership(planId: string): Promise<boolean> {
+      const { data: planRow } = await db
+        .from("training_plans")
+        .select("profile_id")
+        .eq("id", planId)
+        .maybeSingle();
+      return !!planRow && planRow.profile_id === profile_id;
+    }
 
     // ── EDIT_SINGLE MODE: AI modifies one workout ──
     if (body.mode === "edit_single" && body.workout_id && body.instruction && body.current_workout) {
@@ -456,12 +489,18 @@ Return ONLY a JSON object with these fields: activity_type, label, description, 
 
       return new Response(
         JSON.stringify({ workout }),
-        { status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+        { status: 200, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
     // ── EDIT_APPLY MODE: apply a previously previewed plan ──
     if (body.mode === "edit_apply" && body.plan_id && body.proposed_plan) {
+      if (!(await assertPlanOwnership(body.plan_id))) {
+        return new Response(JSON.stringify({ error: "forbidden" }), {
+          status: 403,
+          headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+        });
+      }
       const editedPlan = body.proposed_plan as LLMPlan;
 
       const { data: oldWeeks } = await db.from("plan_weeks").select("id").eq("plan_id", body.plan_id);
@@ -518,12 +557,18 @@ Return ONLY a JSON object with these fields: activity_type, label, description, 
 
       return new Response(
         JSON.stringify({ plan_id: body.plan_id, plan_name: editedPlan.plan_name, applied: true }),
-        { status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+        { status: 200, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
     // ── EDIT_PREVIEW MODE: return proposed plan without writing to DB ──
     if (body.mode === "edit_preview" && body.plan_id && body.instruction) {
+      if (!(await assertPlanOwnership(body.plan_id))) {
+        return new Response(JSON.stringify({ error: "forbidden" }), {
+          status: 403,
+          headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+        });
+      }
       let editPromptPreview: string;
       const history = body.conversation_history || [];
       if (history.length > 0) {
@@ -536,12 +581,18 @@ Return ONLY a JSON object with these fields: activity_type, label, description, 
       const previewPlan = await generatePlan(editPromptPreview);
       return new Response(
         JSON.stringify({ proposed_plan: previewPlan }),
-        { status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+        { status: 200, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
     // ── EDIT MODE: modify existing plan via AI chat (legacy direct-apply) ──
     if (body.mode === "edit" && body.plan_id && body.instruction) {
+      if (!(await assertPlanOwnership(body.plan_id))) {
+        return new Response(JSON.stringify({ error: "forbidden" }), {
+          status: 403,
+          headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+        });
+      }
       const editPrompt = `You have an existing training plan (JSON below). The user wants to modify it.
 
 USER INSTRUCTION: "${body.instruction}"
@@ -619,7 +670,7 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
           summary: editedPlan.summary,
           weeks: numWeeks,
         }),
-        { status: 200, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+        { status: 200, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
       );
     }
 
@@ -675,7 +726,10 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
       generation_model: LLM_PROVIDER === "gemini" ? "gemini-2.0-flash" : LLM_PROVIDER === "anthropic" ? "claude-sonnet" : "gpt-4o",
     }).select("id").single();
 
-    if (tpErr) throw new Error(`Insert training_plan failed: ${JSON.stringify(tpErr)}`);
+    if (tpErr) {
+      console.error("generate-plan: insert training_plan failed", tpErr);
+      throw new Error("db_insert_failed");
+    }
     const planId = tpData.id;
 
     // 8. Insert weeks and workouts
@@ -689,7 +743,10 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
         notes: week.notes,
       }).select("id").single();
 
-      if (weekErr) throw new Error(`Insert plan_week ${week.week_number} failed: ${JSON.stringify(weekErr)}`);
+      if (weekErr) {
+        console.error("generate-plan: insert plan_week failed", week.week_number, weekErr);
+        throw new Error("db_insert_failed");
+      }
 
       const weekStartDate = new Date(startDate);
       weekStartDate.setDate(weekStartDate.getDate() + (week.week_number - 1) * 7);
@@ -713,7 +770,10 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
       });
 
       const { error: woErr } = await db.from("plan_workouts").insert(workoutRows);
-      if (woErr) throw new Error(`Insert plan_workouts week ${week.week_number} failed: ${JSON.stringify(woErr)}`);
+      if (woErr) {
+        console.error("generate-plan: insert plan_workouts failed", week.week_number, woErr);
+        throw new Error("db_insert_failed");
+      }
     }
 
     // 9. Return success
@@ -728,15 +788,17 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
       }),
       {
         status: 200,
-        headers: { ...corsHeaders(), "Content-Type": "application/json" },
+        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
       }
     );
 
   } catch (err) {
     console.error("generate-plan error:", err);
+    // Never leak raw error details (DB constraint names, upstream bodies, etc.)
+    // to the client. Use stable generic codes; log everything server-side.
     return new Response(
-      JSON.stringify({ error: err instanceof Error ? err.message : "Internal error" }),
-      { status: 500, headers: { ...corsHeaders(), "Content-Type": "application/json" } }
+      JSON.stringify({ error: "internal_error" }),
+      { status: 500, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
     );
   }
 });

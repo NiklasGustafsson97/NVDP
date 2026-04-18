@@ -56,11 +56,23 @@ function ensureLeafletLoaded() {
     let jsLoaded = false;
     const maybeResolve = () => { if (cssLoaded && jsLoaded) resolve(); };
 
+    // SECURITY (assessment M6): add Subresource Integrity to Leaflet assets
+    // so a compromised unpkg CDN cannot silently swap in malicious code.
+    // Hashes are sha-384 of leaflet@1.9.4. Update together whenever the
+    // pinned version changes.
+    const LEAFLET_CSS_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    const LEAFLET_CSS_SRI = 'sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H';
+    const LEAFLET_JS_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    const LEAFLET_JS_SRI = 'sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH';
+
     let link = document.querySelector('link[data-nvdp-leaflet-css]');
     if (!link) {
       link = document.createElement('link');
       link.rel = 'stylesheet';
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      link.href = LEAFLET_CSS_URL;
+      link.integrity = LEAFLET_CSS_SRI;
+      link.crossOrigin = 'anonymous';
+      link.referrerPolicy = 'no-referrer';
       link.setAttribute('data-nvdp-leaflet-css', '1');
       link.onload = () => { cssLoaded = true; maybeResolve(); };
       link.onerror = () => { cssLoaded = true; maybeResolve(); };
@@ -74,7 +86,10 @@ function ensureLeafletLoaded() {
       maybeResolve();
     } else {
       const s = document.createElement('script');
-      s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      s.src = LEAFLET_JS_URL;
+      s.integrity = LEAFLET_JS_SRI;
+      s.crossOrigin = 'anonymous';
+      s.referrerPolicy = 'no-referrer';
       s.onload = () => { jsLoaded = true; maybeResolve(); };
       s.onerror = () => reject(new Error('Leaflet'));
       document.head.appendChild(s);
@@ -1077,9 +1092,19 @@ async function _renderDashCalendar() {
 
 function _updateCalStripCellSize() {
   const scrollArea = document.getElementById('cal-strip-scroll-area');
-  if (!scrollArea) return;
+  const track = document.getElementById('cal-strip-track');
+  if (!scrollArea || !track) return;
   const w = scrollArea.clientWidth;
-  if (w > 0) scrollArea.style.setProperty('--cal-strip-area-width', `${w}px`);
+  if (w <= 0) return;
+  scrollArea.style.setProperty('--cal-strip-area-width', `${w}px`);
+  const gap = 8;
+  const cellW = (w - 3 * gap) / 4;
+  track.querySelectorAll('.cal-cell').forEach(cell => {
+    cell.style.width = `${cellW}px`;
+    cell.style.flex = '0 0 auto';
+  });
+  const totalCells = track.children.length;
+  track.style.width = `${totalCells * cellW + (totalCells - 1) * gap}px`;
 }
 
 function _attachCalStripDragAndWheel(scrollArea) {
@@ -1460,10 +1485,12 @@ function showMoreRecent() {
   const el = document.getElementById('recent-workouts');
   if (!el || !_recentWorkouts.length) return;
   const batch = _recentWorkouts.slice(_recentShown, _recentShown + RECENT_PAGE);
+  // SECURITY (assessment H1): bind click handlers by id after render, rather
+  // than serialising DB rows into inline onclick attributes.
   const html = batch.map(w => {
     const distStr = w.distance_km ? ` | ${w.distance_km} km` : '';
-    const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
-    const mapThumb = w.map_polyline ? `<div class="wo-map wo-map-mini" data-polyline="${w.map_polyline}"></div>` : '';
+    const intBadge = w.intensity ? `<span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
+    const mapThumb = w.map_polyline ? `<div class="wo-map wo-map-mini" data-polyline="${escapeHTML(w.map_polyline)}"></div>` : '';
     const secondary = [];
     if (w.avg_hr) secondary.push(`\u2665 ${w.avg_hr} bpm`);
     if (w.elevation_gain_m) secondary.push(`\u25B2 ${Math.round(w.elevation_gain_m)} m`);
@@ -1475,13 +1502,13 @@ function showMoreRecent() {
     }
     const secondaryHtml = secondary.length ? `<div class="meta wo-secondary-meta">${secondary.join(' · ')}</div>` : '';
     return `
-    <div class="workout-item clickable${w.map_polyline ? ' workout-item-with-map' : ''}" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
+    <div class="workout-item clickable${w.map_polyline ? ' workout-item-with-map' : ''}" data-recent-wid="${escapeHTML(w.id)}">
       <div class="workout-icon" style="background:${ACTIVITY_COLORS[w.activity_type] || '#555'}22;">
         ${activityEmoji(w.activity_type)}
       </div>
       <div class="workout-info">
-        <div class="name">${w.activity_type}${intBadge}</div>
-        <div class="meta">${formatDate(w.workout_date)}${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? ' — ' + w.notes : ''}</div>
+        <div class="name">${escapeHTML(w.activity_type)}${intBadge}</div>
+        <div class="meta">${formatDate(w.workout_date)}${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? ' — ' + escapeHTML(w.notes) : ''}</div>
         <div class="meta wo-primary-meta">${w.duration_minutes} min${distStr}</div>
         ${secondaryHtml}
       </div>
@@ -1495,6 +1522,13 @@ function showMoreRecent() {
   if (oldBtn) oldBtn.remove();
 
   el.insertAdjacentHTML('beforeend', html);
+  batch.forEach(w => {
+    const node = el.querySelector(`[data-recent-wid="${w.id}"]:not([data-wired])`);
+    if (node) {
+      node.setAttribute('data-wired', '1');
+      node.addEventListener('click', () => openWorkoutModal(w));
+    }
+  });
 
   if (_recentShown < _recentWorkouts.length) {
     const remaining = _recentWorkouts.length - _recentShown;
@@ -1580,25 +1614,26 @@ async function openWorkoutModal(w) {
   const ownerName = ownerProfile ? ownerProfile.name : '';
 
   const titlePrefix = isOwn ? '' : ownerName + ' — ';
+  // textContent is already XSS-safe; no escape needed here.
   document.getElementById('wm-title').textContent = titlePrefix + w.activity_type + ' — ' + formatDate(w.workout_date);
 
-  const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
+  const intBadge = w.intensity ? `<span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
   let body = '';
-  body += `<div class="modal-detail-row"><span class="mdr-label">Aktivitet</span><span class="mdr-value">${w.activity_type} ${intBadge}${sourceBadge(w)}</span></div>`;
-  body += `<div class="modal-detail-row"><span class="mdr-label">Datum</span><span class="mdr-value">${w.workout_date}</span></div>`;
+  body += `<div class="modal-detail-row"><span class="mdr-label">Aktivitet</span><span class="mdr-value">${escapeHTML(w.activity_type)} ${intBadge}${sourceBadge(w)}</span></div>`;
+  body += `<div class="modal-detail-row"><span class="mdr-label">Datum</span><span class="mdr-value">${escapeHTML(w.workout_date)}</span></div>`;
   body += `<div class="modal-detail-row"><span class="mdr-label">Tid</span><span class="mdr-value">${w.duration_minutes} min</span></div>`;
   if (w.distance_km) body += `<div class="modal-detail-row"><span class="mdr-label">Distans</span><span class="mdr-value">${w.distance_km} km</span></div>`;
-  if (w.workout_time) body += `<div class="modal-detail-row"><span class="mdr-label">Klockslag</span><span class="mdr-value">${w.workout_time}</span></div>`;
-  if (w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]')) body += `<div class="modal-detail-row"><span class="mdr-label">Anteckning</span><span class="mdr-value">${w.notes}</span></div>`;
+  if (w.workout_time) body += `<div class="modal-detail-row"><span class="mdr-label">Klockslag</span><span class="mdr-value">${escapeHTML(w.workout_time)}</span></div>`;
+  if (w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]')) body += `<div class="modal-detail-row"><span class="mdr-label">Anteckning</span><span class="mdr-value">${escapeHTML(w.notes)}</span></div>`;
   if (w.source === 'strava') {
     const stravaLink = w.strava_activity_id
-      ? `<a href="https://www.strava.com/activities/${w.strava_activity_id}" target="_blank" rel="noopener" class="strava-view-link">View on Strava</a>`
+      ? `<a href="https://www.strava.com/activities/${encodeURIComponent(w.strava_activity_id)}" target="_blank" rel="noopener" class="strava-view-link">View on Strava</a>`
       : '';
     body += `<div class="modal-detail-row"><span class="mdr-label">Källa</span><span class="mdr-value" style="color:#FC4C02;">Strava auto-import ${stravaLink}</span></div>`;
   }
   if (w.source === 'garmin') {
     const garminLink = w.garmin_activity_id
-      ? `<a href="https://connect.garmin.com/modern/activity/${w.garmin_activity_id}" target="_blank" rel="noopener" class="garmin-view-link">View on Garmin</a>`
+      ? `<a href="https://connect.garmin.com/modern/activity/${encodeURIComponent(w.garmin_activity_id)}" target="_blank" rel="noopener" class="garmin-view-link">View on Garmin</a>`
       : '';
     body += `<div class="modal-detail-row"><span class="mdr-label">Källa</span><span class="mdr-value" style="color:#007CC3;">Garmin auto-import ${garminLink}</span></div>`;
   }
@@ -1784,10 +1819,23 @@ async function loadModalSocial(workoutId, isOwn) {
   }
 }
 
+// SECURITY (assessment H1): escape HTML metacharacters for safe interpolation
+// into both element content AND attribute values. Escapes &, <, >, ", ',
+// backtick, and = so the output is safe inside unquoted, single-quoted, or
+// double-quoted attributes. Always pass DB-sourced strings through this before
+// interpolating into an innerHTML template string.
 function escapeHTML(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
+  if (str === null || str === undefined) return '';
+  return String(str).replace(/[&<>"'`=/]/g, (c) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+    '`': '&#96;',
+    '=': '&#61;',
+    '/': '&#47;',
+  }[c]));
 }
 
 function decodePolyline(encoded) {
@@ -2043,6 +2091,7 @@ async function _loadSchema() {
     renderSchema(workouts, plans, targetMonday, deload, invitations, isOwnSchema, profile);
   }
   updateSchemaEmptyBanner();
+  try { await updateCoachCheckinBanner(); } catch (_e) { /* non-blocking */ }
 }
 
 // ── Calendar Strip ──
@@ -2185,7 +2234,7 @@ function buildWorkoutBody(w, opts = {}) {
   if (secondary.length) text += `<div class="wo-secondary">${secondary.join('  ')}</div>`;
 
   if (showMap && w.map_polyline) {
-    return `<div class="wo-body-flex"><div class="wo-body-text">${text}</div><div class="wo-map wo-map-thumb" id="wo-map-${w.id}" data-polyline="${w.map_polyline}"></div></div>`;
+    return `<div class="wo-body-flex"><div class="wo-body-text">${text}</div><div class="wo-map wo-map-thumb" id="wo-map-${escapeHTML(w.id)}" data-polyline="${escapeHTML(w.map_polyline)}"></div></div>`;
   }
 
   return text;
@@ -2419,10 +2468,10 @@ function openPlanModal(dateStr, plan, dayName) {
 
   let body = '';
   if (plan && plan.label) {
-    body += `<div class="modal-detail-row"><span class="mdr-label">Aktivitet</span><span class="mdr-value">${stripDayPrefix(plan.label)}</span></div>`;
+    body += `<div class="modal-detail-row"><span class="mdr-label">Aktivitet</span><span class="mdr-value">${escapeHTML(stripDayPrefix(plan.label))}</span></div>`;
   }
   if (plan && plan.description) {
-    body += `<div class="modal-detail-row"><span class="mdr-label">Beskrivning</span><span class="mdr-value">${plan.description}</span></div>`;
+    body += `<div class="modal-detail-row"><span class="mdr-label">Beskrivning</span><span class="mdr-value">${escapeHTML(plan.description)}</span></div>`;
   }
   if (!plan || (!plan.label && !plan.description)) {
     body += '<div class="text-dim" style="padding:8px 0;">Inget planerat pass</div>';
@@ -2482,9 +2531,9 @@ function renderInviteUserList(query) {
 
   listEl.innerHTML = users.map(p => {
     const initials = p.name.split(' ').map(n => n[0]).join('').toUpperCase();
-    return `<div class="invite-user-row" onclick="selectInviteUser('${p.id}')">
-      <div class="invite-user-avatar">${initials}</div>
-      <div class="invite-user-name">${p.name}</div>
+    return `<div class="invite-user-row" onclick="selectInviteUser('${escapeHTML(p.id)}')">
+      <div class="invite-user-avatar">${escapeHTML(initials)}</div>
+      <div class="invite-user-name">${escapeHTML(p.name)}</div>
     </div>`;
   }).join('');
 }
@@ -2495,8 +2544,8 @@ function selectInviteUser(userId) {
 
   document.getElementById('invite-user-list').innerHTML =
     `<div class="invite-user-row selected">
-      <div class="invite-user-avatar">${_inviteSelectedUser.name.split(' ').map(n => n[0]).join('').toUpperCase()}</div>
-      <div class="invite-user-name">${_inviteSelectedUser.name}</div>
+      <div class="invite-user-avatar">${escapeHTML(_inviteSelectedUser.name.split(' ').map(n => n[0]).join('').toUpperCase())}</div>
+      <div class="invite-user-name">${escapeHTML(_inviteSelectedUser.name)}</div>
       <span class="invite-check">&#10003;</span>
     </div>`;
   document.getElementById('invite-search').classList.add('hidden');
@@ -2635,6 +2684,15 @@ async function loadTrends() {
     hideViewLoading('view-trends');
     document.querySelectorAll('#view-trends .chart-skeleton').forEach(el => el.classList.remove('active'));
   }
+  // Weekly coach check-in history strip (collapsed by default, safe to fail).
+  try {
+    const body = document.getElementById('trends-coach-history-body');
+    const card = document.getElementById('trends-coach-history');
+    if (body && card) {
+      await renderWeeklyCheckinHistory(body);
+      card.classList.toggle('hidden', !body.innerHTML.trim());
+    }
+  } catch (_e) { /* ignore */ }
 }
 async function _loadTrends() {
   const myWorkouts = await fetchWorkouts(currentProfile.id);
@@ -3249,9 +3307,9 @@ async function _loadGroup() {
   const lbEl = document.getElementById('group-leaderboard');
   const rankClasses = ['gold', 'silver', 'bronze'];
   lbEl.innerHTML = weekHours.map((m, i) => `
-    <div class="lb-row clickable" onclick="openMemberProfile('${m.id}')">
+    <div class="lb-row clickable" onclick="openMemberProfile('${escapeHTML(m.id)}')">
       <div class="lb-rank ${rankClasses[i] || ''}">${i + 1}</div>
-      <div class="lb-name">${m.name}</div>
+      <div class="lb-name">${escapeHTML(m.name)}</div>
       <div class="lb-value">${m.hours.toFixed(1)}h</div>
     </div>`).join('');
 
@@ -3275,7 +3333,7 @@ async function _loadGroup() {
   barsEl.innerHTML = members.map((m, i) => {
     const total = allWorkouts.filter(w => w.profile_id === m.id).reduce((s, w) => s + w.duration_minutes, 0) / 60;
     return `<div class="compare-bar-row">
-      <div class="compare-bar-label">${m.name.split(' ')[0]}</div>
+      <div class="compare-bar-label">${escapeHTML(m.name.split(' ')[0])}</div>
       <div class="compare-bar-track"><div class="compare-bar-fill" style="width:${(total/maxTotal)*100}%;background:${colors[i % colors.length]};">${total.toFixed(1)}h</div></div>
     </div>`;
   }).join('');
@@ -3502,16 +3560,21 @@ function updateGroupSettingsCard() {
   const code = _cachedGroupCode || '------';
   const memberEls = _cachedGroupMembers || [];
   const isAdmin = _cachedGroupCreatedBy === currentProfile.id;
+  // SECURITY (assessment H1): member.name is DB-sourced and may contain quotes
+  // or HTML. We escape for HTML body, and since the name is passed into an
+  // onclick attribute, we fetch it by id from a data attribute at click time
+  // instead of inlining it into the attribute value.
   const memberList = memberEls.map(m => {
     const isMe = m.id === currentProfile.id;
+    const safeName = escapeHTML(m.name);
     const removeBtn = isAdmin && !isMe
-      ? `<button class="btn btn-sm btn-danger-text" onclick="removeGroupMember('${m.id}','${m.name}')" style="margin-left:auto;padding:2px 8px;font-size:0.75rem;">Ta bort</button>`
+      ? `<button class="btn btn-sm btn-danger-text" onclick="removeGroupMember('${escapeHTML(m.id)}')" data-member-name="${safeName}" style="margin-left:auto;padding:2px 8px;font-size:0.75rem;">Ta bort</button>`
       : '';
-    return `<div class="sm-member" style="display:flex;align-items:center;gap:8px;">${m.name}${isMe ? ' (du)' : ''}${isAdmin && !isMe ? '<span style="font-size:0.7rem;color:var(--text-muted);margin-left:4px;"></span>' : ''}${removeBtn}</div>`;
+    return `<div class="sm-member" style="display:flex;align-items:center;gap:8px;">${safeName}${isMe ? ' (du)' : ''}${isAdmin && !isMe ? '<span style="font-size:0.7rem;color:var(--text-muted);margin-left:4px;"></span>' : ''}${removeBtn}</div>`;
   }).join('');
   info.innerHTML = `
     <div class="sm-code-row">
-      <span class="sm-code">${code}</span>
+      <span class="sm-code">${escapeHTML(code)}</span>
       <button class="btn btn-sm btn-ghost" onclick="copyGroupCode()">Kopiera</button>
     </div>
     <div class="sm-members">${memberList}</div>
@@ -3521,7 +3584,11 @@ function updateGroupSettingsCard() {
     </button>`;
 }
 
-async function removeGroupMember(profileId, memberName) {
+async function removeGroupMember(profileId) {
+  // Read member name from the button's data attribute rather than as a string
+  // argument (avoids attribute-injection XSS via apostrophe in name).
+  const btn = document.querySelector(`button[data-member-name][onclick*="removeGroupMember('${profileId}')"]`);
+  const memberName = btn ? btn.dataset.memberName : 'medlemmen';
   const confirmed = await showConfirmModal('Ta bort medlem', `Vill du ta bort ${memberName} från gruppen?`, 'Ta bort', true);
   if (!confirmed) return;
   const token = (await sb.auth.getSession()).data.session.access_token;
@@ -3587,16 +3654,19 @@ function renderGroupWeekDetail(allWorkouts, members, plans) {
     const nudgeId = `nudge-${m.id}`;
     const canNudge = !isMe && missedCount > 0;
     const alreadySent = _sentNudges.has(m.id);
+    // SECURITY (assessment H1): m.name is DB-sourced, so we avoid inlining
+    // it into the onclick attribute. Pass only the id and look up the name
+    // from a data attribute at click time.
     const nudgeHTML = canNudge
-      ? `<button class="nudge-btn${alreadySent ? ' sent' : ''}" id="${nudgeId}" onclick="sendNudge('${m.id}', '${m.name}', this)" ${alreadySent ? 'disabled' : ''}>
+      ? `<button class="nudge-btn${alreadySent ? ' sent' : ''}" id="${escapeHTML(nudgeId)}" onclick="sendNudge('${escapeHTML(m.id)}', this)" data-member-name="${escapeHTML(m.name)}" ${alreadySent ? 'disabled' : ''}>
            ${alreadySent ? '✓ Puff skickad' : '👊 Ge en puff'}
          </button>`
       : '';
 
     return `<div class="grp-member-week">
-      <div class="grp-mw-header clickable" onclick="openMemberProfile('${m.id}')">
-        <div class="grp-mw-avatar" style="background:${colors[mi % colors.length]}">${m.name[0].toUpperCase()}</div>
-        <div class="grp-mw-name">${m.name}${isMe ? ' (du)' : ''}</div>
+      <div class="grp-mw-header clickable" onclick="openMemberProfile('${escapeHTML(m.id)}')">
+        <div class="grp-mw-avatar" style="background:${colors[mi % colors.length]}">${escapeHTML(m.name[0].toUpperCase())}</div>
+        <div class="grp-mw-name">${escapeHTML(m.name)}${isMe ? ' (du)' : ''}</div>
         <div class="grp-mw-total">${sessionCount} pass · ${(totalMins / 60).toFixed(1)}h</div>
       </div>
       <div class="grp-mw-days">${daysHTML}</div>
@@ -3696,7 +3766,7 @@ function renderFeedItems(items, members, reactions, comments) {
     const commentCount = wComments.length;
     const lastComment = wComments.length ? wComments[wComments.length - 1] : null;
 
-    const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
+    const intBadge = w.intensity ? `<span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
     const notesSnip = w.notes && w.notes !== 'Importerad' ? `<div class="feed-notes">${escapeHTML(w.notes)}</div>` : '';
 
     let lastCommentHtml = '';
@@ -3709,19 +3779,19 @@ function renderFeedItems(items, members, reactions, comments) {
 
     return `<div class="feed-item" onclick="openFeedWorkout(${globalIdx})">
       <div class="feed-header">
-        <div class="feed-avatar" style="background:${color}">${(member.name || '?')[0].toUpperCase()}</div>
+        <div class="feed-avatar" style="background:${color}">${escapeHTML((member.name || '?')[0].toUpperCase())}</div>
         <div class="feed-info">
-          <div class="feed-name">${member.name || '?'}</div>
-          <div class="feed-date">${formatDate(w.workout_date)}</div>
+          <div class="feed-name">${escapeHTML(member.name || '?')}</div>
+          <div class="feed-date">${escapeHTML(formatDate(w.workout_date))}</div>
         </div>
         <div class="feed-type">${activityEmoji(w.activity_type)} ${w.duration_minutes}'${intBadge}</div>
       </div>
       ${notesSnip}
       <div class="feed-reactions" onclick="event.stopPropagation()">
-        <button class="react-btn-sm${myReaction?.reaction === 'like' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${w.id}','like')">
+        <button class="react-btn-sm${myReaction?.reaction === 'like' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','like')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg> ${likes.length || ''}
         </button>
-        <button class="react-btn-sm${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${w.id}','dislike')">
+        <button class="react-btn-sm${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','dislike')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg> ${dislikes.length || ''}
         </button>
         <span class="feed-comment-count">💬 ${commentCount || ''}</span>
@@ -3750,8 +3820,11 @@ async function refreshFeedReactions() {
   }
 }
 
-async function sendNudge(receiverId, receiverName, btnEl) {
+async function sendNudge(receiverId, btnEl) {
   if (_sentNudges.has(receiverId)) return;
+  // receiverName is read from the button's data attribute when needed, but
+  // currently not used beyond logging — kept for future expansion.
+  // const receiverName = btnEl ? btnEl.dataset.memberName : '';
 
   try {
     const { error } = await sb.from('nudges').insert({
@@ -3779,7 +3852,6 @@ async function sendNudge(receiverId, receiverName, btnEl) {
         },
         body: JSON.stringify({
           receiver_id: receiverId,
-          sender_name: currentProfile.name,
           message: `${currentProfile.name} gav dig en puff! Dags att träna! 💪`
         })
       });
@@ -3844,8 +3916,8 @@ async function loadNudges() {
         const hasPending = invitationNudges.length > 0;
         if (hasPending) {
           actions = `<div class="nudge-actions">
-            <button class="btn btn-sm invite-accept-btn" onclick="event.stopPropagation();acceptInviteFromNudge('${n.sender_id}', '${n.id}')">Acceptera</button>
-            <button class="btn btn-sm invite-decline-btn" onclick="event.stopPropagation();declineInviteFromNudge('${n.sender_id}', '${n.id}')">Avböj</button>
+            <button class="btn btn-sm invite-accept-btn" onclick="event.stopPropagation();acceptInviteFromNudge('${escapeHTML(n.sender_id)}', '${escapeHTML(n.id)}')">Acceptera</button>
+            <button class="btn btn-sm invite-decline-btn" onclick="event.stopPropagation();declineInviteFromNudge('${escapeHTML(n.sender_id)}', '${escapeHTML(n.id)}')">Avböj</button>
           </div>`;
         }
       } else if (nType === 'invitation_accepted') {
@@ -3857,10 +3929,10 @@ async function loadNudges() {
       return `<div class="nudge-item${n.seen ? '' : ' unread'}">
         <div class="nudge-icon">${icon}</div>
         <div class="nudge-content">
-          <div class="nudge-sender">${senderName}</div>
-          <div class="nudge-msg">${n.message}</div>
+          <div class="nudge-sender">${escapeHTML(senderName)}</div>
+          <div class="nudge-msg">${escapeHTML(n.message)}</div>
           ${actions}
-          <div class="nudge-time">${ago}</div>
+          <div class="nudge-time">${escapeHTML(ago)}</div>
         </div>
       </div>`;
     }).join('');
@@ -4042,12 +4114,32 @@ function updateStravaUI() {
   }
 }
 
-function connectStrava() {
+async function connectStrava() {
   if (!STRAVA_CLIENT_ID || !currentProfile) return;
-  const scope = 'activity:read_all';
-  const state = currentProfile.id;
-  const url = `https://www.strava.com/oauth/authorize?client_id=${STRAVA_CLIENT_ID}&redirect_uri=${encodeURIComponent(STRAVA_REDIRECT_URI)}&response_type=code&scope=${scope}&state=${state}&approval_prompt=force`;
-  window.location.href = url;
+  try {
+    // SECURITY (assessment H2): fetch a random, single-use `state` from the
+    // `oauth-state` Edge Function instead of using the guessable profile_id.
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/oauth-state', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ provider: 'strava' }),
+    });
+    if (!res.ok) {
+      await showAlertModal('Fel', 'Kunde inte starta Strava-anslutning. Försök igen.');
+      return;
+    }
+    const { state } = await res.json();
+    const scope = 'activity:read_all';
+    const url = `https://www.strava.com/oauth/authorize?client_id=${STRAVA_CLIENT_ID}&redirect_uri=${encodeURIComponent(STRAVA_REDIRECT_URI)}&response_type=code&scope=${scope}&state=${encodeURIComponent(state)}&approval_prompt=force`;
+    window.location.href = url;
+  } catch (e) {
+    console.error('connectStrava error:', e);
+    await showAlertModal('Fel', 'Kunde inte starta Strava-anslutning. Försök igen.');
+  }
 }
 
 async function disconnectStrava() {
@@ -4250,11 +4342,42 @@ function updateGarminUI() {
   }
 }
 
-function connectGarmin() {
+async function connectGarmin() {
   if (!GARMIN_CLIENT_ID || !currentProfile) return;
-  const state = currentProfile.id;
-  const url = `${GARMIN_AUTH_URL}?client_id=${GARMIN_CLIENT_ID}&redirect_uri=${encodeURIComponent(GARMIN_REDIRECT_URI)}&response_type=code&scope=activity:read&state=${state}`;
-  window.location.href = url;
+  try {
+    // SECURITY (assessment H2 + H3): request a random `state` and a PKCE
+    // `code_challenge` from the server. The matching `code_verifier` stays
+    // on the server; we never receive it or include it in the URL.
+    const { data: { session } } = await sb.auth.getSession();
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/oauth-state', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ provider: 'garmin' }),
+    });
+    if (!res.ok) {
+      await showAlertModal('Fel', 'Kunde inte starta Garmin-anslutning. Försök igen.');
+      return;
+    }
+    const { state, code_challenge, code_challenge_method } = await res.json();
+    const qs = new URLSearchParams({
+      client_id: GARMIN_CLIENT_ID,
+      redirect_uri: GARMIN_REDIRECT_URI,
+      response_type: 'code',
+      scope: 'activity:read',
+      state,
+    });
+    if (code_challenge) {
+      qs.set('code_challenge', code_challenge);
+      qs.set('code_challenge_method', code_challenge_method || 'S256');
+    }
+    window.location.href = `${GARMIN_AUTH_URL}?${qs.toString()}`;
+  } catch (e) {
+    console.error('connectGarmin error:', e);
+    await showAlertModal('Fel', 'Kunde inte starta Garmin-anslutning. Försök igen.');
+  }
 }
 
 async function disconnectGarmin() {
@@ -4396,7 +4519,7 @@ async function openMemberProfile(memberId) {
       const pct = Math.round((count / maxCount) * 100);
       const color = ACTIVITY_COLORS[type] || '#555';
       html += `<div class="mp-type-row">
-        <span class="mp-type-label">${activityEmoji(type)} ${type}</span>
+        <span class="mp-type-label">${activityEmoji(type)} ${escapeHTML(type)}</span>
         <div class="mp-type-bar-bg"><div class="mp-type-bar" style="width:${pct}%;background:${color};"></div></div>
         <span class="mp-type-count">${count}</span>
       </div>`;
@@ -4409,14 +4532,18 @@ async function openMemberProfile(memberId) {
   if (recentSlice.length > 0) {
     html += '<div class="mp-section-title">Senaste pass</div>';
     html += '<div class="mp-recent">';
-    recentSlice.forEach(w => {
+    // SECURITY (assessment H1): wire click handlers after render instead of
+    // serialising the DB row into an inline onclick attribute (which allowed
+    // attribute-injection via field values containing single quotes / HTML).
+    const mpRecent = recentSlice.map((w, i) => ({ w, idx: i }));
+    mpRecent.forEach(({ w, idx }) => {
       const distStr = w.distance_km ? ` | ${w.distance_km} km` : '';
-      const intBadge = w.intensity ? `<span class="intensity-badge">${w.intensity}</span>` : '';
-      const mapThumb = w.map_polyline ? `<div class="wo-map wo-map-mini" data-polyline="${w.map_polyline}"></div>` : '';
-      html += `<div class="workout-item clickable${w.map_polyline ? ' workout-item-with-map' : ''}" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
+      const intBadge = w.intensity ? `<span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
+      const mapThumb = w.map_polyline ? `<div class="wo-map wo-map-mini" data-polyline="${escapeHTML(w.map_polyline)}"></div>` : '';
+      html += `<div class="workout-item clickable${w.map_polyline ? ' workout-item-with-map' : ''}" data-mp-recent-idx="${idx}">
         <div class="workout-icon" style="background:${ACTIVITY_COLORS[w.activity_type] || '#555'}22;">${activityEmoji(w.activity_type)}</div>
         <div class="workout-info">
-          <div class="name">${w.activity_type}${intBadge}</div>
+          <div class="name">${escapeHTML(w.activity_type)}${intBadge}</div>
           <div class="meta">${formatDate(w.workout_date)}</div>
         </div>
         <div class="workout-info duration">${w.duration_minutes} min${distStr}</div>
@@ -4427,6 +4554,14 @@ async function openMemberProfile(memberId) {
   }
 
   bodyEl.innerHTML = html;
+  // Attach click handlers for recent-workout items (see comment above).
+  if (recentSlice.length > 0) {
+    bodyEl.querySelectorAll('[data-mp-recent-idx]').forEach(node => {
+      const idx = parseInt(node.getAttribute('data-mp-recent-idx'), 10);
+      const w = recentSlice[idx];
+      if (w) node.addEventListener('click', () => openWorkoutModal(w));
+    });
+  }
   requestAnimationFrame(() => initMapThumbnails());
 }
 
@@ -4933,9 +5068,9 @@ function buildPlanPreviewHTML(plan, preview, weekIdx) {
     if (wo?.is_rest) {
       grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-rest">Vila</span></div>`;
     } else if (wo) {
-      const zone = wo.intensity_zone ? `<span class="zone-badge zone-${wo.intensity_zone.toLowerCase()}" style="font-size:0.6rem;padding:1px 4px;">${wo.intensity_zone}</span>` : '';
+      const zone = wo.intensity_zone ? `<span class="zone-badge zone-${escapeHTML(wo.intensity_zone.toLowerCase())}" style="font-size:0.6rem;padding:1px 4px;">${escapeHTML(wo.intensity_zone)}</span>` : '';
       const dur = wo.target_duration_minutes ? `${wo.target_duration_minutes}m` : '';
-      grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-label">${wo.label || wo.activity_type}</span><span class="pm-prev-meta">${zone} ${dur}</span></div>`;
+      grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-label">${escapeHTML(wo.label || wo.activity_type)}</span><span class="pm-prev-meta">${zone} ${dur}</span></div>`;
     } else {
       grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-rest">—</span></div>`;
     }
@@ -5098,16 +5233,16 @@ async function openPlanManager() {
     html += '<div class="pm-section-label">Manuella scheman</div>';
     legacyPeriods.forEach(p => {
       const active = isLegacyActive && todayStr >= p.start_date && todayStr <= p.end_date;
-      html += `<div class="plan-manager-item${active ? ' active' : ''}" onclick="toggleLegacyPreview('${p.id}')">
+      html += `<div class="plan-manager-item${active ? ' active' : ''}" onclick="toggleLegacyPreview('${escapeHTML(p.id)}')">
         <span style="font-size:1.1rem;">📋</span>
         <div class="pm-info">
-          <div class="pm-name">${p.name || 'Manuellt schema'}</div>
-          <div class="pm-meta">${p.start_date} — ${p.end_date}</div>
+          <div class="pm-name">${escapeHTML(p.name || 'Manuellt schema')}</div>
+          <div class="pm-meta">${escapeHTML(p.start_date)} — ${escapeHTML(p.end_date)}</div>
         </div>
         <span class="pm-status-badge ${active ? 'active' : 'archived'}">${active ? 'Aktiv' : 'Tillgänglig'}</span>
         <svg class="pm-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
-      <div class="pm-preview-panel hidden" id="pm-preview-legacy-${p.id}"></div>`;
+      <div class="pm-preview-panel hidden" id="pm-preview-legacy-${escapeHTML(p.id)}"></div>`;
     });
   }
 
@@ -5285,7 +5420,7 @@ async function editLegacyPeriod(periodId) {
   modal.innerHTML = `
     <div class="modal-box lpe-modal">
       <div class="modal-header">
-        <h3>Redigera ${period.name || 'manuellt schema'}</h3>
+        <h3>Redigera ${escapeHTML(period.name || 'manuellt schema')}</h3>
         <button class="btn-close" onclick="closeLegacyPeriodEditor()">×</button>
       </div>
 
@@ -5784,7 +5919,7 @@ async function submitPlanEdit() {
   } catch (e) {
     const loadingEl = document.getElementById('plan-edit-loading');
     if (loadingEl) loadingEl.remove();
-    chatEl.innerHTML += `<div class="plan-edit-msg bot" style="color:var(--red);">Fel: ${e.message}</div>`;
+    chatEl.innerHTML += `<div class="plan-edit-msg bot" style="color:var(--red);">Fel: ${escapeHTML(e.message)}</div>`;
   }
   sendBtn.disabled = false;
   chatEl.scrollTop = chatEl.scrollHeight;
@@ -5828,7 +5963,7 @@ async function approvePlanEdit() {
   } catch (e) {
     const applyEl = document.getElementById('plan-edit-applying');
     if (applyEl) applyEl.remove();
-    chatEl.innerHTML += `<div class="plan-edit-msg bot" style="color:var(--red);">Fel: ${e.message}</div>`;
+    chatEl.innerHTML += `<div class="plan-edit-msg bot" style="color:var(--red);">Fel: ${escapeHTML(e.message)}</div>`;
   }
   chatEl.scrollTop = chatEl.scrollHeight;
 }
@@ -5928,12 +6063,12 @@ async function topbarSearchUsers() {
     } else if (status === 'pending') {
       actionHtml = '<span style="font-size:0.72rem;color:var(--text-dim);">Väntande</span>';
     } else {
-      actionHtml = `<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();topbarAddFriend('${p.id}',this)">Lägg till</button>`;
+      actionHtml = `<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();topbarAddFriend('${escapeHTML(p.id)}',this)">Lägg till</button>`;
     }
-    return `<div class="topbar-search-result" onclick="topbarViewProfile('${p.id}')">
-      <div class="tsr-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1.2rem' : '0.8rem'};">${avatar}</div>
+    return `<div class="topbar-search-result" onclick="topbarViewProfile('${escapeHTML(p.id)}')">
+      <div class="tsr-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1.2rem' : '0.8rem'};">${escapeHTML(avatar)}</div>
       <div class="tsr-info">
-        <div class="tsr-name">${p.name}</div>
+        <div class="tsr-name">${escapeHTML(p.name)}</div>
         <div class="tsr-status">${status === 'accepted' ? 'Vän' : ''}</div>
       </div>
       ${actionHtml}
@@ -6003,10 +6138,10 @@ async function searchFriends() {
   resultsEl.innerHTML = matches.slice(0, 8).map(p => {
     const isFriend = existingIds.has(p.id);
     return `<div class="friend-search-item">
-      <span class="friend-search-item-name">${p.name}</span>
+      <span class="friend-search-item-name">${escapeHTML(p.name)}</span>
       ${isFriend
         ? '<span style="font-size:0.75rem;color:var(--text-dim);">Redan tillagd</span>'
-        : `<button class="btn btn-sm btn-primary" onclick="sendFriendRequest('${p.id}')">Lägg till</button>`
+        : `<button class="btn btn-sm btn-primary" onclick="sendFriendRequest('${escapeHTML(p.id)}')">Lägg till</button>`
       }
     </div>`;
   }).join('');
@@ -6096,9 +6231,9 @@ async function renderFriendList() {
     const color = p.color || '#2E86C1';
     const isEmoji = p.avatar && p.avatar.length <= 2;
     return `<div class="friend-item">
-      <div class="friend-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1.2rem' : '0.8rem'};">${avatar}</div>
-      <span class="friend-name">${p.name}</span>
-      <button class="friend-remove-btn" onclick="removeFriend('${fid}')">Ta bort</button>
+      <div class="friend-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1.2rem' : '0.8rem'};">${escapeHTML(avatar)}</div>
+      <span class="friend-name">${escapeHTML(p.name)}</span>
+      <button class="friend-remove-btn" onclick="removeFriend('${escapeHTML(fid)}')">Ta bort</button>
     </div>`;
   }).join('');
 }
@@ -6200,52 +6335,77 @@ async function renderSocialFeed(append) {
     const color = p?.color || '#2E86C1';
     const isEmoji = p?.avatar && p.avatar.length <= 2;
     const wDate = new Date(w.workout_date).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' });
-    const intBadge = w.intensity ? ` <span class="intensity-badge">${w.intensity}</span>` : '';
+    const intBadge = w.intensity ? ` <span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
     const distText = w.distance_km ? ` · ${w.distance_km} km` : '';
     const wLikes = likesByWorkout[w.id] || [];
     const myLike = wLikes.find(l => l.profile_id === currentProfile.id);
     const wComments = commentsByWorkout[w.id] || [];
 
+    // SECURITY (assessment H1): comment author name and body are DB-sourced;
+    // always escape before interpolating into innerHTML.
     const commentsHtml = wComments.slice(-3).map(c => {
       const cp = allProfiles.find(pr => pr.id === c.profile_id);
       return `<div class="sf-comment">
-        <span class="sf-comment-name">${cp?.name || 'Okänd'}</span>
-        <span class="sf-comment-text">${c.text}</span>
+        <span class="sf-comment-name">${escapeHTML(cp?.name || 'Okänd')}</span>
+        <span class="sf-comment-text">${escapeHTML(c.text)}</span>
       </div>`;
     }).join('');
 
-    const mapHtml = w.map_polyline ? `<div class="wo-map wo-map-side" id="sf-map-${w.id}" data-polyline="${w.map_polyline}"></div>` : '';
+    const mapHtml = w.map_polyline ? `<div class="wo-map wo-map-side" id="sf-map-${escapeHTML(w.id)}" data-polyline="${escapeHTML(w.map_polyline)}"></div>` : '';
 
-    return `<div class="social-feed-item" data-workout-id="${w.id}">
+    // SECURITY: pass workout id via data-attribute and look up the full object
+    // on click rather than serialising DB-sourced fields into an inline handler.
+    return `<div class="social-feed-item" data-workout-id="${escapeHTML(w.id)}">
       <div class="sf-header">
-        <div class="sf-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1rem' : '0.75rem'};">${avatar}</div>
-        <span class="sf-name">${name}</span>
-        <span class="sf-date">${wDate}</span>
+        <div class="sf-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1rem' : '0.75rem'};">${escapeHTML(avatar)}</div>
+        <span class="sf-name">${escapeHTML(name)}</span>
+        <span class="sf-date">${escapeHTML(wDate)}</span>
       </div>
-      <div class="sf-body sf-body-clickable${w.map_polyline ? ' sf-body-with-map' : ''}" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
+      <div class="sf-body sf-body-clickable${w.map_polyline ? ' sf-body-with-map' : ''}" data-workout-open-id="${escapeHTML(w.id)}">
         <div class="sf-body-text">
           ${buildWorkoutBody(w)}
-          ${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? `<div class="wo-notes">${w.notes}</div>` : ''}
+          ${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? `<div class="wo-notes">${escapeHTML(w.notes)}</div>` : ''}
         </div>
         ${mapHtml}
       </div>
       <div class="sf-actions">
-        <button class="sf-action-btn${myLike ? ' liked' : ''}" onclick="toggleSocialLike('${w.id}', this)">
+        <button class="sf-action-btn${myLike ? ' liked' : ''}" onclick="toggleSocialLike('${escapeHTML(w.id)}', this)">
           <svg viewBox="0 0 24 24" fill="${myLike ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
           ${wLikes.length > 0 ? wLikes.length : ''}
         </button>
-        <button class="sf-action-btn" onclick="toggleSocialComments('${w.id}')">
+        <button class="sf-action-btn" onclick="toggleSocialComments('${escapeHTML(w.id)}')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           ${wComments.length > 0 ? wComments.length : ''}
         </button>
       </div>
-      <div class="sf-comments hidden" id="sf-comments-${w.id}">${commentsHtml}</div>
-      <div class="sf-comment-form hidden" id="sf-comment-form-${w.id}">
-        <input type="text" placeholder="Skriv en kommentar..." onkeydown="if(event.key==='Enter')submitSocialComment('${w.id}',this)">
-        <button onclick="submitSocialComment('${w.id}',this.previousElementSibling)">Skicka</button>
+      <div class="sf-comments hidden" id="sf-comments-${escapeHTML(w.id)}">${commentsHtml}</div>
+      <div class="sf-comment-form hidden" id="sf-comment-form-${escapeHTML(w.id)}">
+        <input type="text" placeholder="Skriv en kommentar..." onkeydown="if(event.key==='Enter')submitSocialComment('${escapeHTML(w.id)}',this)">
+        <button onclick="submitSocialComment('${escapeHTML(w.id)}',this.previousElementSibling)">Skicka</button>
       </div>
     </div>`;
   }).join('');
+
+  // Wire workout-open clicks via delegation (set up once per feedEl). This
+  // avoids stringifying DB rows into inline onclick attributes and avoids
+  // double-binding when new items are appended.
+  if (!feedEl._workoutOpenDelegated) {
+    feedEl._workoutOpenDelegated = true;
+    feedEl.addEventListener('click', (ev) => {
+      const node = ev.target.closest && ev.target.closest('[data-workout-open-id]');
+      if (!node) return;
+      const wid = node.getAttribute('data-workout-open-id');
+      const wObj = (window._socialFeedWorkouts || []).find(x => x.id === wid);
+      if (wObj) openWorkoutModal(wObj);
+    });
+  }
+  // Keep a lookup of the most recently rendered workouts for the delegated
+  // handler above (appended loads extend this list).
+  if (append) {
+    window._socialFeedWorkouts = (window._socialFeedWorkouts || []).concat(workouts);
+  } else {
+    window._socialFeedWorkouts = workouts.slice();
+  }
 
   if (append) {
     feedEl.innerHTML += html;
@@ -6326,8 +6486,8 @@ async function submitSocialComment(workoutId, input) {
     commentsEl.innerHTML = (comments || []).slice(-5).map(c => {
       const cp = allProfiles.find(pr => pr.id === c.profile_id);
       return `<div class="sf-comment">
-        <span class="sf-comment-name">${cp?.name || 'Okänd'}</span>
-        <span class="sf-comment-text">${c.text}</span>
+        <span class="sf-comment-name">${escapeHTML(cp?.name || 'Okänd')}</span>
+        <span class="sf-comment-text">${escapeHTML(c.text)}</span>
       </div>`;
     }).join('');
 
@@ -6362,6 +6522,7 @@ document.addEventListener('keydown', (e) => {
     ['workout-modal', closeWorkoutModal],
     ['member-profile-modal', closeMemberProfile],
     ['friends-modal', closeFriendsModal],
+    ['coach-checkin-modal', closeCoachCheckin],
     ['plan-edit-modal', closePlanEditModal],
     ['plan-manager', closePlanManager],
     ['plan-wizard', closePlanWizard],
@@ -6377,3 +6538,492 @@ document.addEventListener('keydown', (e) => {
     }
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Weekly Coach Check-In
+// ═══════════════════════════════════════════════════════════════════════════
+
+const CC_STEP_IDS = [0, 1, 2, 3, 4];
+
+let _ccState = null;        // active wizard state
+let _ccCheckin = null;      // response from propose (checkin_id, changes, coach_note, ...)
+let _ccBusy = false;
+
+function _ccReviewMonday(now) {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  const dow = (d.getDay() + 6) % 7; // Mon=0..Sun=6
+  if (dow === 6) {
+    // Sunday — review the current ISO week (week_not_yet_closed on server)
+    d.setDate(d.getDate() - 6);
+    return d;
+  }
+  // Mon–Sat → previous Monday
+  d.setDate(d.getDate() - dow - 7);
+  return d;
+}
+
+async function updateCoachCheckinBanner() {
+  const banner = document.getElementById('coach-checkin-banner');
+  if (!banner) return;
+  banner.classList.add('hidden');
+
+  if (!currentProfile || !_activePlan) return;
+
+  const now = new Date();
+  const dow = (now.getDay() + 6) % 7;
+  // Sun (6), Mon (0), Tue (1)
+  const inWindow = dow === 6 || dow === 0 || dow === 1;
+  if (!inWindow) return;
+
+  const reviewMon = _ccReviewMonday(now);
+  const weekStartISO = isoDate(reviewMon);
+
+  try {
+    const { data } = await sb.from('weekly_checkins')
+      .select('id, status')
+      .eq('profile_id', currentProfile.id)
+      .eq('week_start_date', weekStartISO)
+      .maybeSingle();
+    if (data && (data.status === 'applied' || data.status === 'declined')) {
+      return; // already handled this week
+    }
+    // pending or null → show banner. If pending, user can resume to the diff.
+    const titleEl = banner.querySelector('.cc-banner-title');
+    if (data && data.status === 'pending') {
+      titleEl.textContent = 'Fortsätt veckoavstämningen';
+      banner.dataset.resume = data.id;
+    } else {
+      titleEl.textContent = 'Dags för veckoavstämning med coachen';
+      delete banner.dataset.resume;
+    }
+    banner.classList.remove('hidden');
+  } catch (_e) {
+    // Fail silently — banner stays hidden.
+  }
+}
+
+async function openCoachCheckin() {
+  if (!_activePlan) {
+    alert('Veckoavstämningen kräver en aktiv AI-plan. Skapa en plan först.');
+    return;
+  }
+
+  const banner = document.getElementById('coach-checkin-banner');
+  const resumeId = banner?.dataset?.resume;
+
+  _ccState = {
+    step: 0,
+    overall_feel: null,
+    injury_level: null,
+    injury_note: '',
+    injury_side: null,
+    hardest_session_feel: null,
+    long_run_feel: null,
+    unavailable_days: [],
+    next_week_context: '',
+    free_text: '',
+    hasQuality: false,
+    hasLongRun: false,
+  };
+  _ccCheckin = null;
+  _ccBusy = false;
+
+  // Reset DOM state
+  document.querySelectorAll('#coach-checkin-modal .cc-feel-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#coach-checkin-modal .cc-injury-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#coach-checkin-modal .cc-option-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#coach-checkin-modal .intensity-pill').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#cc-unavail-days .wiz-day-btn').forEach(b => b.classList.remove('active'));
+  const noteEl = document.getElementById('cc-injury-note'); if (noteEl) noteEl.value = '';
+  const ctxEl = document.getElementById('cc-next-context'); if (ctxEl) ctxEl.value = '';
+  const ftEl = document.getElementById('cc-free-text'); if (ftEl) ftEl.value = '';
+  document.getElementById('cc-injury-details').classList.add('hidden');
+  document.getElementById('cc-step-loading').style.display = 'none';
+  document.getElementById('cc-step-diff').style.display = 'none';
+  document.getElementById('cc-step-done').style.display = 'none';
+
+  _ccWireHandlers();
+
+  // Precompute whether last week had a quality session / long run so we can skip steps.
+  try {
+    const reviewMon = _ccReviewMonday(new Date());
+    const weekEnd = addDays(reviewMon, 6);
+    const pws = await fetchPlanWorkoutsByDate(_activePlan.id, isoDate(reviewMon), isoDate(weekEnd));
+    _ccState.hasQuality = pws.some(w => !w.is_rest && (
+      ['Z4', 'Z5', 'mixed'].includes(w.intensity_zone) ||
+      /tröskel|tempo|vo2|interval|fartlek|kvalitet/i.test(w.label || '')
+    ));
+    const runs = pws.filter(w => w.activity_type === 'Löpning' && !w.is_rest);
+    const explicitLong = runs.find(w => /långpass|long run/i.test(w.label || ''));
+    const longest = runs.sort((a, b) => (b.target_duration_minutes || 0) - (a.target_duration_minutes || 0))[0];
+    _ccState.hasLongRun = !!explicitLong || (longest && (longest.target_duration_minutes || 0) >= 60);
+  } catch (_e) { /* ignore */ }
+
+  document.getElementById('coach-checkin-modal').classList.remove('hidden');
+
+  if (resumeId) {
+    // Jump straight to the diff using the stored pending row.
+    await _ccResumePending(resumeId);
+  } else {
+    _ccGoToStep(0);
+  }
+}
+
+function closeCoachCheckin() {
+  document.getElementById('coach-checkin-modal').classList.add('hidden');
+  _ccState = null;
+  _ccCheckin = null;
+}
+
+function _ccWireHandlers() {
+  document.querySelectorAll('#cc-feel-grid .cc-feel-btn').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('#cc-feel-grid .cc-feel-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      _ccState.overall_feel = parseInt(btn.dataset.value);
+    };
+  });
+  document.querySelectorAll('#cc-injury-grid .cc-injury-btn').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('#cc-injury-grid .cc-injury-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      _ccState.injury_level = btn.dataset.value;
+      const needDetail = (_ccState.injury_level === 'niggle' || _ccState.injury_level === 'pain');
+      document.getElementById('cc-injury-details').classList.toggle('hidden', !needDetail);
+    };
+  });
+  document.querySelectorAll('#cc-injury-side .intensity-pill').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('#cc-injury-side .intensity-pill').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      _ccState.injury_side = btn.dataset.value;
+    };
+  });
+  document.querySelectorAll('#cc-hardest-grid .cc-option-btn').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('#cc-hardest-grid .cc-option-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      _ccState.hardest_session_feel = btn.dataset.value;
+    };
+  });
+  document.querySelectorAll('#cc-longrun-grid .cc-option-btn').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('#cc-longrun-grid .cc-option-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      _ccState.long_run_feel = btn.dataset.value;
+    };
+  });
+  document.querySelectorAll('#cc-unavail-days .wiz-day-btn').forEach(btn => {
+    btn.onclick = () => {
+      btn.classList.toggle('active');
+      const d = parseInt(btn.dataset.day);
+      const set = new Set(_ccState.unavailable_days);
+      if (btn.classList.contains('active')) set.add(d); else set.delete(d);
+      _ccState.unavailable_days = [...set].sort();
+    };
+  });
+}
+
+function _ccVisibleSteps() {
+  // Injury=paused short-circuits: skip hardest + long run (no point, it's a recovery week).
+  const skipDetail = _ccState.injury_level === 'paused';
+  return CC_STEP_IDS.filter(s => {
+    if (s === 2) return _ccState.hasQuality && !skipDetail;
+    if (s === 3) return _ccState.hasLongRun && !skipDetail;
+    return true;
+  });
+}
+
+function _ccGoToStep(target) {
+  _ccState.step = target;
+  const visible = _ccVisibleSteps();
+  const idx = visible.indexOf(target);
+  const total = visible.length;
+
+  document.querySelectorAll('#coach-checkin-modal .cc-step').forEach(el => el.classList.remove('active'));
+  const current = document.querySelector(`#coach-checkin-modal .cc-step[data-step="${target}"]`);
+  if (current) current.classList.add('active');
+
+  const banner = document.getElementById('cc-step-banner');
+  banner.textContent = `Steg ${idx + 1} av ${total}`;
+
+  const progress = document.getElementById('cc-progress');
+  progress.innerHTML = visible.map((_s, i) => {
+    const cls = i < idx ? 'wizard-step-dot done' : i === idx ? 'wizard-step-dot active' : 'wizard-step-dot';
+    const dot = `<div class="${cls}"></div>`;
+    if (i < visible.length - 1) return dot + '<div class="wizard-step-line"></div>';
+    return dot;
+  }).join('');
+
+  const prev = document.getElementById('cc-prev');
+  prev.style.visibility = idx === 0 ? 'hidden' : 'visible';
+  const next = document.getElementById('cc-next');
+  next.textContent = idx === total - 1 ? 'Skicka till coachen' : 'Nästa';
+}
+
+function ccStepPrev() {
+  if (!_ccState) return;
+  const visible = _ccVisibleSteps();
+  const idx = visible.indexOf(_ccState.step);
+  if (idx > 0) _ccGoToStep(visible[idx - 1]);
+}
+
+async function ccStepNext() {
+  if (!_ccState || _ccBusy) return;
+  // Validate current step
+  const s = _ccState.step;
+  if (s === 0 && _ccState.overall_feel == null) { alert('Välj hur veckan kändes.'); return; }
+  if (s === 1 && !_ccState.injury_level) { alert('Välj skadeläge.'); return; }
+
+  if (s === 4) {
+    _ccState.next_week_context = (document.getElementById('cc-next-context').value || '').trim();
+    _ccState.free_text = (document.getElementById('cc-free-text').value || '').trim();
+    _ccState.injury_note = (document.getElementById('cc-injury-note').value || '').trim();
+    await _ccSubmitCheckin();
+    return;
+  }
+
+  const visible = _ccVisibleSteps();
+  const idx = visible.indexOf(s);
+  if (idx < visible.length - 1) _ccGoToStep(visible[idx + 1]);
+}
+
+async function _ccSubmitCheckin() {
+  _ccBusy = true;
+  document.querySelectorAll('#coach-checkin-modal .cc-step').forEach(el => {
+    if (el.id !== 'cc-step-loading') el.classList.remove('active');
+    el.style.display = el.id === 'cc-step-loading' ? 'block' : '';
+  });
+  document.getElementById('cc-step-loading').style.display = 'block';
+  document.getElementById('cc-nav').style.display = 'none';
+  document.getElementById('cc-progress').innerHTML = '';
+  document.getElementById('cc-step-banner').textContent = 'Coachen tittar på veckan...';
+
+  try {
+    const session = (await sb.auth.getSession()).data.session;
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/weekly-checkin', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        mode: 'propose',
+        responses: {
+          overall_feel: _ccState.overall_feel,
+          injury_level: _ccState.injury_level,
+          injury_note: _ccState.injury_note || undefined,
+          injury_side: _ccState.injury_side || undefined,
+          hardest_session_feel: _ccState.hardest_session_feel || undefined,
+          long_run_feel: _ccState.long_run_feel || undefined,
+          unavailable_days: _ccState.unavailable_days,
+          next_week_context: _ccState.next_week_context || undefined,
+          free_text: _ccState.free_text || undefined,
+        },
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Check-in misslyckades');
+
+    _ccCheckin = data;
+    _ccRenderDiff();
+  } catch (e) {
+    document.getElementById('cc-step-loading').style.display = 'none';
+    document.getElementById('cc-nav').style.display = '';
+    document.getElementById('cc-step-banner').textContent = 'Något gick fel';
+    alert('Kunde inte hämta coachens förslag: ' + e.message);
+  } finally {
+    _ccBusy = false;
+  }
+}
+
+async function _ccResumePending(checkinId) {
+  document.getElementById('cc-step-loading').style.display = 'block';
+  document.getElementById('cc-nav').style.display = 'none';
+  document.getElementById('cc-progress').innerHTML = '';
+  document.getElementById('cc-step-banner').textContent = 'Hämtar din avstämning...';
+  try {
+    const { data, error } = await sb.from('weekly_checkins')
+      .select('id, proposed_changes, coach_note, objective_summary')
+      .eq('id', checkinId)
+      .single();
+    if (error || !data) throw new Error('Hittade inte avstämningen');
+    _ccCheckin = {
+      checkin_id: data.id,
+      changes: data.proposed_changes || [],
+      coach_note: data.coach_note || '',
+      summary: {
+        next_week_phase: data.objective_summary?.next_week_phase || null,
+        acwr: data.objective_summary?.acwr,
+        acwr_band: data.objective_summary?.acwr_band,
+      },
+    };
+    _ccRenderDiff();
+  } catch (e) {
+    alert('Kunde inte återuppta avstämningen: ' + e.message);
+    closeCoachCheckin();
+  }
+}
+
+function _ccRenderDiff() {
+  document.getElementById('cc-step-loading').style.display = 'none';
+  document.getElementById('cc-step-banner').textContent = 'Coachens förslag';
+  document.getElementById('cc-progress').innerHTML = '';
+
+  const diffEl = document.getElementById('cc-step-diff');
+  diffEl.style.display = 'block';
+  document.getElementById('cc-coach-note').textContent = _ccCheckin.coach_note || '';
+
+  const listEl = document.getElementById('cc-diff-list');
+  const emptyEl = document.getElementById('cc-diff-empty');
+  const changes = _ccCheckin.changes || [];
+
+  if (changes.length === 0) {
+    listEl.innerHTML = '';
+    emptyEl.classList.remove('hidden');
+  } else {
+    emptyEl.classList.add('hidden');
+    const dayNames = ['Mån', 'Tis', 'Ons', 'Tors', 'Fre', 'Lör', 'Sön'];
+    listEl.innerHTML = changes.map(c => {
+      const cur = c.current_workout || {};
+      const prop = c.proposed_workout || {};
+      const isMove = c.action === 'move_session';
+      const dayLabel = isMove
+        ? `${dayNames[c.from_day] || ''} → ${dayNames[c.to_day] || ''}`
+        : (dayNames[c.day_of_week] || '');
+      const curLabel = cur.is_rest ? 'Vila' : `${cur.label || cur.activity_type || ''} ${cur.target_duration_minutes ? cur.target_duration_minutes + ' min' : ''}`.trim();
+      const curZone = cur.intensity_zone ? `<span class="zone-badge zone-${escapeHTML(cur.intensity_zone)}">${escapeHTML(cur.intensity_zone)}</span>` : '';
+      const propLabel = prop.is_rest ? 'Vila' : `${prop.label || prop.activity_type || ''} ${prop.target_duration_minutes ? prop.target_duration_minutes + ' min' : ''}`.trim();
+      const propZone = prop.intensity_zone ? `<span class="zone-badge zone-${escapeHTML(prop.intensity_zone)}">${escapeHTML(prop.intensity_zone)}</span>` : '';
+      return `
+        <label class="cc-diff-card" data-change-id="${escapeHTML(c.id)}">
+          <input type="checkbox" class="cc-diff-check" checked>
+          <div class="cc-diff-body">
+            <div class="cc-diff-day">${escapeHTML(dayLabel)}</div>
+            <div class="cc-diff-flow">
+              <div class="cc-diff-current"><span class="cc-diff-label">${escapeHTML(curLabel)}</span>${curZone}</div>
+              <div class="cc-diff-arrow" aria-hidden="true">↓</div>
+              <div class="cc-diff-proposed"><span class="cc-diff-label">${escapeHTML(propLabel)}</span>${propZone}</div>
+            </div>
+            <div class="cc-diff-reason">${escapeHTML(c.reason_sv || '')}</div>
+          </div>
+        </label>`;
+    }).join('');
+  }
+
+  const navEl = document.getElementById('cc-nav');
+  navEl.style.display = '';
+  navEl.innerHTML = changes.length === 0
+    ? `<button class="btn btn-primary btn-sm" onclick="_ccDeclineAll()">Klart</button>`
+    : `<button class="btn btn-ghost btn-sm" onclick="_ccDeclineAll()">Neka allt</button>
+       <button class="btn btn-primary btn-sm" onclick="_ccAcceptSelected()">Acceptera markerade</button>`;
+}
+
+async function _ccAcceptSelected() {
+  if (!_ccCheckin) return;
+  const ids = [...document.querySelectorAll('#cc-diff-list .cc-diff-card')]
+    .filter(el => el.querySelector('.cc-diff-check')?.checked)
+    .map(el => el.dataset.changeId);
+
+  if (ids.length === 0) {
+    if (!confirm('Inga ändringar markerade — vill du neka allt?')) return;
+    return _ccDeclineAll();
+  }
+
+  await _ccPostAction('apply', { checkin_id: _ccCheckin.checkin_id, accepted_change_ids: ids },
+    ids.length === (_ccCheckin.changes?.length || 0)
+      ? 'Schemat uppdaterat — lycka till nästa vecka!'
+      : `${ids.length} av ${_ccCheckin.changes.length} ändringar sparade.`);
+}
+
+async function _ccDeclineAll() {
+  if (!_ccCheckin) return;
+  const hadChanges = (_ccCheckin.changes || []).length > 0;
+  await _ccPostAction('decline', { checkin_id: _ccCheckin.checkin_id },
+    hadChanges ? 'Inga ändringar — kör på originalschemat.' : 'Klart — tack för avstämningen.');
+}
+
+async function _ccPostAction(mode, body, doneMsg) {
+  const navEl = document.getElementById('cc-nav');
+  navEl.querySelectorAll('button').forEach(b => b.disabled = true);
+  try {
+    const session = (await sb.auth.getSession()).data.session;
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/weekly-checkin', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ mode, ...body }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Misslyckades');
+
+    document.getElementById('cc-step-diff').style.display = 'none';
+    document.getElementById('cc-step-done').style.display = 'block';
+    document.getElementById('cc-done-text').textContent = doneMsg;
+    document.getElementById('cc-step-banner').textContent = 'Klart';
+    navEl.innerHTML = `<button class="btn btn-primary btn-sm" onclick="closeCoachCheckin()">Stäng</button>`;
+
+    // Refresh schema to show updates.
+    if (mode === 'apply') {
+      try { await loadSchema(); } catch (_e) { /* ignore */ }
+    } else {
+      try { await updateCoachCheckinBanner(); } catch (_e) { /* ignore */ }
+    }
+  } catch (e) {
+    alert('Något gick fel: ' + e.message);
+    navEl.querySelectorAll('button').forEach(b => b.disabled = false);
+  }
+}
+
+// ── Trends view: weekly check-in history strip ──────────────────────────────
+
+async function renderWeeklyCheckinHistory(containerEl) {
+  if (!containerEl || !currentProfile) return;
+  try {
+    const { data } = await sb.from('weekly_checkins')
+      .select('id, week_start_date, status, responses, coach_note, proposed_changes, applied_changes')
+      .eq('profile_id', currentProfile.id)
+      .order('week_start_date', { ascending: false })
+      .limit(8);
+    const rows = data || [];
+    if (rows.length === 0) { containerEl.innerHTML = ''; return; }
+
+    const feelLabel = { 1: 'Helt slut', 2: 'Tungt', 3: 'OK', 4: 'Bra', 5: 'Superkänsla' };
+    const injuryLabel = { none: 'Inga skador', niggle: 'Småkänning', pain: 'Värk', paused: 'Pausar' };
+
+    const items = rows.map(r => {
+      const feel = r.responses?.overall_feel;
+      const inj = r.responses?.injury_level || 'none';
+      const feelTxt = feelLabel[feel] || '—';
+      const injTxt = injuryLabel[inj] || inj;
+      const applied = Array.isArray(r.applied_changes) ? r.applied_changes.length : 0;
+      const proposed = Array.isArray(r.proposed_changes) ? r.proposed_changes.length : 0;
+      const statusPill = r.status === 'applied'
+        ? `<span class="cc-hist-pill cc-hist-pill--applied">${applied}/${proposed} sparade</span>`
+        : r.status === 'declined'
+          ? `<span class="cc-hist-pill cc-hist-pill--declined">Nekade</span>`
+          : `<span class="cc-hist-pill">Väntar</span>`;
+      const weekLabel = new Date(r.week_start_date).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
+      const note = escapeHTML(r.coach_note || '');
+      return `<details class="cc-hist-item">
+        <summary>
+          <span class="cc-hist-week">V. ${weekLabel}</span>
+          <span class="cc-hist-meta">${escapeHTML(feelTxt)} · ${escapeHTML(injTxt)}</span>
+          ${statusPill}
+        </summary>
+        ${note ? `<div class="cc-hist-note">${note}</div>` : ''}
+      </details>`;
+    }).join('');
+
+    containerEl.innerHTML = `
+      <details class="cc-hist-group">
+        <summary class="cc-hist-group-summary">Veckoavstämningar (${rows.length})</summary>
+        <div class="cc-hist-list">${items}</div>
+      </details>`;
+  } catch (_e) {
+    containerEl.innerHTML = '';
+  }
+}
