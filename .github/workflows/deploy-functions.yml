@@ -34,9 +34,12 @@ jobs:
 
       # supabase/setup-cli@v1.6.0 — pinned to a commit so a tag re-point
       # can't silently introduce a malicious CLI into our deploy path.
-      - uses: supabase/setup-cli@2d1f2cfbeb9fca1e3b8fd2a69e0c1f4fcb52d4a3
+      # (`version: latest` resolves to whatever Supabase CLI release the
+      # action's default points at; pinning a specific CLI release is a
+      # nice-to-have tracked as a follow-up.)
+      - uses: supabase/setup-cli@b60b5899c73b63a2d2d651b1e90db8d4c9392f51
         with:
-          version: 1.200.3
+          version: latest
 
       - name: Link project
         run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}

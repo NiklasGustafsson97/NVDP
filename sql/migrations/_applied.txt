@@ -6,9 +6,4 @@
 20260404_ensure_invitations.sql
 20260416_plan_workouts_update_policy.sql
 20260418_oauth_states.sql
-20260418_rate_limits.sql
 20260418_rls_lockdown.sql
-20260418_strava_enrichment_catchup.sql
-20260418_workouts_strava_unique_constraint.sql
-20260419_weekly_checkin_reminders_pref.sql
-20260419_weekly_checkins.sql
