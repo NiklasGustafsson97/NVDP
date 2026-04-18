@@ -3790,6 +3790,37 @@ async function disconnectStrava() {
   updateStravaUI();
 }
 
+function buildStravaSyncMessage(result, deep = false) {
+  const imp = result.imported || 0;
+  const fetched = result.totalFetched || 0;
+  const sShort = result.skippedShort || 0;
+  const sType = result.skippedType || 0;
+  const sErr = result.skippedError || 0;
+  const lines = [];
+
+  if (imp > 0) {
+    lines.push(`${imp} pass importerade${deep ? ' (full synk)' : ''}.`);
+  } else if (fetched === 0) {
+    lines.push('Strava returnerade 0 aktiviteter.');
+    lines.push('Möjliga orsaker:');
+    lines.push('• Behörigheten saknar "all activities" — koppla från och anslut igen, godkänn alla rutor.');
+    lines.push('• Aktiviteterna är äldre än sökperioden (synk tittar 14 dagar bakåt; använd "Synka allt" för längre).');
+  } else {
+    lines.push('Inga nya pass att importera.');
+    lines.push(`Hämtade ${fetched} från Strava, men inga var nya.`);
+  }
+
+  if (sShort > 0) lines.push(`${sShort} pass hoppades över (kortare än 5 min).`);
+  if (sType > 0) lines.push(`${sType} pass hoppades över (sport-typ filtreras: t.ex. Walk, Hike, Yoga, Tennis).`);
+  if (sErr > 0) lines.push(`${sErr} pass kunde inte sparas (databas-fel) — testa synka igen.`);
+
+  if (fetched > 0 && imp === 0 && sShort === 0 && sType === 0 && sErr === 0) {
+    lines.push('(Alla hämtade pass finns redan i din historik.)');
+  }
+
+  return lines.join('\n');
+}
+
 async function syncStrava() {
   if (!_stravaConnection || !currentProfile) return;
   const btn = document.getElementById('strava-sync-btn');
@@ -3810,19 +3841,8 @@ async function syncStrava() {
     if (res.ok) {
       if (result.last_sync_at) _stravaConnection.last_sync_at = result.last_sync_at;
       updateStravaUI();
-      console.log(`Strava sync: imported=${result.imported}, fetched=${result.totalFetched}, skipped=${result.skipped}`, result.debug);
-      let msg;
-      if (result.imported > 0) {
-        msg = `${result.imported} nya pass importerade.`;
-      } else if (result.totalFetched === 0) {
-        msg = 'Strava returnerade 0 aktiviteter.\nTesta koppla från och anslut igen (sidan meny) för att förnya behörigheten.';
-      } else {
-        msg = 'Inga nya pass att importera.';
-      }
-      if (result.skipped > 0) msg += `\n${result.skipped} pass hoppades över (för korta eller redan importerade).`;
-      if (result.debug?.firstError) msg += `\nVissa pass kunde inte sparas. Testa synka igen.`;
-      if (result.totalFetched > 0) msg += `\n\nHämtade ${result.totalFetched} från Strava, importerade ${result.imported}.`;
-      await showAlertModal('Synk klar', msg);
+      console.log(`Strava sync: imported=${result.imported}, fetched=${result.totalFetched}, skipped=${result.skipped} (short=${result.skippedShort||0}, type=${result.skippedType||0}, error=${result.skippedError||0})`, result.debug);
+      await showAlertModal('Synk klar', buildStravaSyncMessage(result));
       navigate(currentView);
     } else {
       await showAlertModal('Synk-fel', result.error || 'Okänt fel');
@@ -3863,12 +3883,7 @@ async function syncStravaAll() {
       if (result.last_sync_at) _stravaConnection.last_sync_at = result.last_sync_at;
       updateStravaUI();
       if (result.debug) console.log('Strava deep sync debug:', result.debug);
-      let msg = result.imported > 0
-        ? `${result.imported} pass importerade.`
-        : 'Inga pass hittades.';
-      if (result.totalFetched > 0) msg += `\nHämtade ${result.totalFetched} från Strava, importerade ${result.imported}.`;
-      if (result.totalFetched === 0) msg += '\nStrava returnerade 0 aktiviteter. Testa koppla från och anslut igen.';
-      await showAlertModal('Full synk klar', msg);
+      await showAlertModal('Full synk klar', buildStravaSyncMessage(result, true));
       navigate(currentView);
     } else {
       await showAlertModal('Synk-fel', result.error || 'Okänt fel');

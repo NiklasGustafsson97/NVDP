@@ -67,25 +67,37 @@ serve(async (req) => {
 
     const accessToken = await refreshTokenIfNeeded(conn);
 
-    const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
+    // Always look back at least 14 days for normal sync (catches edge cases
+    // where Strava's start_date sits right at the previous boundary). Deep
+    // sync (no since) goes back 60 days.
+    const fourteenDaysAgo = Math.floor(Date.now() / 1000) - 14 * 24 * 3600;
     let after: number;
     if (since) {
       const sinceTs = Math.floor(new Date(since).getTime() / 1000);
-      after = Math.min(sinceTs, sevenDaysAgo);
+      after = Math.min(sinceTs, fourteenDaysAgo);
     } else {
-      const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 3600;
+      const sixtyDaysAgo = Math.floor(Date.now() / 1000) - 60 * 24 * 3600;
       const lastSyncTs = conn.last_sync_at
         ? Math.floor(new Date(conn.last_sync_at).getTime() / 1000)
         : 0;
-      after = Math.min(lastSyncTs || thirtyDaysAgo, sevenDaysAgo);
+      after = Math.min(lastSyncTs || sixtyDaysAgo, fourteenDaysAgo);
     }
 
     let page = 1;
     let imported = 0;
     let skipped = 0;
+    let skippedShort = 0;
+    let skippedType = 0;
+    let skippedError = 0;
     let totalFetched = 0;
     let firstError: string | null = null;
-    const debug: Record<string, unknown> = { after, after_date: new Date(after * 1000).toISOString(), last_sync_at: conn.last_sync_at };
+    const activityLog: Array<Record<string, unknown>> = [];
+    const debug: Record<string, unknown> = {
+      after,
+      after_date: new Date(after * 1000).toISOString(),
+      last_sync_at: conn.last_sync_at,
+      activity_log: activityLog,
+    };
 
     // First verify the token works by checking athlete profile
     const athleteRes = await fetch("https://www.strava.com/api/v3/athlete", {
@@ -120,7 +132,25 @@ serve(async (req) => {
       if (activities.length === 0) break;
 
       for (const summaryActivity of activities) {
+        const sportType = summaryActivity.sport_type || summaryActivity.type;
+        const movingMin = Math.round((summaryActivity.moving_time || 0) / 60);
+        const baseLog = {
+          id: summaryActivity.id,
+          name: summaryActivity.name,
+          type: sportType,
+          start: summaryActivity.start_date_local,
+          moving_min: movingMin,
+        };
+
+        if (summaryActivity.moving_time < 300) {
+          activityLog.push({ ...baseLog, action: "skipped_short" });
+          skippedShort++;
+          skipped++;
+          continue;
+        }
         if (!shouldImportActivity(summaryActivity)) {
+          activityLog.push({ ...baseLog, action: "skipped_type" });
+          skippedType++;
           skipped++;
           continue;
         }
@@ -153,8 +183,11 @@ serve(async (req) => {
         if (upsertErr) {
           console.error("Workout upsert error:", upsertErr);
           if (!firstError) firstError = JSON.stringify(upsertErr);
+          activityLog.push({ ...baseLog, action: "error", err: String(upsertErr.message || upsertErr) });
+          skippedError++;
           skipped++;
         } else {
+          activityLog.push({ ...baseLog, action: "imported" });
           imported++;
         }
       }
@@ -174,7 +207,16 @@ serve(async (req) => {
 
     if (firstError) debug.firstError = firstError;
     return new Response(
-      JSON.stringify({ imported, skipped, totalFetched, last_sync_at: newSyncAt, debug }),
+      JSON.stringify({
+        imported,
+        skipped,
+        skippedShort,
+        skippedType,
+        skippedError,
+        totalFetched,
+        last_sync_at: newSyncAt,
+        debug,
+      }),
       {
         status: 200,
         headers: { ...corsHeaders(), "Content-Type": "application/json" },
