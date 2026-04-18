@@ -49,3 +49,9 @@ jobs:
 
       - name: Deploy send-nudge-email
         run: supabase functions deploy send-nudge-email --no-verify-jwt
+
+      - name: Deploy weekly-checkin
+        run: supabase functions deploy weekly-checkin --no-verify-jwt
+
+      - name: Deploy weekly-checkin-reminder
+        run: supabase functions deploy weekly-checkin-reminder --no-verify-jwt
