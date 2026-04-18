@@ -757,7 +757,7 @@ select option { background: #1a1a2e; color: var(--text); }
   box-shadow: 0 0 0 1px rgba(46,134,193,0.08);
 }
 .sr-card.sr-rest { opacity: 0.4; }
-.sr-card.sr-future { opacity: 0.5; }
+.sr-card.sr-future { opacity: 1; }
 .sr-card.sr-done { border-left: 3px solid var(--green); }
 .sr-card.sr-missed { border-left: 3px solid var(--red); }
 
