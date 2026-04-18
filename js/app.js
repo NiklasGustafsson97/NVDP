@@ -47,21 +47,38 @@ const GATE_PASSED_KEY = 'nvdp_gate_passed';
 // ── Lazy Leaflet (PERF-01: ladda karta först när den behövs) ──
 let _leafletPromise = null;
 function ensureLeafletLoaded() {
-  if (typeof L !== 'undefined') return Promise.resolve();
+  if (typeof L !== 'undefined' && document.querySelector('link[data-nvdp-leaflet-css]')) {
+    return Promise.resolve();
+  }
   if (_leafletPromise) return _leafletPromise;
   _leafletPromise = new Promise((resolve, reject) => {
-    if (!document.querySelector('link[data-nvdp-leaflet-css]')) {
-      const link = document.createElement('link');
+    let cssLoaded = false;
+    let jsLoaded = false;
+    const maybeResolve = () => { if (cssLoaded && jsLoaded) resolve(); };
+
+    let link = document.querySelector('link[data-nvdp-leaflet-css]');
+    if (!link) {
+      link = document.createElement('link');
       link.rel = 'stylesheet';
       link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
       link.setAttribute('data-nvdp-leaflet-css', '1');
+      link.onload = () => { cssLoaded = true; maybeResolve(); };
+      link.onerror = () => { cssLoaded = true; maybeResolve(); };
       document.head.appendChild(link);
+    } else {
+      cssLoaded = true;
     }
-    const s = document.createElement('script');
-    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error('Leaflet'));
-    document.head.appendChild(s);
+
+    if (typeof L !== 'undefined') {
+      jsLoaded = true;
+      maybeResolve();
+    } else {
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      s.onload = () => { jsLoaded = true; maybeResolve(); };
+      s.onerror = () => reject(new Error('Leaflet'));
+      document.head.appendChild(s);
+    }
   });
   return _leafletPromise;
 }
@@ -93,7 +110,7 @@ function _initLeafletMap(el) {
     const map = L.map(el, {
       zoomControl: false, attributionControl: false,
       dragging: false, scrollWheelZoom: false, doubleClickZoom: false,
-      touchZoom: false, boxZoom: false, keyboard: false, tap: false
+      touchZoom: false, boxZoom: false, keyboard: false
     });
     L.tileLayer(getMapTileUrl(), { maxZoom: 18 }).addTo(map);
     const line = L.polyline(coords, {
@@ -141,6 +158,7 @@ function mapAuthError(msg) {
 }
 
 let _wmFocusBefore = null;
+let _wmMapInstance = null;
 
 function gateOpen() {
   return (
@@ -1445,20 +1463,40 @@ async function openWorkoutModal(w) {
   document.getElementById('wm-body').innerHTML = body;
 
   if (w.map_polyline) {
+    if (_wmMapInstance) {
+      try { _wmMapInstance.remove(); } catch (e) { /* ignore */ }
+      _wmMapInstance = null;
+    }
     ensureLeafletLoaded().then(() => {
       setTimeout(() => {
+        const modalEl = document.getElementById('workout-modal');
+        if (!modalEl || modalEl.classList.contains('hidden')) return;
         const mapEl = document.getElementById('wm-map');
-        if (!mapEl || typeof L === 'undefined') return;
-        const coords = decodePolyline(w.map_polyline);
-        if (coords.length === 0) return;
-        const map = L.map(mapEl, { zoomControl: false, attributionControl: false });
-        L.tileLayer(getMapTileUrl(), { maxZoom: 18 }).addTo(map);
-        L.polyline(coords, { color: '#3B9DFF', weight: 4, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(map);
-        const shadow = L.polyline(coords, { color: '#000', weight: 7, opacity: 0.15, lineCap: 'round', lineJoin: 'round' });
-        shadow.addTo(map);
-        shadow.bringToBack();
-        const line = L.polyline(coords, { color: '#3B9DFF', weight: 4, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(map);
-        map.fitBounds(line.getBounds(), { padding: [30, 30] });
+        if (!mapEl || !mapEl.isConnected || typeof L === 'undefined') return;
+        if (mapEl._leaflet_id) return;
+        let coords;
+        try { coords = decodePolyline(w.map_polyline); } catch (e) { return; }
+        if (!coords || coords.length < 2) return;
+        try {
+          const tmpLine = L.polyline(coords);
+          const bounds = tmpLine.getBounds();
+          const center = bounds.getCenter();
+          const map = L.map(mapEl, {
+            zoomControl: false,
+            attributionControl: false,
+            center: center,
+            zoom: 13,
+            preferCanvas: true
+          });
+          L.tileLayer(getMapTileUrl(), { maxZoom: 18 }).addTo(map);
+          L.polyline(coords, { color: '#000', weight: 7, opacity: 0.15, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+          L.polyline(coords, { color: '#3B9DFF', weight: 4, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+          map.fitBounds(bounds, { padding: [30, 30], animate: false });
+          _wmMapInstance = map;
+          setTimeout(() => { try { map.invalidateSize(); map.fitBounds(bounds, { padding: [30, 30], animate: false }); } catch (e) { /* ignore */ } }, 320);
+        } catch (e) {
+          console.error('Workout modal map init failed:', e);
+        }
       }, 100);
     }).catch(() => {});
   }
@@ -1595,6 +1633,10 @@ async function handleDeleteComment(commentId, workoutId) {
 function closeWorkoutModal() {
   document.getElementById('workout-modal').classList.add('hidden');
   selectedWorkout = null;
+  if (_wmMapInstance) {
+    try { _wmMapInstance.remove(); } catch (e) { /* ignore */ }
+    _wmMapInstance = null;
+  }
   if (_wmFocusBefore && typeof _wmFocusBefore.focus === 'function') {
     try { _wmFocusBefore.focus(); } catch (e) { /* ignore */ }
   }
@@ -3023,6 +3065,7 @@ async function _loadGroup() {
   renderGroupEffortChart(allWorkouts, members);
 
   // Season totals bars
+  const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
   const maxTotal = Math.max(...members.map(m => allWorkouts.filter(w => w.profile_id === m.id).reduce((s, w) => s + w.duration_minutes, 0) / 60), 1);
   const barsEl = document.getElementById('group-totals-bars');
   barsEl.innerHTML = members.map((m, i) => {
@@ -4779,16 +4822,33 @@ async function toggleLegacyPreview(periodId) {
 }
 
 function buildLegacyPreviewHTML(period, plans, isActive) {
-  const DAY = ['Mån', 'Tis', 'Ons', 'Tors', 'Fre', 'Lör', 'Sön'];
-  let grid = '';
+  const DAY = ['Måndag', 'Tisdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lördag', 'Söndag'];
+  let rows = '';
   for (let d = 0; d < 7; d++) {
     const wo = plans.find(p => p.day_of_week === d);
     if (wo?.is_rest) {
-      grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-rest">Vila</span></div>`;
+      rows += `
+        <div class="pm-day-row pm-day-rest">
+          <div class="pm-day-col-name">${DAY[d]}</div>
+          <div class="pm-day-col-content"><span class="pm-day-rest-pill">Vila</span></div>
+        </div>`;
     } else if (wo) {
-      grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-label">${stripDayPrefix(wo.label || '')}</span><span class="pm-prev-meta">${wo.description ? wo.description.slice(0, 30) : ''}</span></div>`;
+      const label = stripDayPrefix(wo.label || 'Pass');
+      const desc = wo.description ? wo.description.replace(/</g, '&lt;') : '';
+      rows += `
+        <div class="pm-day-row">
+          <div class="pm-day-col-name">${DAY[d]}</div>
+          <div class="pm-day-col-content">
+            <div class="pm-day-label">${label}</div>
+            ${desc ? `<div class="pm-day-desc">${desc}</div>` : ''}
+          </div>
+        </div>`;
     } else {
-      grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-rest">—</span></div>`;
+      rows += `
+        <div class="pm-day-row pm-day-empty">
+          <div class="pm-day-col-name">${DAY[d]}</div>
+          <div class="pm-day-col-content"><span class="pm-day-empty-pill">—</span></div>
+        </div>`;
     }
   }
 
@@ -4798,10 +4858,10 @@ function buildLegacyPreviewHTML(period, plans, isActive) {
       <div class="pm-preview-phases">Manuellt veckoschema</div>
       <div class="pm-preview-weeks-label">${period.start_date} — ${period.end_date}</div>
     </div>
-    <div class="pm-prev-grid">${grid}</div>
+    <div class="pm-day-list">${rows}</div>
     <div class="pm-preview-actions">
       ${isActive
-        ? `<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();editLegacyPeriod('${period.id}')">Redigera dagar</button>`
+        ? `<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();editLegacyPeriod('${period.id}')">Redigera</button>`
         : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();activateLegacyPeriod('${period.id}')">Aktivera</button>`}
       <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();renameLegacyPeriod('${period.id}','${safeName}')">Byt namn</button>
       <button class="btn btn-danger-text btn-sm" onclick="event.stopPropagation();deleteLegacyPeriod('${period.id}')">Ta bort</button>
@@ -5002,16 +5062,58 @@ async function deleteLegacyPeriod(periodId) {
   }
 }
 
+let _lpeCurrentPeriodId = null;
+
 async function editLegacyPeriod(periodId) {
   const periods = await fetchPeriods();
   const period = periods.find(p => p.id === periodId);
   if (!period) return;
   const plans = await fetchPlans(periodId);
+  _lpeCurrentPeriodId = periodId;
 
+  let modal = document.getElementById('legacy-period-editor');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'legacy-period-editor';
+    modal.className = 'modal-overlay modal-overlay-scroll hidden';
+    document.body.appendChild(modal);
+  }
+  modal.innerHTML = `
+    <div class="modal-box lpe-modal">
+      <div class="modal-header">
+        <h3>Redigera ${period.name || 'manuellt schema'}</h3>
+        <button class="btn-close" onclick="closeLegacyPeriodEditor()">×</button>
+      </div>
+
+      <div class="lpe-ai-section">
+        <label class="lpe-section-label">Beskriv vad du vill ändra (AI hjälper dig)</label>
+        <textarea id="lpe-ai-prompt" class="lpe-ai-prompt" rows="3" placeholder="T.ex. 'Lägg till ett tröskelpass på onsdag och flytta långpasset till söndag' eller 'Bygg ett 5-dagarsschema med fokus på halvmaraton'"></textarea>
+        <div class="lpe-ai-row">
+          <button class="btn btn-outline btn-sm" onclick="lpeGenerateWithAI()" id="lpe-ai-btn">
+            <span id="lpe-ai-btn-text">✨ Föreslå med AI</span>
+          </button>
+          <span id="lpe-ai-status" class="lpe-ai-status"></span>
+        </div>
+      </div>
+
+      <div class="lpe-divider"></div>
+
+      <label class="lpe-section-label">Eller redigera dag för dag</label>
+      <div class="lpe-body" id="lpe-day-list"></div>
+
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="closeLegacyPeriodEditor()">Avbryt</button>
+        <button class="btn btn-primary" onclick="saveLegacyPeriodEditor('${periodId}')">Spara</button>
+      </div>
+    </div>`;
+  _lpeRenderDayList(plans);
+  modal.classList.remove('hidden');
+}
+
+function _lpeRenderDayList(plans) {
   const DAY = ['Måndag', 'Tisdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lördag', 'Söndag'];
   const byDay = {};
   plans.forEach(p => { byDay[p.day_of_week] = p; });
-
   let rows = '';
   for (let d = 0; d < 7; d++) {
     const wo = byDay[d] || {};
@@ -5026,32 +5128,11 @@ async function editLegacyPeriod(periodId) {
           </label>
         </div>
         <input type="text" class="lpe-label" placeholder="Pass-namn (t.ex. Distans Z2)" value="${(wo.label || '').replace(/"/g, '&quot;')}" ${isRest ? 'disabled' : ''}/>
-        <textarea class="lpe-desc" rows="2" placeholder="Beskrivning (km, tempo, beskrivning)" ${isRest ? 'disabled' : ''}>${(wo.description || '').replace(/</g, '&lt;')}</textarea>
+        <textarea class="lpe-desc" rows="2" placeholder="Beskrivning (km, tempo, struktur)" ${isRest ? 'disabled' : ''}>${(wo.description || '').replace(/</g, '&lt;')}</textarea>
       </div>`;
   }
-
-  let modal = document.getElementById('legacy-period-editor');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'legacy-period-editor';
-    modal.className = 'modal hidden';
-    document.body.appendChild(modal);
-  }
-  modal.innerHTML = `
-    <div class="modal-content lpe-modal">
-      <div class="modal-header">
-        <h3>Redigera ${period.name || 'manuellt schema'}</h3>
-        <button class="modal-close" onclick="closeLegacyPeriodEditor()">×</button>
-      </div>
-      <div class="lpe-body">
-        ${rows}
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-outline" onclick="closeLegacyPeriodEditor()">Avbryt</button>
-        <button class="btn btn-primary" onclick="saveLegacyPeriodEditor('${periodId}')">Spara</button>
-      </div>
-    </div>`;
-  modal.classList.remove('hidden');
+  const el = document.getElementById('lpe-day-list');
+  if (el) el.innerHTML = rows;
 }
 
 function _lpeToggleRest(day, isRest) {
@@ -5070,6 +5151,70 @@ function _lpeToggleRest(day, isRest) {
 function closeLegacyPeriodEditor() {
   const modal = document.getElementById('legacy-period-editor');
   if (modal) modal.classList.add('hidden');
+  _lpeCurrentPeriodId = null;
+}
+
+async function lpeGenerateWithAI() {
+  const promptEl = document.getElementById('lpe-ai-prompt');
+  const statusEl = document.getElementById('lpe-ai-status');
+  const btnEl = document.getElementById('lpe-ai-btn');
+  const btnTextEl = document.getElementById('lpe-ai-btn-text');
+  const userPrompt = (promptEl?.value || '').trim();
+  if (!userPrompt) {
+    statusEl.textContent = 'Skriv vad du vill ändra först';
+    statusEl.className = 'lpe-ai-status lpe-ai-error';
+    return;
+  }
+
+  // Collect current state from form
+  const currentDays = [];
+  document.querySelectorAll('#legacy-period-editor .lpe-day').forEach(row => {
+    const d = parseInt(row.dataset.day, 10);
+    const isRest = row.querySelector('.lpe-rest').checked;
+    currentDays.push({
+      day_of_week: d,
+      is_rest: isRest,
+      label: isRest ? null : (row.querySelector('.lpe-label').value.trim() || null),
+      description: isRest ? null : (row.querySelector('.lpe-desc').value.trim() || null),
+    });
+  });
+
+  btnEl.disabled = true;
+  btnTextEl.textContent = '⏳ Genererar...';
+  statusEl.textContent = '';
+  statusEl.className = 'lpe-ai-status';
+
+  try {
+    const session = await sb.auth.getSession();
+    const token = session.data.session?.access_token;
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/weekly-template-ai`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        prompt: userPrompt,
+        current_template: currentDays,
+        max_hr: currentProfile?.user_max_hr || null,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'AI-fel');
+    if (!Array.isArray(data.days) || data.days.length !== 7) {
+      throw new Error('AI returnerade ogiltigt format');
+    }
+    _lpeRenderDayList(data.days);
+    statusEl.textContent = '✓ Förslag inläst i formuläret. Granska och tryck Spara.';
+    statusEl.className = 'lpe-ai-status lpe-ai-ok';
+  } catch (e) {
+    console.error('AI suggest error:', e);
+    statusEl.textContent = 'Fel: ' + e.message;
+    statusEl.className = 'lpe-ai-status lpe-ai-error';
+  } finally {
+    btnEl.disabled = false;
+    btnTextEl.textContent = '✨ Föreslå med AI';
+  }
 }
 
 async function saveLegacyPeriodEditor(periodId) {

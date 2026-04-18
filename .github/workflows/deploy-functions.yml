@@ -44,5 +44,8 @@ jobs:
       - name: Deploy generate-plan
         run: supabase functions deploy generate-plan --no-verify-jwt
 
+      - name: Deploy weekly-template-ai
+        run: supabase functions deploy weekly-template-ai --no-verify-jwt
+
       - name: Deploy send-nudge-email
         run: supabase functions deploy send-nudge-email --no-verify-jwt
