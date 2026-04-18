@@ -801,11 +801,11 @@ select option { background: #1a1a2e; color: var(--text); }
 .wo-body-text { flex: 1; min-width: 0; }
 .wo-map-thumb { width: 56px; min-width: 56px; max-width: 56px; height: 56px; border-radius: 6px; flex-shrink: 0; }
 .workout-item-with-map .wo-map-mini {
-  width: 168px; min-width: 168px; max-width: 168px; height: 112px; margin-left: 8px;
+  width: 168px; min-width: 168px; max-width: 168px; height: 80px; margin-left: 8px;
 }
 @media (max-width: 720px) {
   .workout-item-with-map .wo-map-mini {
-    width: 110px; min-width: 110px; max-width: 110px; height: 80px;
+    width: 110px; min-width: 110px; max-width: 110px; height: 60px;
   }
 }
 .wo-primary-meta { font-weight: 600; color: var(--text); margin-top: 2px; }

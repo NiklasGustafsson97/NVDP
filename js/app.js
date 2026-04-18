@@ -100,7 +100,7 @@ function _initLeafletMap(el) {
       color: '#3B9DFF', weight: 3.5, opacity: 0.9,
       lineCap: 'round', lineJoin: 'round'
     }).addTo(map);
-    map.fitBounds(line.getBounds(), { padding: [20, 20], animate: false });
+    map.fitBounds(line.getBounds(), { padding: [4, 4], animate: false });
     el._leafletMap = map;
     el._leafletTile = map._layers && Object.values(map._layers).find(l => l._url);
   } catch (e) { el.style.display = 'none'; }
@@ -5418,15 +5418,19 @@ async function getAcceptedFriends() {
 }
 
 async function renderFriendList() {
-  const el = document.getElementById('friend-list');
   const friendIds = await getAcceptedFriends();
+  const countEl = document.getElementById('friends-count');
+  if (countEl) countEl.textContent = String(friendIds.length);
+
+  const modalListEl = document.getElementById('friend-list-modal');
+  if (!modalListEl) return;
 
   if (friendIds.length === 0) {
-    el.innerHTML = '<div style="padding:12px 0;color:var(--text-dim);font-size:0.82rem;text-align:center;">Inga vänner ännu. Lägg till vänner ovan.</div>';
+    modalListEl.innerHTML = '<div style="padding:18px 0;color:var(--text-dim);font-size:0.85rem;text-align:center;">Inga vänner ännu. Stäng och välj &laquo;+ Lägg till&raquo; för att bjuda in.</div>';
     return;
   }
 
-  el.innerHTML = friendIds.map(fid => {
+  modalListEl.innerHTML = friendIds.map(fid => {
     const p = allProfiles.find(pr => pr.id === fid);
     if (!p) return '';
     const avatar = p.avatar || p.name[0].toUpperCase();
@@ -5438,6 +5442,18 @@ async function renderFriendList() {
       <button class="friend-remove-btn" onclick="removeFriend('${fid}')">Ta bort</button>
     </div>`;
   }).join('');
+}
+
+function openFriendsModal() {
+  const m = document.getElementById('friends-modal');
+  if (!m) return;
+  renderFriendList();
+  m.classList.remove('hidden');
+}
+
+function closeFriendsModal() {
+  const m = document.getElementById('friends-modal');
+  if (m) m.classList.add('hidden');
 }
 
 async function removeFriend(friendId) {
@@ -5686,6 +5702,7 @@ document.addEventListener('keydown', (e) => {
   const chain = [
     ['workout-modal', closeWorkoutModal],
     ['member-profile-modal', closeMemberProfile],
+    ['friends-modal', closeFriendsModal],
     ['plan-edit-modal', closePlanEditModal],
     ['plan-manager', closePlanManager],
     ['plan-wizard', closePlanWizard],
