@@ -3847,6 +3847,7 @@ async function sendNudge(receiverId, btnEl) {
       fetch(SUPABASE_FUNCTIONS_URL + '/send-nudge-email', {
         method: 'POST',
         headers: {
+          'apikey': SUPABASE_ANON_KEY,
           'Authorization': 'Bearer ' + session.access_token,
           'Content-Type': 'application/json'
         },
@@ -4055,6 +4056,7 @@ async function autoSyncStravaIfStale() {
     const res = await fetch(SUPABASE_FUNCTIONS_URL + '/strava-sync', {
       method: 'POST',
       headers: {
+        'apikey': SUPABASE_ANON_KEY,
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
@@ -4123,6 +4125,7 @@ async function connectStrava() {
     const res = await fetch(SUPABASE_FUNCTIONS_URL + '/oauth-state', {
       method: 'POST',
       headers: {
+        'apikey': SUPABASE_ANON_KEY,
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
@@ -4204,6 +4207,7 @@ async function syncStrava() {
     const res = await fetch(SUPABASE_FUNCTIONS_URL + '/strava-sync', {
       method: 'POST',
       headers: {
+        'apikey': SUPABASE_ANON_KEY,
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
@@ -4245,6 +4249,7 @@ async function syncStravaAll() {
     const res = await fetch(SUPABASE_FUNCTIONS_URL + '/strava-sync', {
       method: 'POST',
       headers: {
+        'apikey': SUPABASE_ANON_KEY,
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
@@ -4352,6 +4357,7 @@ async function connectGarmin() {
     const res = await fetch(SUPABASE_FUNCTIONS_URL + '/oauth-state', {
       method: 'POST',
       headers: {
+        'apikey': SUPABASE_ANON_KEY,
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
@@ -4411,6 +4417,7 @@ async function syncGarmin() {
     const res = await fetch(SUPABASE_FUNCTIONS_URL + '/garmin-sync', {
       method: 'POST',
       headers: {
+        'apikey': SUPABASE_ANON_KEY,
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
@@ -4607,7 +4614,6 @@ let _activePlanWorkouts = [];
 let _schemaEditMode = false;
 let _wizardStep = 0;
 let _wizardGoalType = null;
-let _wizardIncludeGym = true;
 
 // ── Fetch active plan ──
 
@@ -4743,7 +4749,6 @@ function renderGenerateButton() {
 function openPlanWizard() {
   _wizardStep = 0;
   _wizardGoalType = null;
-  _wizardIncludeGym = true;
 
   const grid = document.getElementById('wizard-goal-grid');
   grid.innerHTML = GOAL_TYPES.map(g =>
@@ -4800,12 +4805,6 @@ function selectWizardGoal(goalId) {
 
 function toggleWizActivity(btn) {
   btn.classList.toggle('active');
-}
-
-function setWizGym(val) {
-  _wizardIncludeGym = val;
-  document.getElementById('wiz-gym-yes').classList.toggle('active', val);
-  document.getElementById('wiz-gym-no').classList.toggle('active', !val);
 }
 
 async function autoPopulateBaseline() {
@@ -4962,7 +4961,7 @@ async function submitPlanWizard() {
     },
     preferences: {
       activity_types: activityTypes,
-      include_gym: _wizardIncludeGym,
+      include_gym: activityTypes.includes('Gym'),
       preferred_rest_days: restDays,
     },
     start_date: startDate,
@@ -4978,6 +4977,7 @@ async function submitPlanWizard() {
     const res = await fetch(SUPABASE_FUNCTIONS_URL + '/generate-plan', {
       method: 'POST',
       headers: {
+        'apikey': SUPABASE_ANON_KEY,
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
@@ -5735,6 +5735,7 @@ async function submitPlanWorkoutAI() {
     const res = await fetch(SUPABASE_FUNCTIONS_URL + '/generate-plan', {
       method: 'POST',
       headers: {
+        'apikey': SUPABASE_ANON_KEY,
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
@@ -5883,6 +5884,7 @@ async function submitPlanEdit() {
     const res = await fetch(SUPABASE_FUNCTIONS_URL + '/generate-plan', {
       method: 'POST',
       headers: {
+        'apikey': SUPABASE_ANON_KEY,
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
@@ -5936,6 +5938,7 @@ async function approvePlanEdit() {
     const res = await fetch(SUPABASE_FUNCTIONS_URL + '/generate-plan', {
       method: 'POST',
       headers: {
+        'apikey': SUPABASE_ANON_KEY,
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
@@ -6805,6 +6808,7 @@ async function _ccSubmitCheckin() {
     const res = await fetch(SUPABASE_FUNCTIONS_URL + '/weekly-checkin', {
       method: 'POST',
       headers: {
+        'apikey': SUPABASE_ANON_KEY,
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
@@ -6952,6 +6956,7 @@ async function _ccPostAction(mode, body, doneMsg) {
     const res = await fetch(SUPABASE_FUNCTIONS_URL + '/weekly-checkin', {
       method: 'POST',
       headers: {
+        'apikey': SUPABASE_ANON_KEY,
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
