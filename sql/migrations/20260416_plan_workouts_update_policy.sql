@@ -1,5 +1,8 @@
 -- Allow users to update their own plan_workouts (via plan_weeks -> training_plans ownership)
-CREATE POLICY pwo_update_own ON public.plan_workouts
+-- Idempotent: drop-if-exists ensures the migration workflow can retry safely.
+drop policy if exists pwo_update_own on public.plan_workouts;
+
+create policy pwo_update_own on public.plan_workouts
   FOR UPDATE
   USING (
     EXISTS (
