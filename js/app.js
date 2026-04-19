@@ -455,7 +455,26 @@ function restoreEmailNotifToggle() {
   const on = currentProfile.email_notifications !== false;
   const toggle = document.querySelector('#email-notif-toggle input');
   if (toggle) toggle.checked = on;
+  const ccToggle = document.querySelector('#coach-checkin-chat-toggle input');
+  if (ccToggle) ccToggle.checked = currentProfile.coach_checkin_chat_enabled === true;
 }
+
+async function setCoachCheckinChatEnabled(on) {
+  const toggle = document.querySelector('#coach-checkin-chat-toggle input');
+  if (toggle) toggle.checked = on;
+  if (!currentProfile) return;
+  const { error } = await sb.from('profiles')
+    .update({ coach_checkin_chat_enabled: !!on })
+    .eq('id', currentProfile.id);
+  if (error) {
+    alert('Kunde inte uppdatera inställningen.');
+    if (toggle) toggle.checked = !on;
+    return;
+  }
+  currentProfile.coach_checkin_chat_enabled = !!on;
+  if (typeof updateCoachCheckinBanner === 'function') updateCoachCheckinBanner();
+}
+if (typeof window !== 'undefined') window.setCoachCheckinChatEnabled = setCoachCheckinChatEnabled;
 
 function updateSideMenuContent() {
   const smName = document.getElementById('sm-name');
@@ -730,7 +749,46 @@ function navigate(view, param) {
   else if (view === 'group') loadGroup();
   else if (view === 'social') loadSocial();
   else if (view === 'friend-profile') loadFriendProfile(param);
+  else if (view === 'coach') { loadCoach(); markCoachViewed(); }
 }
+
+// ═══════════════════════
+//  COACH UNREAD BADGE
+// ═══════════════════════
+async function refreshCoachUnreadBadge() {
+  const badge = document.getElementById('coach-unread-badge');
+  if (!badge || !currentProfile) return;
+  try {
+    const lastView = currentProfile.last_coach_view_at || '1970-01-01T00:00:00.000Z';
+    const { count, error } = await supabase
+      .from('coach_messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('profile_id', currentProfile.id)
+      .eq('role', 'assistant')
+      .gt('created_at', lastView);
+    if (error) return;
+    if (count && count > 0) {
+      badge.textContent = count > 9 ? '9+' : String(count);
+      badge.classList.remove('hidden');
+    } else {
+      badge.textContent = '';
+      badge.classList.add('hidden');
+    }
+  } catch (_) { /* ignore */ }
+}
+
+async function markCoachViewed() {
+  if (!currentProfile) return;
+  const now = new Date().toISOString();
+  try {
+    await supabase.from('profiles').update({ last_coach_view_at: now }).eq('id', currentProfile.id);
+    currentProfile.last_coach_view_at = now;
+  } catch (_) { /* ignore */ }
+  const badge = document.getElementById('coach-unread-badge');
+  if (badge) { badge.textContent = ''; badge.classList.add('hidden'); }
+}
+
+window.refreshCoachUnreadBadge = refreshCoachUnreadBadge;
 
 // ═══════════════════════
 //  HELPERS
@@ -965,6 +1023,7 @@ async function loadDashboard() {
     showToast('Kunde inte ladda dashboard. Kontrollera anslutningen.');
   }
   hideViewLoading('view-dashboard');
+  refreshCoachUnreadBadge();
 }
 let _dashSelectedDate = null;
 let _dashPlanWorkouts = [];
@@ -1298,6 +1357,9 @@ async function _renderDashDayCard(dateStr) {
   const isToday = dateStr === todayStr;
   const dayLabel = isToday ? 'Idag' : date.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'short' });
 
+  const cardEl = document.getElementById('dash-day-card');
+  if (cardEl) cardEl.classList.toggle('is-today', isToday);
+
   const dayWorkouts = _dashWeekWorkouts.filter(w => w.workout_date === dateStr);
   const planWorkout = _dashPlanWorkouts.find(pw => pw.workout_date === dateStr);
 
@@ -1354,9 +1416,21 @@ async function _renderDashDayCard(dateStr) {
     html += '<div class="ddc-done-section">';
     html += `<div class="ddc-done-label">${dayWorkouts.length > 1 ? dayWorkouts.length + ' genomförda pass' : 'Genomfört'}</div>`;
     dayWorkouts.forEach(w => {
+      // Inline feel-prompt: shown when an auto-synced (Strava etc.) workout has no perceived_exertion yet.
+      const isAutoSynced = !!(w.external_source || w.strava_id || w.source === 'strava' || w.source === 'garmin');
+      const missingFeel = (w.perceived_exertion === null || w.perceived_exertion === undefined);
+      const showFeelPrompt = isAutoSynced && missingFeel;
       html += `<div class="ddc-done-item clickable" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
         ${buildWorkoutBody(w)}
       </div>`;
+      if (showFeelPrompt) {
+        html += `<div class="feel-inline-prompt" id="feel-inline-${w.id}" data-wid="${w.id}" onclick="event.stopPropagation()">
+          <span class="feel-inline-label">Hur kändes det?</span>
+          <button type="button" class="feel-pill" data-value="2" onclick="saveInlineFeel('${w.id}', 2, this)"><span class="feel-emoji" aria-hidden="true">😮‍💨</span><span>Tungt</span></button>
+          <button type="button" class="feel-pill" data-value="3" onclick="saveInlineFeel('${w.id}', 3, this)"><span class="feel-emoji" aria-hidden="true">🙂</span><span>Lagom</span></button>
+          <button type="button" class="feel-pill" data-value="4" onclick="saveInlineFeel('${w.id}', 4, this)"><span class="feel-emoji" aria-hidden="true">💪</span><span>Hade mer</span></button>
+        </div>`;
+      }
     });
     html += '</div>';
   } else if (isPast && plan && !plan.is_rest) {
@@ -1510,7 +1584,7 @@ function showMoreRecent() {
         ${activityEmoji(w.activity_type)}
       </div>
       <div class="workout-info">
-        <div class="name">${escapeHTML(w.activity_type)}${intBadge}</div>
+        <div class="name">${escapeHTML(w.activity_type)}${intBadge}${workoutScoreChip(w)}</div>
         <div class="meta">${formatDate(w.workout_date)}${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? ' — ' + escapeHTML(w.notes) : ''}</div>
         <div class="meta wo-primary-meta">${w.duration_minutes} min${distStr}</div>
         ${secondaryHtml}
@@ -1898,6 +1972,31 @@ function closeWorkoutModal() {
   _wmFocusBefore = null;
 }
 
+function askCoachAboutWorkout() {
+  if (!selectedWorkout) return;
+  const w = selectedWorkout;
+  const isMine = w.profile_id === currentProfile?.id;
+  if (!isMine) return;
+  const parts = [`Berätta om passet jag körde ${w.workout_date}`];
+  if (w.activity_type) parts.push(`— ${w.activity_type}`);
+  if (w.duration_minutes) parts.push(`, ${w.duration_minutes} min`);
+  if (w.distance_km) parts.push(`, ${w.distance_km} km`);
+  if (w.intensity) parts.push(` (${w.intensity})`);
+  if (w.avg_hr) parts.push(`, snittpuls ${w.avg_hr}`);
+  const prompt = parts.join('') + '. Hur ser det ut, och vad ska jag tänka på framåt?';
+  closeWorkoutModal();
+  navigate('coach');
+  setTimeout(() => {
+    const input = document.getElementById('coach-input');
+    if (input) {
+      input.value = prompt;
+      input.dispatchEvent(new Event('input'));
+      input.focus();
+    }
+  }, 120);
+}
+window.askCoachAboutWorkout = askCoachAboutWorkout;
+
 function editWorkout() {
   if (!selectedWorkout) return;
   const workout = { ...selectedWorkout };
@@ -1915,6 +2014,16 @@ function editWorkout() {
     p.classList.toggle('active', p.dataset.value === workout.intensity);
   });
   document.getElementById('log-intensity').value = workout.intensity || '';
+  // Preselect feel chip from existing perceived_exertion (RPE) if it was set via feel chips.
+  const existingRpe = workout.perceived_exertion;
+  let feelVal = '';
+  if (existingRpe === 7) feelVal = '2';
+  else if (existingRpe === 5) feelVal = '3';
+  else if (existingRpe === 3) feelVal = '4';
+  document.getElementById('log-feel-value').value = feelVal;
+  document.querySelectorAll('#log-feel .feel-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.value === feelVal);
+  });
   document.getElementById('log-form').querySelector('[type="submit"]').textContent = 'Uppdatera pass';
 }
 
@@ -1945,6 +2054,61 @@ document.querySelectorAll('.intensity-pill').forEach(pill => {
   });
 });
 
+// Feel pills (per-pass feel) — scoped to #log-feel
+document.querySelectorAll('#log-feel .feel-pill').forEach(pill => {
+  pill.addEventListener('click', () => {
+    const hidden = document.getElementById('log-feel-value');
+    if (pill.classList.contains('active')) {
+      pill.classList.remove('active');
+      hidden.value = '';
+    } else {
+      document.querySelectorAll('#log-feel .feel-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      hidden.value = pill.dataset.value;
+    }
+  });
+});
+
+// Map feel chip value (2/3/4) → RPE per ALGORITHM.md spec.
+// 2=Tungt → RPE 7, 3=Lagom → RPE 5, 4=Hade mer → RPE 3.
+function feelToRpe(feel) {
+  const f = parseInt(feel, 10);
+  if (f === 2) return 7;
+  if (f === 3) return 5;
+  if (f === 4) return 3;
+  return null;
+}
+
+// Save feel from an inline prompt on dashboard day card. Patches workouts.perceived_exertion.
+async function saveInlineFeel(workoutId, feelVal, btnEl) {
+  const rpe = feelToRpe(feelVal);
+  if (rpe === null) return;
+  const wrap = document.getElementById('feel-inline-' + workoutId);
+  if (wrap) {
+    wrap.querySelectorAll('.feel-pill').forEach(p => p.classList.remove('active'));
+    if (btnEl) btnEl.classList.add('active');
+  }
+  try {
+    const { error } = await sb.from('workouts')
+      .update({ perceived_exertion: rpe })
+      .eq('id', workoutId);
+    if (error) throw error;
+    // Reflect change locally so UI doesn't reshow the prompt on next render.
+    if (Array.isArray(_dashWeekWorkouts)) {
+      const w = _dashWeekWorkouts.find(x => x.id === workoutId);
+      if (w) w.perceived_exertion = rpe;
+    }
+    if (wrap) {
+      wrap.classList.add('saved');
+      wrap.querySelector('.feel-inline-label').textContent = 'Tack!';
+    }
+  } catch (e) {
+    console.error('saveInlineFeel failed', e);
+    if (wrap) wrap.querySelector('.feel-inline-label').textContent = 'Kunde inte spara';
+  }
+}
+window.saveInlineFeel = saveInlineFeel;
+
 document.getElementById('log-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const date = document.getElementById('log-date').value;
@@ -1955,6 +2119,8 @@ document.getElementById('log-form').addEventListener('submit', async (e) => {
   const distance = distRaw ? parseFloat(distRaw) : null;
   const intensity = document.getElementById('log-intensity').value || null;
   const notes = document.getElementById('log-notes').value.trim();
+  const feelRaw = document.getElementById('log-feel-value').value;
+  const rpe = feelToRpe(feelRaw);
 
   const row = {
     profile_id: currentProfile.id,
@@ -1966,6 +2132,7 @@ document.getElementById('log-form').addEventListener('submit', async (e) => {
   if (time) row.workout_time = time;
   if (distance !== null) row.distance_km = distance;
   if (intensity) row.intensity = intensity;
+  if (rpe !== null) row.perceived_exertion = rpe;
 
   let error;
   if (editingWorkoutId) {
@@ -2008,6 +2175,9 @@ function resetLogForm() {
   document.getElementById('log-time').value = '';
   document.getElementById('log-intensity').value = '';
   document.querySelectorAll('.intensity-pill').forEach(p => p.classList.remove('active'));
+  const fv = document.getElementById('log-feel-value');
+  if (fv) fv.value = '';
+  document.querySelectorAll('#log-feel .feel-pill').forEach(p => p.classList.remove('active'));
   const ex = document.getElementById('intensity-pills-extra');
   const imb = document.getElementById('intensity-more-btn');
   if (ex && !ex.classList.contains('hidden')) {
@@ -2212,12 +2382,32 @@ function estimateDurationFromDescription(description, storedMinutes) {
   return (total > 0 && total > (storedMinutes || 0)) ? total : (storedMinutes || 0);
 }
 
+function workoutScoreChip(w) {
+  if (!w || w.activity_type === 'Vila' || !w.duration_minutes) return '';
+  try {
+    const raw = calcWorkoutEffort(w);
+    if (!raw || raw <= 0) return '';
+    const score = effortRawToDisplay(raw);
+    let band = 'low';
+    if (score >= 2.0) band = 'peak';
+    else if (score >= 1.0) band = 'high';
+    else if (score >= 0.5) band = 'med';
+    const im = _intensityMultiplier(w);
+    const title = `Belastning: ${score.toFixed(2)} n·h (IM ${im.toFixed(2)})`;
+    return `<span class="score-chip score-chip--${band}" title="${title}">${score.toFixed(1)} n·h</span>`;
+  } catch (_) {
+    return '';
+  }
+}
+
 function buildWorkoutBody(w, opts = {}) {
-  const { showMap = false } = opts;
+  const { showMap = false, showScore = true } = opts;
   let text = '';
 
+  const scoreChip = showScore ? workoutScoreChip(w) : '';
   text += `<div class="wo-label">${w.activity_type}`;
   if (w.intensity) text += ` <span class="intensity-badge">${w.intensity}</span>`;
+  if (scoreChip) text += ` ${scoreChip}`;
   text += '</div>';
 
   const primary = [];
@@ -2680,6 +2870,14 @@ function setMixUnit(unit) { _mixUnit = unit; loadTrends(); }
 
 async function loadTrends() {
   if (!currentProfile) return;
+  // One-time effort recalibration nudge after IM range fix (Sprint 1.3).
+  // Older weekly bars will look slightly different — let the user know once.
+  try {
+    if (!localStorage.getItem('nvdp_im_recalib_v1')) {
+      showToast('Vi har kalibrerat effort-skalan — äldre veckor kan se lite annorlunda ut.');
+      localStorage.setItem('nvdp_im_recalib_v1', '1');
+    }
+  } catch (_) { /* ignore */ }
   document.querySelectorAll('#view-trends .chart-skeleton').forEach(el => el.classList.add('active'));
   showViewLoading('view-trends');
   try { await _loadTrends(); } catch (e) { console.error('Trends error:', e); }
@@ -2819,6 +3017,13 @@ async function _loadTrends() {
 
   // Effort per week chart
   renderEffortChart(myWorkouts);
+
+  // CTL / ATL / TSB (performance management chart)
+  renderPmcChart(myWorkouts);
+
+  // Polarization (senaste 4 v) + easy-pace HR trend
+  renderPolarizationCard(myWorkouts);
+  renderEasyHrChart(myWorkouts);
 
   // Weekly summary + recent workouts (moved from dashboard)
   const now2 = new Date();
@@ -2988,29 +3193,31 @@ function _elevationFactor(elevGainM, distKm) {
 }
 
 function _intensityMultiplier(w) {
-  const LO = 0.8, HI = 1.2;
-  // Level 1: Edwards HR zone distribution (best accuracy)
+  // Per ALGORITHM.md §4: IM range [0.70, 1.50] across all 4 fallback levels.
+  const LO = 0.7, HI = 1.5;
+  // Level 1: Edwards HR zone distribution. IM = 0.7 + (WI − 1.0) × 0.2.
   const zs = w.hr_zone_seconds;
   if (zs && Array.isArray(zs) && zs.length >= 5) {
     const total = zs.reduce((a, b) => a + b, 0);
     if (total > 0) {
       const wi = zs.reduce((s, sec, i) => s + (sec / total) * (i + 1), 0);
-      return Math.max(LO, Math.min(HI, LO + (wi - 1.0) * 0.1));
+      return Math.max(LO, Math.min(HI, 0.7 + (wi - 1.0) * 0.2));
     }
   }
-  // Level 2: average HR (use profile max HR if available, else workout max HR)
+  // Level 2: average HR (use profile max HR if available, else workout max HR).
+  // Linear map 50% HRmax → 0.70, 100% HRmax → 1.50 (slope 0.8/0.5).
   const maxHr = (currentProfile?.user_max_hr && currentProfile.user_max_hr >= 100)
     ? currentProfile.user_max_hr : w.max_hr;
   if (w.avg_hr && w.avg_hr >= 30 && maxHr && maxHr >= 100) {
     const pctMax = w.avg_hr / maxHr;
-    return Math.max(LO, Math.min(HI, LO + (pctMax - 0.5) * 0.8));
+    return Math.max(LO, Math.min(HI, 0.7 + (pctMax - 0.5) * (0.8 / 0.5)));
   }
-  // Level 3: Strava perceived exertion (direct RPE 1-10)
+  // Level 3: RPE 1–10. IM = 0.7 + (RPE − 1) × (0.8 / 9).
   if (w.perceived_exertion && w.perceived_exertion >= 1) {
     const rpe = Math.min(10, w.perceived_exertion);
-    return Math.max(LO, Math.min(HI, LO + (rpe - 1) * (0.4 / 9)));
+    return Math.max(LO, Math.min(HI, 0.7 + (rpe - 1) * (0.8 / 9)));
   }
-  // Text labels (Z2, Kvalitet) skipped -- too coarse to be reliable
+  // Level 4: no intensity data → IM = 1.0.
   return 1.0;
 }
 
@@ -3196,6 +3403,390 @@ function renderEffortChart(workouts) {
       <div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> n·h = normaliserade timmar: rå effort delat med ${EFFORT_DISPLAY_DIVISOR} (≈ 1 h @ MET 10), samma skala som graferna ovan. Timmar-linjen är faktisk tid.</div>
     `;
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Performance Management Chart: CTL (42d), ATL (7d), TSB (CTL−ATL).
+//  Impulse = per-day summed calcWorkoutEffort (raw), then EWMA per TrainingPeaks.
+// ─────────────────────────────────────────────────────────────
+
+function _dailyLoadSeries(workouts, days = 120) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const start = addDays(today, -(days - 1));
+  const series = [];
+  const byDate = new Map();
+  for (const w of workouts) {
+    if (!w.workout_date) continue;
+    const d = w.workout_date;
+    byDate.set(d, (byDate.get(d) || 0) + calcWorkoutEffort(w));
+  }
+  for (let i = 0; i < days; i++) {
+    const d = addDays(start, i);
+    const iso = isoDate(d);
+    series.push({ date: iso, load: byDate.get(iso) || 0 });
+  }
+  return series;
+}
+
+function _ewma(values, tau) {
+  const alpha = 1 - Math.exp(-1 / tau);
+  let prev = 0;
+  const out = new Array(values.length);
+  for (let i = 0; i < values.length; i++) {
+    prev = prev + alpha * (values[i] - prev);
+    out[i] = prev;
+  }
+  return out;
+}
+
+function renderPmcChart(workouts) {
+  const canvas = document.getElementById('chart-pmc');
+  if (!canvas || typeof Chart === 'undefined') return;
+  if (window._chartPmc) window._chartPmc.destroy();
+
+  const series = _dailyLoadSeries(workouts, 120);
+  if (series.every((s) => s.load === 0)) {
+    const statusEl = document.getElementById('pmc-status');
+    if (statusEl) statusEl.textContent = 'För lite data — logga några pass så fylls grafen.';
+    const sub = document.getElementById('pmc-subtitle');
+    if (sub) sub.textContent = '';
+    return;
+  }
+
+  // Scale raw effort to n·h display to align with the effort chart.
+  const loads = series.map((s) => effortRawToDisplay(s.load));
+  const ctl = _ewma(loads, 42);
+  const atl = _ewma(loads, 7);
+  const tsb = ctl.map((c, i) => c - atl[i]);
+  const labels = series.map((s) => {
+    const d = new Date(s.date + 'T00:00:00');
+    return `${d.getDate()}/${d.getMonth() + 1}`;
+  });
+
+  const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
+  const ctlColor = 'rgba(46, 134, 193, 0.9)';
+  const atlColor = 'rgba(231, 76, 60, 0.9)';
+  const tsbColor = 'rgba(46, 204, 113, 0.85)';
+
+  window._chartPmc = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'CTL (fitness)',
+          data: ctl.map((v) => +v.toFixed(2)),
+          borderColor: ctlColor,
+          backgroundColor: 'rgba(46,134,193,0.15)',
+          borderWidth: 2,
+          pointRadius: 0,
+          fill: true,
+          tension: 0.25,
+          yAxisID: 'y',
+        },
+        {
+          label: 'ATL (trötthet)',
+          data: atl.map((v) => +v.toFixed(2)),
+          borderColor: atlColor,
+          borderWidth: 2,
+          pointRadius: 0,
+          fill: false,
+          tension: 0.25,
+          yAxisID: 'y',
+        },
+        {
+          label: 'TSB (form)',
+          data: tsb.map((v) => +v.toFixed(2)),
+          borderColor: tsbColor,
+          borderWidth: 2,
+          pointRadius: 0,
+          borderDash: [5, 4],
+          fill: false,
+          tension: 0.25,
+          yAxisID: 'y1',
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, boxWidth: 10 } },
+        tooltip: {
+          callbacks: {
+            label: (c) => `${c.dataset.label}: ${c.parsed.y.toFixed(1)} n·h`,
+          },
+        },
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          ticks: { color: textColor, callback: (v) => v + ' n·h' },
+          title: { display: true, text: 'CTL / ATL (n·h)', color: textColor },
+        },
+        y1: {
+          position: 'right',
+          grid: { display: false },
+          ticks: { color: textColor, callback: (v) => (v > 0 ? '+' : '') + v },
+          title: { display: true, text: 'TSB', color: textColor },
+        },
+        x: {
+          grid: { display: false },
+          ticks: { color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
+        },
+      },
+    },
+  });
+
+  const lastCtl = ctl[ctl.length - 1];
+  const lastAtl = atl[atl.length - 1];
+  const lastTsb = tsb[tsb.length - 1];
+  const prev7Ctl = ctl[ctl.length - 8] ?? 0;
+  const ctlDelta = lastCtl - prev7Ctl;
+
+  const sub = document.getElementById('pmc-subtitle');
+  if (sub) {
+    const deltaStr = (ctlDelta >= 0 ? '+' : '') + ctlDelta.toFixed(1);
+    sub.textContent = `Fitness ${lastCtl.toFixed(1)} n·h (${deltaStr} senaste veckan)`;
+  }
+
+  const legendEl = document.getElementById('pmc-legend');
+  if (legendEl) {
+    legendEl.innerHTML = `
+      <div class="pmc-legend-item"><span class="pmc-dot" style="background:${ctlColor}"></span><strong>CTL</strong> — rullande 42-dagars belastning (din form).</div>
+      <div class="pmc-legend-item"><span class="pmc-dot" style="background:${atlColor}"></span><strong>ATL</strong> — rullande 7-dagars belastning (akut trötthet).</div>
+      <div class="pmc-legend-item"><span class="pmc-dot" style="background:${tsbColor}"></span><strong>TSB</strong> — form − trötthet. &gt;+5 = peakar, −10 till −30 = bygger, &lt;−30 = risk.</div>
+    `;
+  }
+
+  const statusEl = document.getElementById('pmc-status');
+  if (statusEl) {
+    let band, msg;
+    if (lastTsb > 5) { band = 'fresh'; msg = `Bra form (TSB ${lastTsb.toFixed(0)}). Bra tajming för ett nyckelpass eller tävling.`; }
+    else if (lastTsb > -10) { band = 'neutral'; msg = `Neutral (TSB ${lastTsb.toFixed(0)}). Du bygger jämnt.`; }
+    else if (lastTsb > -30) { band = 'productive'; msg = `Produktiv belastning (TSB ${lastTsb.toFixed(0)}). Håll i, planera deload snart.`; }
+    else { band = 'risk'; msg = `Hög trötthet (TSB ${lastTsb.toFixed(0)}). Dra ner — risk för överträning.`; }
+    statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(msg)} <span class="pmc-atl-note">ATL ${lastAtl.toFixed(1)} n·h</span>`;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Polarization mix (last 4 weeks): easy (Z1-Z2) / mod (Z3) / hard (Z4-Z5).
+//  Target for polarized training: ~80/0-10/20 by time-in-zone.
+// ─────────────────────────────────────────────────────────────
+
+const _POLARIZATION_BANDS = {
+  easy: new Set(['Z1', 'Z2']),
+  mod: new Set(['Z3', 'mixed']),
+  hard: new Set(['Z4', 'Z5', 'Kvalitet']),
+};
+
+function _classifyWorkoutIntensity(w) {
+  if (w.activity_type === 'Vila') return null;
+  if (w.hr_zone_seconds && Array.isArray(w.hr_zone_seconds) && w.hr_zone_seconds.length >= 5) {
+    const [z1, z2, z3, z4, z5] = w.hr_zone_seconds;
+    return { easy: (z1 || 0) + (z2 || 0), mod: z3 || 0, hard: (z4 || 0) + (z5 || 0) };
+  }
+  const mins = w.duration_minutes || 0;
+  if (mins <= 0) return null;
+  const seconds = mins * 60;
+  if (w.intensity && _POLARIZATION_BANDS.easy.has(w.intensity)) return { easy: seconds, mod: 0, hard: 0 };
+  if (w.intensity && _POLARIZATION_BANDS.mod.has(w.intensity)) return { easy: 0, mod: seconds, hard: 0 };
+  if (w.intensity && _POLARIZATION_BANDS.hard.has(w.intensity)) return { easy: 0, mod: 0, hard: seconds };
+  // Default: treat unspecified as easy (common for low-intensity endurance).
+  return { easy: seconds, mod: 0, hard: 0 };
+}
+
+function renderPolarizationCard(workouts) {
+  const subEl = document.getElementById('polarization-subtitle');
+  const legendEl = document.getElementById('polarization-legend');
+  const statusEl = document.getElementById('polarization-status');
+  const segEasy = document.getElementById('pol-seg-easy');
+  const segMod = document.getElementById('pol-seg-mod');
+  const segHard = document.getElementById('pol-seg-hard');
+  if (!subEl || !legendEl || !statusEl || !segEasy || !segMod || !segHard) return;
+
+  const today = new Date();
+  const cutoff = addDays(today, -28);
+  const cutoffIso = isoDate(cutoff);
+  const recent = workouts.filter((w) => w.workout_date && w.workout_date >= cutoffIso);
+
+  let easy = 0, mod = 0, hard = 0;
+  for (const w of recent) {
+    const cls = _classifyWorkoutIntensity(w);
+    if (!cls) continue;
+    easy += cls.easy; mod += cls.mod; hard += cls.hard;
+  }
+  const total = easy + mod + hard;
+  if (total === 0) {
+    segEasy.style.width = '100%'; segMod.style.width = '0%'; segHard.style.width = '0%';
+    segEasy.style.background = 'var(--bg-card-hover)';
+    legendEl.innerHTML = '';
+    statusEl.textContent = 'För lite data — logga några pass så fylls mätaren.';
+    subEl.textContent = '';
+    return;
+  }
+
+  const pEasy = (easy / total) * 100;
+  const pMod = (mod / total) * 100;
+  const pHard = (hard / total) * 100;
+
+  segEasy.style.width = pEasy.toFixed(1) + '%';
+  segMod.style.width = pMod.toFixed(1) + '%';
+  segHard.style.width = pHard.toFixed(1) + '%';
+  segEasy.style.background = '';
+  segEasy.textContent = pEasy >= 12 ? Math.round(pEasy) + '%' : '';
+  segMod.textContent = pMod >= 12 ? Math.round(pMod) + '%' : '';
+  segHard.textContent = pHard >= 12 ? Math.round(pHard) + '%' : '';
+
+  const fmt = (sec) => (sec / 3600).toFixed(1) + ' h';
+  legendEl.innerHTML = `
+    <div class="polarization-legend-item"><span class="pol-dot pol-dot--easy"></span>Easy (Z1-Z2) — ${fmt(easy)} · ${Math.round(pEasy)}%</div>
+    <div class="polarization-legend-item"><span class="pol-dot pol-dot--mod"></span>Moderat (Z3) — ${fmt(mod)} · ${Math.round(pMod)}%</div>
+    <div class="polarization-legend-item"><span class="pol-dot pol-dot--hard"></span>Hårt (Z4-Z5) — ${fmt(hard)} · ${Math.round(pHard)}%</div>
+  `;
+
+  subEl.textContent = `Mål: ~80% easy, ~20% hårt`;
+
+  let band, msg;
+  if (pEasy >= 75 && pHard >= 10 && pHard <= 25 && pMod <= 15) {
+    band = 'fresh'; msg = `Polariserad mix (${Math.round(pEasy)}/${Math.round(pMod)}/${Math.round(pHard)}). Exakt där du ska vara.`;
+  } else if (pEasy < 70) {
+    band = 'risk'; msg = `Bara ${Math.round(pEasy)}% easy. För lite lågintensivt — bygg mer aerob bas i Z1-Z2.`;
+  } else if (pHard > 25) {
+    band = 'risk'; msg = `${Math.round(pHard)}% i Z4-Z5. För mycket hårt — risk för överträning.`;
+  } else if (pHard < 8) {
+    band = 'neutral'; msg = `Bara ${Math.round(pHard)}% hårt. Du kan lägga in mer kvalitet om formen tillåter.`;
+  } else if (pMod > 20) {
+    band = 'productive'; msg = `${Math.round(pMod)}% i Z3 ("gråzonen"). Försök styra mer mot Z2 eller Z4 istället.`;
+  } else {
+    band = 'neutral'; msg = `Mix: ${Math.round(pEasy)}/${Math.round(pMod)}/${Math.round(pHard)}. OK balans.`;
+  }
+  statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(msg)}`;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Easy-pace HR trend: rolling weekly avg HR for Z1-Z2 running.
+//  Lower avg HR at same pace = aerobic adaptation.
+// ─────────────────────────────────────────────────────────────
+
+function renderEasyHrChart(workouts) {
+  const canvas = document.getElementById('chart-easy-hr');
+  const statusEl = document.getElementById('easy-hr-status');
+  const subEl = document.getElementById('easy-hr-subtitle');
+  if (!canvas || !statusEl || !subEl || typeof Chart === 'undefined') return;
+  if (window._chartEasyHr) window._chartEasyHr.destroy();
+
+  const runs = workouts.filter((w) =>
+    w.activity_type === 'Löpning' &&
+    w.avg_hr && w.avg_hr >= 80 &&
+    (w.intensity === 'Z1' || w.intensity === 'Z2') &&
+    w.workout_date
+  );
+
+  const byWeek = new Map();
+  for (const w of runs) {
+    const mon = mondayOfWeek(new Date(w.workout_date + 'T00:00:00'));
+    const key = isoDate(mon);
+    if (!byWeek.has(key)) byWeek.set(key, { hrSum: 0, minSum: 0, paceSum: 0, paceMinSum: 0 });
+    const entry = byWeek.get(key);
+    entry.hrSum += w.avg_hr * w.duration_minutes;
+    entry.minSum += w.duration_minutes;
+    if (w.avg_speed_kmh && w.avg_speed_kmh > 0) {
+      entry.paceSum += w.avg_speed_kmh * w.duration_minutes;
+      entry.paceMinSum += w.duration_minutes;
+    }
+  }
+  const keys = [...byWeek.keys()].sort();
+
+  if (keys.length < 2) {
+    statusEl.textContent = 'Behöver minst 2 veckor med loggad Z1/Z2-löpning och puls.';
+    subEl.textContent = '';
+    return;
+  }
+
+  const labels = keys.map((k) => {
+    const mon = parseISOWeekKeyLocal(k);
+    return `V${weekNumber(mon)}`;
+  });
+  const hrData = keys.map((k) => +((byWeek.get(k).hrSum / byWeek.get(k).minSum) || 0).toFixed(1));
+  const paceData = keys.map((k) => {
+    const e = byWeek.get(k);
+    return e.paceMinSum > 0 ? +(e.paceSum / e.paceMinSum).toFixed(2) : null;
+  });
+  const hasPace = paceData.some((v) => v !== null);
+
+  const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
+  const datasets = [
+    {
+      label: 'Avg HR (bpm)',
+      data: hrData,
+      borderColor: 'rgba(231, 76, 60, 0.9)',
+      backgroundColor: 'rgba(231, 76, 60, 0.1)',
+      borderWidth: 2,
+      pointRadius: 3,
+      fill: true,
+      tension: 0.25,
+      yAxisID: 'y',
+    },
+  ];
+  if (hasPace) {
+    datasets.push({
+      label: 'Tempo (km/h)',
+      data: paceData,
+      borderColor: 'rgba(46, 134, 193, 0.9)',
+      borderWidth: 2,
+      pointRadius: 3,
+      fill: false,
+      tension: 0.25,
+      yAxisID: 'y1',
+      spanGaps: true,
+    });
+  }
+
+  window._chartEasyHr = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, boxWidth: 10 } },
+        tooltip: {
+          callbacks: {
+            label: (c) => c.dataset.label === 'Avg HR (bpm)'
+              ? `Puls: ${c.parsed.y.toFixed(0)} bpm`
+              : `Tempo: ${c.parsed.y.toFixed(2)} km/h`,
+          },
+        },
+      },
+      scales: {
+        y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor, callback: (v) => v + ' bpm' }, title: { display: true, text: 'Avg HR', color: textColor } },
+        y1: { position: 'right', grid: { display: false }, ticks: { color: textColor, callback: (v) => v.toFixed(1) + ' km/h' }, title: { display: true, text: 'Tempo', color: textColor } },
+        x: { grid: { display: false }, ticks: { color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
+      },
+    },
+  });
+
+  const recentWeeks = hrData.slice(-4);
+  const earlierWeeks = hrData.slice(-8, -4);
+  const avgRecent = recentWeeks.reduce((a, b) => a + b, 0) / (recentWeeks.length || 1);
+  const avgEarlier = earlierWeeks.length ? earlierWeeks.reduce((a, b) => a + b, 0) / earlierWeeks.length : null;
+  subEl.textContent = `Senaste 4 veckor: ${avgRecent.toFixed(0)} bpm`;
+
+  if (avgEarlier === null) {
+    statusEl.textContent = 'Bygg historik: logga Z1/Z2-löpning med puls minst 8 veckor för att se aerob-trenden.';
+    return;
+  }
+  const delta = avgRecent - avgEarlier;
+  let band, msg;
+  if (delta <= -2) { band = 'fresh'; msg = `Aerob förbättring — snittpulsen på easy har sjunkit ${Math.abs(delta).toFixed(1)} bpm mot förra 4-veckors-perioden.`; }
+  else if (delta >= 3) { band = 'risk'; msg = `Pulsen på easy har stigit ${delta.toFixed(1)} bpm — kolla sömn, stress och att Z2 fortfarande är pratstempo.`; }
+  else { band = 'neutral'; msg = `Stabil aerob profil (${delta >= 0 ? '+' : ''}${delta.toFixed(1)} bpm mot förra 4-veckors).`; }
+  statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(msg)}`;
 }
 
 function calcStreak(workouts, profileId) {
@@ -4618,6 +5209,11 @@ let _schemaEditMode = false;
 let _wizardStep = 0;
 let _wizardShowIntro = true;
 let _wizardGoalType = null;
+// Realism step state. _wizardRealism is the latest assess-feasibility
+// response; _wizardRealismCTA is the current "next" button label (varies
+// from "Generera schema" to "Generera ändå" depending on risk).
+let _wizardRealism = null;
+let _wizardRealismCTA = 'Generera schema';
 
 // ── Fetch active plan ──
 
@@ -4754,6 +5350,8 @@ function openPlanWizard() {
   _wizardStep = 0;
   _wizardShowIntro = true;
   _wizardGoalType = null;
+  _wizardRealism = null;
+  _wizardRealismCTA = 'Generera schema';
 
   const grid = document.getElementById('wizard-goal-grid');
   grid.innerHTML = GOAL_TYPES.map(g =>
@@ -4778,10 +5376,18 @@ function openPlanWizard() {
   document.getElementById('wiz-start-date').value = isoDate(nextMon);
 
   document.getElementById('wiz-resting-hr').value = '';
-  document.getElementById('wiz-max-hr').value = '';
+  const mhr = document.getElementById('wiz-max-hr');
+  if (mhr) mhr.value = currentProfile?.user_max_hr ?? '';
   document.getElementById('wiz-recent-5k').value = '';
   document.getElementById('wiz-recent-10k').value = '';
   document.getElementById('wiz-easy-pace').value = '';
+
+  const freeText = document.getElementById('wiz-free-text');
+  if (freeText) freeText.value = '';
+  const vdp = document.getElementById('wiz-philosophy-vdp');
+  if (vdp) vdp.checked = false;
+  const philoText = document.getElementById('wiz-philosophy-text');
+  if (philoText) philoText.value = '';
 
   autoPopulateBaseline();
   updateWizardUI();
@@ -4841,12 +5447,16 @@ async function autoPopulateBaseline() {
 
 function updateWizardUI() {
   // Hide every wizard pane first, then activate the one matching our state.
-  for (let i = 0; i <= 2; i++) {
+  // Step 4 is the realism check; it has its own pane (#wizard-step-realism)
+  // and is handled separately below because it has no intro screen.
+  for (let i = 0; i <= 3; i++) {
     const introEl = document.getElementById(`wizard-intro-${i}`);
     const stepEl = document.getElementById(`wizard-step-${i}`);
     if (introEl) introEl.classList.toggle('active', _wizardShowIntro && i === _wizardStep);
     if (stepEl) stepEl.classList.toggle('active', !_wizardShowIntro && i === _wizardStep);
   }
+  const realismEl = document.getElementById('wizard-step-realism');
+  if (realismEl) realismEl.classList.toggle('active', _wizardStep === 4);
 
   // Progress dots: current step is active; earlier steps are done. On intro,
   // the current step has not been completed yet, so use the same rule.
@@ -4856,23 +5466,32 @@ function updateWizardUI() {
     dot.classList.toggle('done', s < _wizardStep);
   });
 
-  // Back button is hidden only on the very first intro screen.
+  // Back button is removed (not just hidden) on the very first intro screen so
+  // the primary "Fortsätt" button can fill the full width of the nav row.
   const prevBtn = document.getElementById('wiz-prev');
   const atFirstScreen = _wizardStep === 0 && _wizardShowIntro;
-  prevBtn.style.visibility = atFirstScreen ? 'hidden' : 'visible';
+  prevBtn.style.display = atFirstScreen ? 'none' : '';
+  prevBtn.style.visibility = '';
+  const navEl = document.getElementById('wizard-nav');
+  if (navEl) navEl.classList.toggle('is-single', atFirstScreen);
 
-  // Next button label reflects where we're going.
+  // Next button label reflects where we're going. Step 3 now advances to the
+  // realism check (step 4) instead of generating directly, so the label on
+  // step 3 is "Analysera mål". Step 4's CTA ("Generera ändå" or "Generera
+  // schema") is rendered dynamically based on the assessed risk level.
   const nextBtn = document.getElementById('wiz-next');
   if (_wizardShowIntro) {
     nextBtn.textContent = 'Fortsätt';
-  } else if (_wizardStep === 2) {
-    nextBtn.textContent = 'Generera schema';
+  } else if (_wizardStep === 3) {
+    nextBtn.textContent = 'Analysera mål';
+  } else if (_wizardStep === 4) {
+    nextBtn.textContent = _wizardRealismCTA || 'Generera schema';
   } else {
     nextBtn.textContent = 'Nästa';
   }
 
   const stepBanner = document.getElementById('wizard-step-banner');
-  if (stepBanner) stepBanner.textContent = `Steg ${_wizardStep + 1} av 3`;
+  if (stepBanner) stepBanner.textContent = `Steg ${_wizardStep + 1} av 5`;
 
   document.querySelectorAll('.wiz-day-btn').forEach(btn => {
     btn.onclick = () => btn.classList.toggle('active');
@@ -4887,7 +5506,15 @@ function updateWizardUI() {
 }
 
 function wizardPrev() {
-  // Flow backwards through: intro 0 → form 0 → intro 1 → form 1 → intro 2 → form 2
+  // Flow backwards through: intro 0 → form 0 → intro 1 → form 1 → intro 2 →
+  // form 2 → intro 3 → form 3 → realism (step 4, no intro). From the realism
+  // step, "back" returns to form 3 so the user can adjust preferences.
+  if (_wizardStep === 4) {
+    _wizardStep = 3;
+    _wizardShowIntro = false;
+    updateWizardUI();
+    return;
+  }
   if (_wizardShowIntro) {
     if (_wizardStep === 0) return; // already at the very start
     _wizardStep--;
@@ -4912,17 +5539,40 @@ async function wizardNext() {
     return;
   }
 
-  if (_wizardStep < 2) {
+  if (_wizardStep < 3) {
     _wizardStep++;
     _wizardShowIntro = true;
     updateWizardUI();
     return;
   }
 
-  await submitPlanWizard();
+  // Step 3 → step 4 (realism). Step 4 → submit. We pre-validate basic
+  // required fields here so the assess-feasibility call has something to
+  // work with — submitPlanWizard repeats these checks for the actual
+  // generate call.
+  if (_wizardStep === 3) {
+    const payload = collectWizardPayload();
+    if (!payload) return; // collectWizardPayload showed the appropriate alert
+    _wizardStep = 4;
+    _wizardShowIntro = false;
+    _wizardRealism = null;
+    _wizardRealismCTA = 'Generera schema';
+    updateWizardUI();
+    await runRealismCheck(payload);
+    return;
+  }
+
+  if (_wizardStep === 4) {
+    await submitPlanWizard();
+    return;
+  }
 }
 
-async function submitPlanWizard() {
+// Reads every wizard field and returns a generate-plan payload, or null if
+// validation fails (in which case the function shows the alert itself).
+// Extracted so the realism step (step 4) can build the same payload to
+// pre-flight against /assess-feasibility.
+function collectWizardPayload() {
   const goalText = document.getElementById('wiz-goal-text').value.trim();
   const goalDate = document.getElementById('wiz-goal-date').value || null;
   const goalTime = document.getElementById('wiz-goal-time').value.trim();
@@ -4958,12 +5608,12 @@ async function submitPlanWizard() {
   const startDate = document.getElementById('wiz-start-date').value;
 
   if (!fullGoalText) {
-    await showAlertModal('Saknar mål', 'Beskriv ditt mål innan du genererar.');
-    return;
+    showAlertModal('Saknar mål', 'Beskriv ditt mål innan du genererar.');
+    return null;
   }
   if (activityTypes.length === 0) {
-    await showAlertModal('Saknar aktiviteter', 'Välj minst en aktivitetstyp.');
-    return;
+    showAlertModal('Saknar aktiviteter', 'Välj minst en aktivitetstyp.');
+    return null;
   }
 
   const activityMix = {};
@@ -4972,7 +5622,7 @@ async function submitPlanWizard() {
     activityMix[t] = i === activityTypes.length - 1 ? 100 - pct * (activityTypes.length - 1) : pct;
   });
 
-  const payload = {
+  return {
     profile_id: currentProfile.id,
     goal_type: _wizardGoalType,
     goal_text: fullGoalText,
@@ -5000,9 +5650,132 @@ async function submitPlanWizard() {
       activity_types: activityTypes,
       include_gym: activityTypes.includes('Gym'),
       preferred_rest_days: restDays,
+      free_text: document.getElementById('wiz-free-text')?.value?.trim() || null,
+      training_philosophy: {
+        preset: document.getElementById('wiz-philosophy-vdp')?.checked ? 'van_der_poel' : null,
+        custom: document.getElementById('wiz-philosophy-text')?.value?.trim() || null,
+      },
     },
     start_date: startDate,
   };
+}
+
+// Calls the deterministic /assess-feasibility endpoint and renders the
+// realism callout. Always shows the panel — even on a network failure
+// we let the user proceed (we just hide the warning UI).
+async function runRealismCheck(payload) {
+  const loadingEl = document.getElementById('wiz-realism-loading');
+  const contentEl = document.getElementById('wiz-realism-content');
+  loadingEl.classList.remove('hidden');
+  contentEl.classList.add('hidden');
+
+  try {
+    const session = (await sb.auth.getSession()).data.session;
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/assess-feasibility', {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'assess_failed');
+    _wizardRealism = result;
+    renderRealism(result);
+  } catch (e) {
+    console.warn('Realism check failed, showing soft fallback:', e);
+    // Fail soft: render a minimal "all clear" panel and let the user
+    // proceed. We don't want a flaky network call to block plan creation.
+    _wizardRealism = null;
+    renderRealism({
+      profile: null,
+      feasibility: {
+        riskLevel: 'comfortable',
+        factors: [],
+        coachingNote: 'Vi kunde inte göra en pre-koll just nu — du kan fortfarande generera planen och se resultatet.',
+        recommendedAdjustments: [],
+      },
+    });
+  }
+  loadingEl.classList.add('hidden');
+  contentEl.classList.remove('hidden');
+}
+
+const RISK_LABELS = {
+  comfortable: 'Rimligt mål',
+  ambitious: 'Ambitiöst mål',
+  aggressive: 'Aggressivt mål',
+  unrealistic: 'Orealistiskt på utsatt tid',
+};
+
+function renderRealism(result) {
+  const f = result.feasibility || {};
+  const p = result.profile || null;
+  const risk = f.riskLevel || 'comfortable';
+
+  const badgeEl = document.getElementById('wiz-realism-badge');
+  badgeEl.className = `wiz-realism-badge risk-${risk}`;
+  badgeEl.textContent = RISK_LABELS[risk] || risk;
+
+  document.getElementById('wiz-realism-note').textContent = f.coachingNote || '';
+
+  const profEl = document.getElementById('wiz-realism-profile');
+  if (p) {
+    const qp = p.qualityPerPhase || {};
+    profEl.innerHTML =
+      `Profil: <strong>${escapeHTML(p.tier)}</strong> · ` +
+      `~${p.weeklyVolumeKm ?? '?'} km/v · ` +
+      `kvalitet/v: base ${qp.base ?? '?'} · build ${qp.build ?? '?'} · peak ${qp.peak ?? '?'} · taper ${qp.taper ?? '?'} ` +
+      `(max ${p.qualityCapPerWeek ?? '?'}/v).`;
+    profEl.classList.remove('hidden');
+  } else {
+    profEl.classList.add('hidden');
+  }
+
+  const factorsEl = document.getElementById('wiz-realism-factors');
+  const factors = Array.isArray(f.factors) ? [...f.factors] : [];
+  // Sort: high → warn → ok so the most important issue is at the top.
+  const sevOrder = { high: 0, warn: 1, ok: 2 };
+  factors.sort((a, b) => (sevOrder[a.severity] ?? 9) - (sevOrder[b.severity] ?? 9));
+  if (factors.length === 0) {
+    factorsEl.innerHTML = '';
+  } else {
+    factorsEl.innerHTML = factors.map(fac => {
+      const icon = fac.severity === 'high' ? '!' : fac.severity === 'warn' ? '⚠' : '✓';
+      return `<div class="wiz-realism-factor sev-${escapeHTML(fac.severity)}">
+        <span class="wiz-realism-factor-icon">${icon}</span>
+        <span>${escapeHTML(fac.text)}</span>
+      </div>`;
+    }).join('');
+  }
+
+  const adjEl = document.getElementById('wiz-realism-adjustments');
+  const adjustments = Array.isArray(f.recommendedAdjustments) ? f.recommendedAdjustments : [];
+  if (adjustments.length === 0) {
+    adjEl.innerHTML = '';
+  } else {
+    adjEl.innerHTML =
+      `<div class="wiz-realism-adjustments-title">Förslag på justeringar</div>` +
+      `<ul>${adjustments.map(a => `<li>${escapeHTML(a)}</li>`).join('')}</ul>`;
+  }
+
+  const hint = document.getElementById('wiz-realism-cta-hint');
+  if (risk === 'aggressive' || risk === 'unrealistic') {
+    _wizardRealismCTA = 'Generera ändå';
+    hint.textContent = 'Du kan välja "Tillbaka" för att justera målet, eller fortsätta ändå.';
+  } else {
+    _wizardRealismCTA = 'Generera schema';
+    hint.textContent = '';
+  }
+  // Refresh the next-button label.
+  updateWizardUI();
+}
+
+async function submitPlanWizard() {
+  const payload = collectWizardPayload();
+  if (!payload) return;
 
   // Show loading (hides all intros + form steps; starts fact rotation)
   document.querySelectorAll('.wizard-step').forEach(s => s.classList.remove('active'));
@@ -5033,7 +5806,15 @@ async function submitPlanWizard() {
     document.getElementById('wizard-step-loading').style.display = 'none';
     document.getElementById('wizard-nav').style.display = '';
 
-    await showAlertModal('Schema skapat!', `${result.plan_name}\n${result.weeks} veckor: ${result.start_date} till ${result.end_date}`);
+    // Surface the coaching note from the feasibility assessment in the
+    // success modal so the user sees it before the alert is dismissed.
+    const coachingNote = result.feasibility?.coachingNote
+      ? `\n\nCoach: ${result.feasibility.coachingNote}`
+      : '';
+    await showAlertModal(
+      'Schema skapat!',
+      `${result.plan_name}\n${result.weeks} veckor: ${result.start_date} till ${result.end_date}${coachingNote}`,
+    );
 
     _activePlan = null;
     _activePlanWeeks = [];
@@ -5045,9 +5826,12 @@ async function submitPlanWizard() {
     stopWizRunLoader();
     document.getElementById('wizard-step-loading').style.display = 'none';
     document.getElementById('wizard-nav').style.display = '';
-    _wizardStep = 2;
+    // Return to the realism step (step 4) so the user can retry without
+    // losing the realism context.
+    _wizardStep = 4;
     _wizardShowIntro = false;
     updateWizardUI();
+    if (_wizardRealism) renderRealism(_wizardRealism);
     await showAlertModal('Fel', 'Kunde inte generera schema: ' + e.message);
   }
 }
@@ -5099,7 +5883,7 @@ function startWizRunLoader() {
   stopWizRunLoader();
   _wizRunFactIndex = -1;
   showNextWizRunFact();
-  _wizRunFactTimer = setInterval(showNextWizRunFact, 3800);
+  _wizRunFactTimer = setInterval(showNextWizRunFact, 11400);
 }
 
 function stopWizRunLoader() {
@@ -5177,7 +5961,16 @@ function buildPlanPreviewHTML(plan, preview, weekIdx) {
   const isActive = plan.status === 'active';
   const phaseLabel = PHASE_LABELS[week.phase] || week.phase || '';
 
+  // Plan summary now begins with the feasibility coaching note (prepended
+  // by generate-plan). Surface it as a callout above the phase grid so the
+  // user is reminded what the realism check said when revisiting the plan.
+  const summaryText = (plan.summary || '').trim();
+  const summaryCallout = summaryText
+    ? `<div class="plan-coaching-callout"><div class="plan-coaching-icon">💡</div><div class="plan-coaching-text">${escapeHTML(summaryText)}</div></div>`
+    : '';
+
   return `
+    ${summaryCallout}
     <div class="pm-preview-summary">
       <div class="pm-preview-phases">${phaseStr}</div>
       <div class="pm-preview-weeks-label">${weeks.length} veckor · ${plan.start_date} — ${plan.end_date}</div>
@@ -5884,14 +6677,18 @@ async function submitPlanWorkoutAI() {
 let _planEditHistory = [];
 let _planEditProposal = null;
 let _planEditCurrentPlan = null;
+let _planEditPreviewWeek = 0;
+let _planEditChangedOnly = false;
 
 function openPlanEditModal() {
   if (!_activePlan) return;
   _planEditHistory = [];
   _planEditProposal = null;
   _planEditCurrentPlan = null;
+  _planEditPreviewWeek = 0;
+  _planEditChangedOnly = false;
   const chatEl = document.getElementById('plan-edit-chat');
-  chatEl.innerHTML = `<div class="plan-edit-msg bot">Beskriv vilka ändringar du vill göra i schemat, t.ex. "byt torsdagens pass mot tempo" eller "minska volymen vecka 3". Du får granska förslaget innan det sparas.</div>`;
+  chatEl.innerHTML = `<div class="plan-edit-msg bot">Beskriv vilka ändringar du vill göra i schemat, t.ex. "byt torsdagens pass mot tempo" eller "lägg långpasset på lördagar". Du får granska förslaget innan det sparas.</div>`;
   document.getElementById('plan-edit-input').value = '';
   document.getElementById('plan-edit-modal').classList.remove('hidden');
 }
@@ -5901,32 +6698,297 @@ function closePlanEditModal() {
   _planEditProposal = null;
 }
 
-function _buildDiffSummary(oldPlan, newPlan) {
-  const DAY = ['Man', 'Tis', 'Ons', 'Tors', 'Fre', 'Lor', 'Son'];
-  const changes = [];
-  const oldWeeks = oldPlan.weeks || [];
-  const newWeeks = newPlan.weeks || [];
-  const maxWeeks = Math.max(oldWeeks.length, newWeeks.length);
+function _findWorkout(week, dayOfWeek) {
+  return (week?.workouts || []).find(w => w.day_of_week === dayOfWeek) || null;
+}
 
-  for (let wi = 0; wi < maxWeeks; wi++) {
-    const ow = oldWeeks[wi];
-    const nw = newWeeks[wi];
-    if (!nw) { changes.push(`Vecka ${wi + 1}: borttagen`); continue; }
-    if (!ow) { changes.push(`Vecka ${nw.week_number}: ny (${nw.phase})`); continue; }
-    const owWo = ow.workouts || [];
-    const nwWo = nw.workouts || [];
+function _workoutsDiffer(a, b) {
+  if (!a && !b) return false;
+  if (!a || !b) return true;
+  if ((a.is_rest ? 1 : 0) !== (b.is_rest ? 1 : 0)) return true;
+  if ((a.activity_type || '') !== (b.activity_type || '')) return true;
+  if ((a.label || '') !== (b.label || '')) return true;
+  if ((a.description || '') !== (b.description || '')) return true;
+  if ((a.target_duration_minutes || 0) !== (b.target_duration_minutes || 0)) return true;
+  if ((a.target_distance_km ?? null) !== (b.target_distance_km ?? null)) return true;
+  if ((a.intensity_zone || null) !== (b.intensity_zone || null)) return true;
+  return false;
+}
+
+function _countChangedWeeks(oldPlan, newPlan) {
+  const weeks = newPlan?.weeks || [];
+  let total = 0;
+  for (let wi = 0; wi < weeks.length; wi++) {
+    const ow = oldPlan?.weeks?.[wi];
+    const nw = weeks[wi];
     for (let d = 0; d < 7; d++) {
-      const o = owWo.find(w => w.day_of_week === d);
-      const n = nwWo.find(w => w.day_of_week === d);
-      if (!o && !n) continue;
-      const oLabel = o ? (o.is_rest ? 'Vila' : `${o.label || o.activity_type} ${o.target_duration_minutes || 0}min ${o.intensity_zone || ''}`.trim()) : '(tom)';
-      const nLabel = n ? (n.is_rest ? 'Vila' : `${n.label || n.activity_type} ${n.target_duration_minutes || 0}min ${n.intensity_zone || ''}`.trim()) : '(tom)';
-      if (oLabel !== nLabel) {
-        changes.push(`v${nw.week_number} ${DAY[d]}: ${oLabel} → ${nLabel}`);
-      }
+      if (_workoutsDiffer(_findWorkout(ow, d), _findWorkout(nw, d))) { total++; break; }
     }
   }
-  return changes.length > 0 ? changes : ['Inga synliga ändringar.'];
+  return total;
+}
+
+function _countChangedWorkouts(oldPlan, newPlan) {
+  const weeks = newPlan?.weeks || [];
+  let total = 0;
+  for (let wi = 0; wi < weeks.length; wi++) {
+    const ow = oldPlan?.weeks?.[wi];
+    const nw = weeks[wi];
+    for (let d = 0; d < 7; d++) {
+      if (_workoutsDiffer(_findWorkout(ow, d), _findWorkout(nw, d))) total++;
+    }
+  }
+  return total;
+}
+
+function _peFormatWorkoutSummary(wo) {
+  if (!wo) return '(tom)';
+  if (wo.is_rest) return 'Vila';
+  const parts = [wo.label || wo.activity_type || 'Pass'];
+  if (wo.target_duration_minutes) parts.push(`${wo.target_duration_minutes} min`);
+  if (wo.intensity_zone) parts.push(wo.intensity_zone);
+  return parts.join(' · ');
+}
+
+function renderProposalPreview() {
+  const container = document.getElementById('pe-preview');
+  if (!container || !_planEditProposal || !_planEditCurrentPlan) return;
+  const DAY = ['Mån', 'Tis', 'Ons', 'Tors', 'Fre', 'Lör', 'Sön'];
+  const newWeeks = _planEditProposal.weeks || [];
+  const oldWeeks = _planEditCurrentPlan.weeks || [];
+  if (!newWeeks.length) {
+    container.innerHTML = `<div class="pe-preview-empty">Inga veckor i förslaget.</div>`;
+    return;
+  }
+
+  const weekIdx = Math.max(0, Math.min(_planEditPreviewWeek, newWeeks.length - 1));
+  _planEditPreviewWeek = weekIdx;
+  const newWeek = newWeeks[weekIdx];
+  const oldWeek = oldWeeks[weekIdx] || null;
+  const changedWeeks = _countChangedWeeks(_planEditCurrentPlan, _planEditProposal);
+  const changedTotal = _countChangedWorkouts(_planEditCurrentPlan, _planEditProposal);
+
+  let cards = '';
+  for (let d = 0; d < 7; d++) {
+    const oldWo = _findWorkout(oldWeek, d);
+    const newWo = _findWorkout(newWeek, d);
+    const changed = _workoutsDiffer(oldWo, newWo);
+    if (_planEditChangedOnly && !changed) continue;
+    const zoneBadge = newWo?.intensity_zone
+      ? `<span class="zone-badge zone-${escapeHTML(newWo.intensity_zone.toLowerCase())}" style="font-size:0.55rem;padding:1px 4px;">${escapeHTML(newWo.intensity_zone)}</span>`
+      : '';
+    const dur = newWo?.target_duration_minutes ? `${newWo.target_duration_minutes}m` : '';
+    const body = !newWo
+      ? `<span class="pe-card-rest">—</span>`
+      : newWo.is_rest
+        ? `<span class="pe-card-rest">Vila</span>`
+        : `<span class="pe-card-label">${escapeHTML(newWo.label || newWo.activity_type || 'Pass')}</span>
+           <span class="pe-card-meta">${zoneBadge} ${dur}</span>`;
+    const badge = changed ? `<span class="pe-card-badge">Ändrat</span>` : '';
+    const compareBtn = changed
+      ? `<button class="pe-card-compare" title="Jämför före/efter" onclick="togglePeCompare(${weekIdx}, ${d})">⇄</button>`
+      : '';
+    cards += `
+      <div class="pe-card ${changed ? 'pe-card-changed' : ''}" id="pe-card-${weekIdx}-${d}">
+        <div class="pe-card-head">
+          <span class="pe-card-day">${DAY[d]}</span>
+          <div class="pe-card-head-actions">
+            ${compareBtn}
+            <button class="pe-card-edit-btn" title="Redigera pass manuellt" onclick="openManualWorkoutEdit(${weekIdx}, ${d})" aria-label="Redigera ${DAY[d]}">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="pe-card-body">${body}</div>
+        ${badge}
+      </div>`;
+  }
+
+  if (!cards && _planEditChangedOnly) {
+    cards = `<div class="pe-preview-empty">Inga ändringar på denna vecka.</div>`;
+  }
+
+  const phaseLabel = (typeof PHASE_LABELS !== 'undefined' && PHASE_LABELS[newWeek.phase]) || newWeek.phase || '';
+  const weekChangesCount = (() => {
+    let c = 0;
+    for (let d = 0; d < 7; d++) {
+      if (_workoutsDiffer(_findWorkout(oldWeek, d), _findWorkout(newWeek, d))) c++;
+    }
+    return c;
+  })();
+
+  container.innerHTML = `
+    <div class="pe-preview-header">
+      <div class="pe-preview-title">Föreslaget schema</div>
+      <div class="pe-preview-summary">
+        ${changedTotal} ${changedTotal === 1 ? 'pass ändrat' : 'pass ändrade'} över ${changedWeeks} ${changedWeeks === 1 ? 'vecka' : 'veckor'}
+        · Totalt ${newWeeks.length} ${newWeeks.length === 1 ? 'vecka' : 'veckor'}
+      </div>
+    </div>
+    <div class="pe-filter-toggle">
+      <button class="${_planEditChangedOnly ? '' : 'active'}" onclick="setPeChangedOnly(false)">Hela veckan</button>
+      <button class="${_planEditChangedOnly ? 'active' : ''}" onclick="setPeChangedOnly(true)">Bara ändrade</button>
+    </div>
+    <div class="pe-week-nav">
+      <button class="pe-nav-arrow" onclick="pePreviewWeek(-1)" ${weekIdx === 0 ? 'disabled' : ''} aria-label="Föregående vecka">‹</button>
+      <span class="pe-week-label">Vecka ${newWeek.week_number}${phaseLabel ? ' · ' + escapeHTML(phaseLabel) : ''}${weekChangesCount > 0 ? ` · <span class="pe-week-changes">${weekChangesCount} ändr.</span>` : ''}</span>
+      <button class="pe-nav-arrow" onclick="pePreviewWeek(1)" ${weekIdx >= newWeeks.length - 1 ? 'disabled' : ''} aria-label="Nästa vecka">›</button>
+    </div>
+    <div class="pe-preview-grid">${cards}</div>
+    <div class="pe-preview-actions">
+      <button class="btn btn-primary btn-sm" onclick="approvePlanEdit()">Godkänn ändringar</button>
+      <button class="btn btn-outline btn-sm" onclick="continueAiAdjust()">Be AI justera vidare</button>
+      <button class="btn btn-danger-text btn-sm" onclick="discardPlanEditProposal()">Kasta bort förslag</button>
+    </div>
+  `;
+}
+
+function pePreviewWeek(delta) {
+  const total = (_planEditProposal?.weeks || []).length;
+  if (!total) return;
+  _planEditPreviewWeek = Math.max(0, Math.min(_planEditPreviewWeek + delta, total - 1));
+  renderProposalPreview();
+}
+
+function setPeChangedOnly(onlyChanged) {
+  _planEditChangedOnly = !!onlyChanged;
+  renderProposalPreview();
+}
+
+function togglePeCompare(weekIdx, dayIdx) {
+  const card = document.getElementById(`pe-card-${weekIdx}-${dayIdx}`);
+  if (!card) return;
+  const existing = card.querySelector('.pe-compare-popover');
+  if (existing) { existing.remove(); return; }
+  const oldWo = _findWorkout(_planEditCurrentPlan?.weeks?.[weekIdx], dayIdx);
+  const newWo = _findWorkout(_planEditProposal?.weeks?.[weekIdx], dayIdx);
+  const pop = document.createElement('div');
+  pop.className = 'pe-compare-popover';
+  pop.innerHTML = `
+    <div class="pe-compare-row"><span class="pe-compare-label">Före</span><span>${escapeHTML(_peFormatWorkoutSummary(oldWo))}</span></div>
+    <div class="pe-compare-row pe-compare-new"><span class="pe-compare-label">Efter</span><span>${escapeHTML(_peFormatWorkoutSummary(newWo))}</span></div>
+    ${(oldWo?.description || newWo?.description) ? `
+      <div class="pe-compare-desc"><span class="pe-compare-label">Beskrivning</span>
+        <div class="pe-compare-desc-old">${escapeHTML(oldWo?.description || '(saknas)')}</div>
+        <div class="pe-compare-desc-new">${escapeHTML(newWo?.description || '(saknas)')}</div>
+      </div>` : ''}
+  `;
+  card.appendChild(pop);
+}
+
+function discardPlanEditProposal() {
+  _planEditProposal = null;
+  _planEditPreviewWeek = 0;
+  _planEditChangedOnly = false;
+  const wrap = document.getElementById('pe-preview-wrap');
+  if (wrap) wrap.remove();
+  const chatEl = document.getElementById('plan-edit-chat');
+  chatEl.innerHTML += `<div class="plan-edit-msg bot">Förslaget kasserat. Beskriv vad du vill ändra — eller stäng rutan.</div>`;
+  const input = document.getElementById('plan-edit-input');
+  input?.focus();
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+function continueAiAdjust() {
+  const input = document.getElementById('plan-edit-input');
+  input?.focus();
+  // Keep the proposal visible so the user can see current state while typing.
+}
+
+// ── Manual per-workout edit (pen icon on each preview card) ─────────
+let _peManualTarget = null; // { weekIdx, origDayIdx }
+
+function openManualWorkoutEdit(weekIdx, dayIdx) {
+  if (!_planEditProposal?.weeks?.[weekIdx]) return;
+  const wo = _findWorkout(_planEditProposal.weeks[weekIdx], dayIdx);
+  _peManualTarget = { weekIdx, origDayIdx: dayIdx };
+
+  document.getElementById('pe-manual-title').textContent = `Redigera vecka ${_planEditProposal.weeks[weekIdx].week_number} · ${['Måndag','Tisdag','Onsdag','Torsdag','Fredag','Lördag','Söndag'][dayIdx]}`;
+  document.getElementById('pe-manual-rest').checked = !!(wo?.is_rest);
+  document.getElementById('pe-manual-day').value = String(dayIdx);
+  document.getElementById('pe-manual-activity').value = wo?.activity_type || 'Löpning';
+  document.getElementById('pe-manual-label').value = wo?.label || '';
+  document.getElementById('pe-manual-description').value = wo?.description || '';
+  document.getElementById('pe-manual-duration').value = wo?.target_duration_minutes ?? '';
+  document.getElementById('pe-manual-distance').value = wo?.target_distance_km ?? '';
+  document.getElementById('pe-manual-zone').value = wo?.intensity_zone || '';
+
+  onPeManualRestToggle();
+  document.getElementById('pe-manual-edit-modal').classList.remove('hidden');
+}
+
+function closeManualWorkoutEdit() {
+  document.getElementById('pe-manual-edit-modal').classList.add('hidden');
+  _peManualTarget = null;
+}
+
+function onPeManualRestToggle() {
+  const isRest = document.getElementById('pe-manual-rest').checked;
+  const disabled = isRest;
+  ['pe-manual-activity', 'pe-manual-label', 'pe-manual-description',
+   'pe-manual-duration', 'pe-manual-distance', 'pe-manual-zone'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = disabled;
+  });
+  if (isRest) {
+    document.getElementById('pe-manual-activity').value = 'Vila';
+    document.getElementById('pe-manual-label').value = 'Vila';
+    document.getElementById('pe-manual-description').value = '';
+    document.getElementById('pe-manual-duration').value = 0;
+    document.getElementById('pe-manual-distance').value = '';
+    document.getElementById('pe-manual-zone').value = '';
+  }
+}
+
+function saveManualWorkoutEdit() {
+  if (!_peManualTarget || !_planEditProposal) return;
+  const { weekIdx, origDayIdx } = _peManualTarget;
+  const week = _planEditProposal.weeks[weekIdx];
+  if (!week) return;
+
+  const isRest = document.getElementById('pe-manual-rest').checked;
+  const newDay = parseInt(document.getElementById('pe-manual-day').value, 10);
+  if (!(newDay >= 0 && newDay <= 6)) return;
+
+  const duration = parseInt(document.getElementById('pe-manual-duration').value, 10) || 0;
+  const distRaw = document.getElementById('pe-manual-distance').value;
+  const distance = distRaw === '' ? null : (parseFloat(distRaw) || null);
+
+  const updated = isRest ? {
+    day_of_week: newDay,
+    activity_type: 'Vila',
+    label: 'Vila',
+    description: null,
+    target_duration_minutes: 0,
+    target_distance_km: null,
+    intensity_zone: null,
+    is_rest: true,
+  } : {
+    day_of_week: newDay,
+    activity_type: document.getElementById('pe-manual-activity').value,
+    label: document.getElementById('pe-manual-label').value.trim() || document.getElementById('pe-manual-activity').value,
+    description: document.getElementById('pe-manual-description').value.trim() || null,
+    target_duration_minutes: Math.max(0, duration),
+    target_distance_km: distance,
+    intensity_zone: document.getElementById('pe-manual-zone').value || null,
+    is_rest: false,
+  };
+
+  // If the day changed, swap with whatever workout occupied the target day.
+  const origIdx = week.workouts.findIndex(w => w.day_of_week === origDayIdx);
+  if (origIdx < 0) return;
+
+  if (newDay !== origDayIdx) {
+    const targetIdx = week.workouts.findIndex(w => w.day_of_week === newDay);
+    if (targetIdx >= 0 && targetIdx !== origIdx) {
+      // Move the existing target-day workout to the original day (swap).
+      week.workouts[targetIdx] = { ...week.workouts[targetIdx], day_of_week: origDayIdx };
+    }
+  }
+  week.workouts[origIdx] = updated;
+
+  closeManualWorkoutEdit();
+  renderProposalPreview();
 }
 
 async function _loadCurrentPlanForEdit() {
@@ -5968,6 +7030,11 @@ async function submitPlanEdit() {
 
   const chatEl = document.getElementById('plan-edit-chat');
   const sendBtn = document.getElementById('plan-edit-send');
+
+  // Remove any previous proposal preview so the new one replaces it in place.
+  const prevWrap = document.getElementById('pe-preview-wrap');
+  if (prevWrap) prevWrap.remove();
+
   chatEl.innerHTML += `<div class="plan-edit-msg user">${escapeHTML(instruction)}</div>`;
   chatEl.innerHTML += `<div class="plan-edit-msg bot" id="plan-edit-loading"><span class="spinner-sm"></span> Genererar förslag...</div>`;
   input.value = '';
@@ -5977,6 +7044,9 @@ async function submitPlanEdit() {
   _planEditHistory.push({ role: 'user', content: instruction });
 
   try {
+    // When iterating on an existing proposal, let the AI refine from there
+    // instead of the original DB plan.
+    const basePlan = _planEditProposal || await _loadCurrentPlanForEdit();
     const currentPlan = await _loadCurrentPlanForEdit();
     const session = (await sb.auth.getSession()).data.session;
     const res = await fetch(SUPABASE_FUNCTIONS_URL + '/generate-plan', {
@@ -5991,7 +7061,7 @@ async function submitPlanEdit() {
         mode: 'edit_preview',
         plan_id: _activePlan.id,
         instruction: instruction,
-        current_plan: currentPlan,
+        current_plan: basePlan,
         conversation_history: _planEditHistory.slice(0, -1),
       }),
     });
@@ -6003,19 +7073,26 @@ async function submitPlanEdit() {
     if (!res.ok) throw new Error(result.error || 'Preview failed');
 
     _planEditProposal = result.proposed_plan;
-    const diff = _buildDiffSummary(currentPlan, _planEditProposal);
-    const diffHtml = diff.map(d => `<div class="pe-diff-line">${escapeHTML(d)}</div>`).join('');
+    _planEditPreviewWeek = 0;
+    _planEditChangedOnly = false;
 
-    chatEl.innerHTML += `<div class="plan-edit-msg bot">
-      <div class="pe-diff-title">Föreslagna ändringar:</div>
-      <div class="pe-diff-list">${diffHtml}</div>
-      <div class="pe-diff-actions">
-        <button class="btn btn-primary btn-sm" onclick="approvePlanEdit()">Godkann</button>
-        <button class="btn btn-outline btn-sm" onclick="document.getElementById('plan-edit-input').focus();">Andra</button>
-      </div>
-    </div>`;
+    // Jump to the first changed week so the user sees the change immediately.
+    const newWeeks = _planEditProposal.weeks || [];
+    for (let wi = 0; wi < newWeeks.length; wi++) {
+      const oldWeek = (currentPlan.weeks || [])[wi];
+      const newWeek = newWeeks[wi];
+      let changed = false;
+      for (let d = 0; d < 7; d++) {
+        if (_workoutsDiffer(_findWorkout(oldWeek, d), _findWorkout(newWeek, d))) { changed = true; break; }
+      }
+      if (changed) { _planEditPreviewWeek = wi; break; }
+    }
 
-    _planEditHistory.push({ role: 'assistant', content: 'Proposed changes: ' + diff.join('; ') });
+    chatEl.innerHTML += `<div class="plan-edit-msg bot pe-preview-msg" id="pe-preview-wrap"><div id="pe-preview"></div></div>`;
+    renderProposalPreview();
+
+    const changedTotal = _countChangedWorkouts(currentPlan, _planEditProposal);
+    _planEditHistory.push({ role: 'assistant', content: `Proposed plan updated (${changedTotal} workouts changed).` });
   } catch (e) {
     const loadingEl = document.getElementById('plan-edit-loading');
     if (loadingEl) loadingEl.remove();
@@ -6028,6 +7105,8 @@ async function submitPlanEdit() {
 async function approvePlanEdit() {
   if (!_planEditProposal || !_activePlan) return;
   const chatEl = document.getElementById('plan-edit-chat');
+  const prevWrap = document.getElementById('pe-preview-wrap');
+  if (prevWrap) prevWrap.remove();
   chatEl.innerHTML += `<div class="plan-edit-msg bot" id="plan-edit-applying"><span class="spinner-sm"></span> Sparar ändringar...</div>`;
   chatEl.scrollTop = chatEl.scrollHeight;
 
@@ -6061,6 +7140,7 @@ async function approvePlanEdit() {
     _activePlanWeeks = [];
     _activePlanWorkouts = [];
     loadSchema();
+    setTimeout(() => { closePlanEditModal(); }, 900);
   } catch (e) {
     const applyEl = document.getElementById('plan-edit-applying');
     if (applyEl) applyEl.remove();
@@ -6931,6 +8011,9 @@ async function updateCoachCheckinBanner() {
   banner.classList.add('hidden');
 
   if (!currentProfile || !_activePlan) return;
+  // Feature flag: when chat-based check-in is enabled, the Sunday wizard is
+  // replaced by a proactive coach nudge, so the legacy banner/modal is hidden.
+  if (currentProfile.coach_checkin_chat_enabled) return;
 
   const now = new Date();
   const dow = (now.getDay() + 6) % 7;
@@ -6968,6 +8051,12 @@ async function updateCoachCheckinBanner() {
 async function openCoachCheckin() {
   if (!_activePlan) {
     alert('Veckoavstämningen kräver en aktiv AI-plan. Skapa en plan först.');
+    return;
+  }
+  // When the chat-based check-in is enabled, route the user into the coach
+  // view instead of the legacy modal so they can answer conversationally.
+  if (currentProfile?.coach_checkin_chat_enabled) {
+    if (typeof navigate === 'function') navigate('coach');
     return;
   }
 
@@ -7391,3 +8480,357 @@ async function renderWeeklyCheckinHistory(containerEl) {
     containerEl.innerHTML = '';
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  COACH (chat)
+//  Sprint 1: open/send via coach-chat edge function. No tool-calling yet.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const _coach = {
+  thread: null,
+  messages: [],
+  sending: false,
+  loading: false,
+  inputBound: false,
+};
+
+function _coachEndpoint() {
+  return SUPABASE_URL + '/functions/v1/coach-chat';
+}
+
+async function _coachFetch(payload) {
+  const session = await sb.auth.getSession();
+  const token = session.data.session?.access_token;
+  if (!token) throw new Error('not_authenticated');
+  const res = await fetch(_coachEndpoint(), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + token,
+      'apikey': SUPABASE_ANON_KEY,
+    },
+    body: JSON.stringify(payload),
+  });
+  let data = null;
+  try { data = await res.json(); } catch (_) { /* ignore */ }
+  if (!res.ok) {
+    const msg = data?.error || ('http_' + res.status);
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
+  return data || {};
+}
+
+function _coachFormatTime(iso) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+  } catch (_) {
+    return '';
+  }
+}
+
+// Local decisions for plan-diff cards that arrived via tool-calls. Keyed by
+// diff_id so a single proposal can't be accepted twice.
+const _coachDiffDecisions = new Map();
+
+function _coachExtractDiff(m) {
+  if (m.role !== 'assistant') return null;
+  if (!m.tool_result || !Array.isArray(m.tool_result.calls)) return null;
+  const call = m.tool_result.calls.find(c => c && c.name === 'propose_plan_changes' && c.ok && c.data && c.data.diff_id);
+  return call ? call.data : null;
+}
+
+function _coachDayLabel(dow, isMove, fromDay, toDay) {
+  const dayNames = ['Mån', 'Tis', 'Ons', 'Tors', 'Fre', 'Lör', 'Sön'];
+  if (isMove) return `${dayNames[fromDay] || ''} → ${dayNames[toDay] || ''}`;
+  return dayNames[dow] || '';
+}
+
+function _coachRenderDiffCard(diff, decisionState) {
+  const changes = Array.isArray(diff.changes) ? diff.changes : [];
+  if (!changes.length) {
+    return `<div class="coach-diff coach-diff--empty">Inga plan-ändringar att föreslå just nu.</div>`;
+  }
+  const locked = decisionState === 'applied' || decisionState === 'declined';
+  const items = changes.map(c => {
+    const cur = c.current || {};
+    const prop = c.proposed || {};
+    const isMove = c.action === 'move_session';
+    const dayLabel = _coachDayLabel(c.day_of_week, isMove, c.from_day, c.to_day);
+    const curLabel = cur.is_rest ? 'Vila' : `${cur.label || cur.activity_type || ''}${cur.target_duration_minutes ? ' ' + cur.target_duration_minutes + ' min' : ''}`.trim();
+    const propLabel = prop.is_rest ? 'Vila' : `${prop.label || prop.activity_type || ''}${prop.target_duration_minutes ? ' ' + prop.target_duration_minutes + ' min' : ''}`.trim();
+    const curZone = cur.intensity_zone ? `<span class="zone-badge zone-${escapeHTML(cur.intensity_zone)}">${escapeHTML(cur.intensity_zone)}</span>` : '';
+    const propZone = prop.intensity_zone ? `<span class="zone-badge zone-${escapeHTML(prop.intensity_zone)}">${escapeHTML(prop.intensity_zone)}</span>` : '';
+    const disabled = locked ? 'disabled' : '';
+    const checked = locked ? (decisionState === 'applied' ? 'checked' : '') : 'checked';
+    return `
+      <label class="cc-diff-card" data-change-id="${escapeHTML(c.id)}">
+        <input type="checkbox" class="cc-diff-check" ${checked} ${disabled}>
+        <div class="cc-diff-body">
+          <div class="cc-diff-day">${escapeHTML(dayLabel)}</div>
+          <div class="cc-diff-flow">
+            <div class="cc-diff-current"><span class="cc-diff-label">${escapeHTML(curLabel)}</span>${curZone}</div>
+            <div class="cc-diff-arrow" aria-hidden="true">↓</div>
+            <div class="cc-diff-proposed"><span class="cc-diff-label">${escapeHTML(propLabel)}</span>${propZone}</div>
+          </div>
+          <div class="cc-diff-reason">${escapeHTML(c.reason_sv || '')}</div>
+        </div>
+      </label>`;
+  }).join('');
+
+  let actions = '';
+  if (decisionState === 'applied') {
+    actions = `<div class="coach-diff-status coach-diff-status--applied">Ändringarna är sparade i nästa vecka.</div>`;
+  } else if (decisionState === 'declined') {
+    actions = `<div class="coach-diff-status coach-diff-status--declined">Ignorerat.</div>`;
+  } else {
+    actions = `
+      <div class="coach-diff-actions">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="declineCoachDiff('${escapeHTML(diff.diff_id)}')">Ignorera</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="applyCoachDiff('${escapeHTML(diff.diff_id)}')">Spara ändringar</button>
+      </div>`;
+  }
+
+  return `
+    <div class="coach-diff" data-coach-diff="${escapeHTML(diff.diff_id)}">
+      <div class="coach-diff-title">Förslag på ändringar i nästa vecka</div>
+      <div class="cc-diff-list">${items}</div>
+      ${actions}
+    </div>`;
+}
+
+function _coachRenderMessages() {
+  const wrap = document.getElementById('coach-messages');
+  if (!wrap) return;
+  if (!_coach.messages.length) {
+    wrap.innerHTML = `<div class="coach-empty"><p>Inga meddelanden ännu. Säg hej!</p></div>`;
+    return;
+  }
+  let html = '';
+  for (const m of _coach.messages) {
+    if (m.role !== 'user' && m.role !== 'assistant' && m.role !== 'system') continue;
+    const cls = 'coach-msg coach-msg--' + m.role;
+    const safe = escapeHTML(m.content || '');
+    const time = m.created_at ? `<span class="coach-msg-time">${_coachFormatTime(m.created_at)}</span>` : '';
+    const diff = _coachExtractDiff(m);
+    const diffHtml = diff
+      ? _coachRenderDiffCard(diff, _coachDiffDecisions.get(diff.diff_id) || 'pending')
+      : '';
+    html += `<div class="${cls}">${safe}${time}${diffHtml}</div>`;
+  }
+  wrap.innerHTML = html;
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+async function applyCoachDiff(diffId) {
+  if (_coachDiffDecisions.get(diffId) === 'applied' || _coachDiffDecisions.get(diffId) === 'declined') return;
+  const wrap = document.getElementById('coach-messages');
+  const card = wrap?.querySelector(`[data-coach-diff="${CSS.escape(diffId)}"]`);
+  const acceptedIds = card
+    ? [...card.querySelectorAll('.cc-diff-card')]
+        .filter(el => el.querySelector('.cc-diff-check')?.checked)
+        .map(el => el.dataset.changeId)
+    : [];
+  if (acceptedIds.length === 0) {
+    const ok = await showConfirmModal('Ingen ändring vald', 'Inga ändringar är markerade. Vill du ignorera förslaget?', 'Ignorera');
+    if (!ok) return;
+    return declineCoachDiff(diffId);
+  }
+  _coachShowTyping(true);
+  try {
+    const data = await _coachFetch({
+      mode: 'tool',
+      tool_name: 'apply_plan_changes',
+      arguments: { diff_id: diffId, accepted_change_ids: acceptedIds },
+    });
+    _coachDiffDecisions.set(diffId, data?.ok ? 'applied' : 'pending');
+    if (data?.assistant_message) _coach.messages.push(data.assistant_message);
+    if (data && !data.ok) {
+      showToast('Kunde inte spara ändringar: ' + (data?.result?.error || 'okänt fel'));
+    }
+    // Refresh upcoming week in the background so Ditt schema reflects updates.
+    if (data?.ok && typeof loadDashboard === 'function') { try { loadDashboard(); } catch (_) {} }
+  } catch (e) {
+    console.error('coach apply failed', e);
+    showToast(e.status === 429 ? 'Bromsa — försök igen om en stund.' : 'Kunde inte spara ändringarna.');
+  } finally {
+    _coachShowTyping(false);
+    _coachRenderMessages();
+    _coachRenderChips();
+  }
+}
+
+function declineCoachDiff(diffId) {
+  if (_coachDiffDecisions.get(diffId) === 'applied') return;
+  _coachDiffDecisions.set(diffId, 'declined');
+  _coachRenderMessages();
+}
+
+function _coachRenderChips() {
+  const el = document.getElementById('coach-chips');
+  if (!el) return;
+  // Pull chips from the most recent assistant message.
+  let chips = [];
+  for (let i = _coach.messages.length - 1; i >= 0; i--) {
+    const m = _coach.messages[i];
+    if (m.role === 'assistant') {
+      if (Array.isArray(m.chips)) chips = m.chips.slice(0, 4);
+      break;
+    }
+  }
+  if (!chips.length) { el.innerHTML = ''; return; }
+  el.innerHTML = chips.map((c) =>
+    `<button type="button" class="coach-chip" onclick="sendCoachChip(${JSON.stringify(c).replace(/"/g, '&quot;')})">${escapeHTML(c)}</button>`
+  ).join('');
+}
+
+function _coachShowTyping(on) {
+  const wrap = document.getElementById('coach-messages');
+  if (!wrap) return;
+  let typing = wrap.querySelector('.coach-typing');
+  if (on) {
+    if (!typing) {
+      typing = document.createElement('div');
+      typing.className = 'coach-typing';
+      typing.innerHTML = '<span></span><span></span><span></span>';
+      wrap.appendChild(typing);
+      wrap.scrollTop = wrap.scrollHeight;
+    }
+  } else if (typing) {
+    typing.remove();
+  }
+}
+
+function _coachUpdateThreadTitle() {
+  const el = document.getElementById('coach-thread-title');
+  if (!el) return;
+  el.textContent = _coach.thread?.title || 'Coach';
+}
+
+function _coachBindComposer() {
+  if (_coach.inputBound) return;
+  const input = document.getElementById('coach-input');
+  if (!input) return;
+  _coach.inputBound = true;
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 140) + 'px';
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendCoachMessage(e);
+    }
+  });
+}
+
+async function loadCoach() {
+  if (!currentProfile) return;
+  if (_coach.loading) return;
+  _coach.loading = true;
+  _coachBindComposer();
+  const wrap = document.getElementById('coach-messages');
+  if (wrap && !_coach.messages.length) {
+    wrap.innerHTML = `<div class="coach-empty"><p>Laddar samtal…</p></div>`;
+  }
+  try {
+    const data = await _coachFetch({ mode: 'open' });
+    _coach.thread = data.thread || null;
+    _coach.messages = Array.isArray(data.messages) ? data.messages : [];
+    _coachUpdateThreadTitle();
+    _coachRenderMessages();
+    _coachRenderChips();
+  } catch (e) {
+    console.error('coach open failed', e);
+    if (wrap) {
+      wrap.innerHTML = `<div class="coach-empty"><p>Kunde inte ladda coachen. ${escapeHTML(e.message || '')}</p></div>`;
+    }
+  } finally {
+    _coach.loading = false;
+  }
+}
+
+async function sendCoachMessage(ev) {
+  if (ev) ev.preventDefault();
+  if (_coach.sending) return;
+  const input = document.getElementById('coach-input');
+  if (!input) return;
+  const content = (input.value || '').trim();
+  if (!content) return;
+
+  _coach.sending = true;
+  const sendBtn = document.getElementById('coach-send-btn');
+  if (sendBtn) sendBtn.disabled = true;
+
+  // Optimistic user turn so the UI feels snappy.
+  const optimistic = {
+    id: 'optimistic-' + Date.now(),
+    role: 'user',
+    content,
+    created_at: new Date().toISOString(),
+  };
+  _coach.messages.push(optimistic);
+  _coachRenderMessages();
+  _coachRenderChips();
+  input.value = '';
+  input.style.height = 'auto';
+  _coachShowTyping(true);
+
+  try {
+    const data = await _coachFetch({ mode: 'send', content });
+    // Replace optimistic with persisted, append assistant.
+    _coach.messages = _coach.messages.filter((m) => m.id !== optimistic.id);
+    if (data.user_message) _coach.messages.push(data.user_message);
+    if (data.assistant_message) _coach.messages.push(data.assistant_message);
+    if (data.thread) _coach.thread = data.thread;
+    _coachUpdateThreadTitle();
+  } catch (e) {
+    console.error('coach send failed', e);
+    _coach.messages.push({
+      id: 'err-' + Date.now(),
+      role: 'system',
+      content: e.status === 429
+        ? 'Du skickar lite för många meddelanden. Försök igen om en stund.'
+        : 'Kunde inte skicka. Försök igen.',
+      created_at: new Date().toISOString(),
+    });
+  } finally {
+    _coachShowTyping(false);
+    _coachRenderMessages();
+    _coachRenderChips();
+    _coach.sending = false;
+    if (sendBtn) sendBtn.disabled = false;
+  }
+}
+
+function sendCoachChip(text) {
+  const input = document.getElementById('coach-input');
+  if (!input) return;
+  input.value = text;
+  sendCoachMessage();
+}
+
+async function archiveCoachThread() {
+  const ok = await showConfirmModal('Nytt samtal', 'Vill du börja ett nytt samtal? Det aktuella sparas i historiken.', 'Starta nytt');
+  if (!ok) return;
+  try {
+    await _coachFetch({ mode: 'archive' });
+    _coach.thread = null;
+    _coach.messages = [];
+    _coachRenderMessages();
+    _coachRenderChips();
+    await loadCoach();
+  } catch (e) {
+    console.error('coach archive failed', e);
+    showToast('Kunde inte starta nytt samtal');
+  }
+}
+
+window.loadCoach = loadCoach;
+window.sendCoachMessage = sendCoachMessage;
+window.sendCoachChip = sendCoachChip;
+window.archiveCoachThread = archiveCoachThread;
+window.applyCoachDiff = applyCoachDiff;
+window.declineCoachDiff = declineCoachDiff;

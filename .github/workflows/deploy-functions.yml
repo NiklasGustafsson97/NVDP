@@ -108,3 +108,14 @@ jobs:
 
       - name: Deploy oauth-state
         run: supabase functions deploy oauth-state --no-verify-jwt
+
+      # ── Conversational coach (user JWT, same ES256 caveat as the rest of
+      #    the user-facing endpoints).
+      - name: Deploy coach-chat
+        run: supabase functions deploy coach-chat --no-verify-jwt
+
+      # ── Coach proactive nudges (cron-triggered, same shared CRON_SECRET
+      #    pattern as weekly-checkin-reminder). Keep --no-verify-jwt; the
+      #    function checks CRON_SECRET / service-role itself.
+      - name: Deploy coach-nudge
+        run: supabase functions deploy coach-nudge --no-verify-jwt
