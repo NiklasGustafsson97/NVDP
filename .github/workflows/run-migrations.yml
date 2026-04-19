@@ -102,9 +102,23 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add sql/migrations/_applied.txt
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: update _applied.txt with new migrations"
-            git push
-          else
+          if git diff --cached --quiet; then
             echo "No changes to commit"
+            exit 0
           fi
+          git commit -m "chore: update _applied.txt with new migrations"
+
+          # Retry with rebase to survive races with cache-bust / other workflows
+          # that touch main at the same time. The _applied.txt file only ever
+          # appends new lines, so a rebase against an unrelated change is safe.
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              echo "Pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "Push rejected on attempt $attempt — pulling and retrying"
+            git pull --rebase --autostash origin main
+            sleep $((attempt * 2))
+          done
+          echo "::error::Failed to push _applied.txt after 5 attempts"
+          exit 1
