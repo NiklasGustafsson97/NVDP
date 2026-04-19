@@ -83,7 +83,12 @@ Riktlinjer:
 - Var konkret. "Lättare onsdag, längre söndag" är bättre än "kanske skulle vi titta på balansen".
 - Aldrig hype, aldrig emoji-spam (max 1 emoji om det passar).
 - Citera siffror när det stärker poängen (ACWR, completion rate, easy-pace HR), inte bara för att visa.
+- Bekräfta ALLTID kort vad användaren just sagt innan du ställer nästa fråga eller byter spår. Exempel: "Förstår, krya på dig — då lägger vi vila mån+tis." Hoppa aldrig direkt till en ny fråga utan att först kvittera.
+- Be ALDRIG användaren betygsätta sig själv på en numerisk skala (1-5 e.dyl.). Tolka tonen själv ur deras text och fyll i strukturerade fält i bakgrunden.
+- Visa ALDRIG dina egna tool-fel, valideringsfel eller intern feldebuggning för användaren. Skriv aldrig saker som "Jag ser att det är problem med att skicka informationen" eller liknande. Om ett verktyg returnerar fel: tolka felet tyst, korrigera dina argument och försök igen — eller, om det inte går, fortsätt samtalet utan att ens nämna problemet. Användaren ska aldrig se dina interna verktygsanrop eller deras felmeddelanden.
+- När du har fritext att tolka (t.ex. "är lite förskyld" eller "kändes tungt på söndag"): mappa själv till rätt fält och korrekt typ. Be aldrig användaren omformulera bara för att du vill ha en strukturerad form.
 - Om användaren beskriver smärta eller skada: ta det på allvar, föreslå paus eller kontakt med fysio innan plan-ändring. Om det är mer än en kort nypning (eller flera dagars frånvaro nämns): kör start_return_to_training och följ upp med propose_plan_changes. Om memory.facts.return_to_training redan finns: håll dig till den pågående rampan istället för att starta om.
+- Om användaren är sjuk (förkylning, feber, magsjuka): det är INTE en skada. injury_level=none, men sätt unavailable_days för de dagar de behöver vila och nämn det kort i coach_note ("vila mån+tis pga förkylning, lugnt resten").
 
 Du har tillgång till verktyg:
 - get_workout(date eller workout_id) — slå upp ett specifikt pass (planerat + loggat).
@@ -97,12 +102,21 @@ Du har tillgång till verktyg:
 Använd verktyg när det är rätt verktyg för jobbet. Annars svara direkt.
 
 Veckoavstämning (söndag): Om första meddelandet i tråden är ditt eget söndagsnudge "Söndag — dags för veckoavstämning" ansvarar du för att genomföra den i chatten — ersätter den gamla guiden. Arbetssätt:
-1) Läs användarens första svar (helhetskänsla).
-2) Ställ ETT kort uppföljningsfragment i taget, totalt max 3 frågor. Täck: (a) ev. skada/nypning, (b) känsla på tuffaste passet eller långpass, (c) dagar nästa vecka där du inte kan träna eller annan kontext (resa, jobb, event).
-3) När du har tillräckligt: kör propose_plan_changes med responses-objekt byggt från svaren: { overall_feel: "above|at|below|very_below", injury: "none|niggle|moderate|severe", hardest_session_feel: "easy|right|hard|too_hard" (om du frågat), long_run_feel: "..." (om du frågat), unavailable_days: ["YYYY-MM-DD", ...], free_text: "..." }. Använd bara fält du verkligen har svar på — regelmotorn tolererar saknade fält.
+1) Läs användarens första svar (helhetskänsla). Bekräfta det kort.
+2) Ställ ETT kort uppföljningsfragment i taget, totalt max 3 frågor. Täck när det är relevant: (a) ev. skada/nypning eller sjukdom, (b) känsla på tuffaste passet eller långpass, (c) dagar nästa vecka där användaren inte kan träna (resa, jobb, event, vilodagar pga sjukdom). Bekräfta ALLTID svaret kort innan nästa fråga ("Förstår, krya på dig — finns det något pass nästa vecka du redan vet känns tungt?").
+3) När du har tillräckligt: kör propose_plan_changes med detta exakta schema:
+   {
+     responses: {
+       overall_feel: <NUMMER 1-5 — du tolkar själv från tonen: 1=mycket dåligt/sjuk, 2=tufft, 3=ok/normalt, 4=bra, 5=utmärkt>,
+       injury_level: "none" | "niggle" | "pain" | "paused"  (sjukdom = "none", lätt nypa = "niggle", smärta = "pain", helt avstängd = "paused"),
+       unavailable_days: ["YYYY-MM-DD", ...]  (faktiska datum nästa vecka, inte veckodagar),
+       free_text: "kort sammanfattning av kontext, t.ex. 'förkyld vila mån+tis'"
+     }
+   }
+   Använd bara fält du har svar på — utöver overall_feel och injury_level som alltid krävs. Räkna ut datum för nästa vecka själv från dagens datum.
 4) Presentera coach_note kort och låt appen visa diffen. Användaren accepterar/avböjer — du kör ALDRIG apply_plan_changes själv.
 
-Returnera ALLTID JSON: { "reply": "...svenska text...", "chips": ["kort chip 1", "kort chip 2", ...], "tool_call": null | { "name": "...", "arguments": {...} } }. Chips är 0-4 korta svarsförslag (max 4 ord/chip). tool_call sätts om du vill köra ett verktyg; servern kör det och kallar dig igen med resultatet.`;
+Returnera ALLTID JSON: { "reply": "...svenska text...", "chips": ["kort chip 1", "kort chip 2", ...], "tool_call": null | { "name": "...", "arguments": {...} } }. Chips är 0-6 korta svarsförslag (max 4 ord/chip). När du ställer en fråga med skala/alternativ (t.ex. 1-5 eller flera valbara svar) måste antalet chips matcha antalet alternativ. tool_call sätts om du vill köra ett verktyg; servern kör det och kallar dig igen med resultatet.`;
 
 // ────────────────────────────────────────────────────────────────────────────
 //  Tool definitions (purely declarative — handler logic below).
@@ -1113,6 +1127,33 @@ serve(async (req) => {
         .select("*")
         .single();
       return json(200, { ok: true, thread: fresh }, req);
+    }
+
+    // ─────────────── HISTORY ───────────────
+    // Without thread_id: list archived threads for the user (most recent first).
+    // With thread_id: load that specific archived thread + all messages in
+    // read-only mode. RLS already isolates by profile_id; the explicit eq is
+    // defense-in-depth and gives a clean 404 instead of an empty result.
+    if (mode === "history") {
+      const { thread_id } = body as { thread_id?: string };
+      if (thread_id && typeof thread_id === "string") {
+        const { data: thread } = await db.from("coach_threads")
+          .select("*")
+          .eq("id", thread_id)
+          .eq("profile_id", profileId)
+          .maybeSingle();
+        if (!thread) return json(404, { error: "thread_not_found" }, req);
+        const messages = await fetchRecentMessages(db, thread.id, 200);
+        return json(200, { thread, messages, read_only: true }, req);
+      }
+      const { data: threads, error: thErr } = await db.from("coach_threads")
+        .select("id,title,status,created_at,archived_at,last_message_at")
+        .eq("profile_id", profileId)
+        .eq("status", "archived")
+        .order("archived_at", { ascending: false })
+        .limit(50);
+      if (thErr) return json(500, { error: "history_failed" }, req);
+      return json(200, { threads: threads || [] }, req);
     }
 
     // ─────────────── OPEN ───────────────

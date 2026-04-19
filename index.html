@@ -34,7 +34,7 @@
     form-action 'self';
     object-src 'none';
   ">
-  <link rel="stylesheet" href="css/style.css?v=35f70c9">
+  <link rel="stylesheet" href="css/style.css?v=31f8c64">
   <script
     src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"
     integrity="sha384-GFr3yTh5lJznCbZfpTtXnwboFsxqtTQoeTZCRHhE0579KrRmlCzen5AA8ohaB5ug"
@@ -403,17 +403,43 @@
     <section id="view-coach" class="view">
       <div class="coach-shell">
         <div class="coach-header">
+          <div class="coach-avatar coach-avatar--header" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M13 4l-2 5h4l-3 11"/>
+              <circle cx="17" cy="4" r="2"/>
+            </svg>
+          </div>
           <div class="coach-header-text">
             <h2 class="coach-title" id="coach-thread-title">Coach</h2>
-            <span class="coach-subtitle" id="coach-subtitle">Din digitala tränare</span>
+            <span class="coach-status" id="coach-status">
+              <span class="coach-status-dot" aria-hidden="true"></span>
+              <span class="coach-status-text" id="coach-status-text">Din digitala tränare</span>
+            </span>
           </div>
           <div class="coach-header-actions">
-            <button type="button" class="btn btn-ghost btn-sm" id="coach-new-thread-btn" onclick="archiveCoachThread()" aria-label="Starta nytt samtal">Nytt samtal</button>
+            <button type="button" class="coach-icon-btn" id="coach-history-btn" onclick="openCoachHistory()" aria-label="Visa tidigare samtal" title="Tidigare samtal">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="9"/>
+                <polyline points="12 7 12 12 15 14"/>
+              </svg>
+            </button>
+            <button type="button" class="coach-icon-btn" id="coach-new-thread-btn" onclick="archiveCoachThread()" aria-label="Starta nytt samtal" title="Nytt samtal">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"/>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
+              </svg>
+            </button>
           </div>
         </div>
 
-        <div class="coach-messages" id="coach-messages" role="log" aria-live="polite">
-          <div class="coach-empty" id="coach-empty">
+        <div class="coach-archived-banner" id="coach-archived-banner" hidden>
+          <span class="coach-archived-text">Arkiverat samtal — endast läsläge.</span>
+          <button type="button" class="btn btn-primary btn-sm" onclick="returnToActiveCoachThread()">Återgå till nuvarande</button>
+        </div>
+
+        <div class="coach-messages" id="coach-messages" role="log" aria-live="polite" aria-label="Coach-samtal">
+          <div class="coach-loading" id="coach-empty">
+            <div class="coach-loading-dots"><span></span><span></span><span></span></div>
             <p>Laddar samtal…</p>
           </div>
         </div>
@@ -421,18 +447,37 @@
         <div class="coach-chips" id="coach-chips" aria-label="Snabbsvar"></div>
 
         <form class="coach-composer" id="coach-composer" onsubmit="sendCoachMessage(event)">
-          <textarea
-            id="coach-input"
-            class="coach-input"
-            placeholder="Skriv ett meddelande…"
-            rows="1"
-            maxlength="4000"
-            autocomplete="off"></textarea>
+          <div class="coach-composer-inner">
+            <textarea
+              id="coach-input"
+              class="coach-input"
+              placeholder="Skriv ett meddelande…"
+              rows="1"
+              maxlength="4000"
+              autocomplete="off"
+              aria-label="Meddelande till coachen"></textarea>
+            <span class="coach-char-count" id="coach-char-count" hidden aria-live="polite"></span>
+          </div>
           <button type="submit" class="coach-send-btn" id="coach-send-btn" aria-label="Skicka">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            <svg class="coach-send-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            <svg class="coach-stop-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none" width="14" height="14"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
           </button>
         </form>
       </div>
+
+      <!-- History drawer -->
+      <div class="coach-drawer-backdrop" id="coach-history-backdrop" hidden onclick="closeCoachHistory()"></div>
+      <aside class="coach-drawer" id="coach-history-drawer" hidden role="dialog" aria-modal="true" aria-labelledby="coach-history-title">
+        <header class="coach-drawer-header">
+          <h3 id="coach-history-title">Tidigare samtal</h3>
+          <button type="button" class="coach-icon-btn" onclick="closeCoachHistory()" aria-label="Stäng">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </header>
+        <div class="coach-drawer-body" id="coach-history-list">
+          <div class="coach-loading"><div class="coach-loading-dots"><span></span><span></span><span></span></div></div>
+        </div>
+      </aside>
     </section>
 
     <!-- ── LOG WORKOUT ── -->
@@ -1497,8 +1542,8 @@
   </div>
 </div>
 
-<script src="js/config.js?v=35f70c9"></script>
-<script src="js/app.js?v=35f70c9"></script>
+<script src="js/config.js?v=31f8c64"></script>
+<script src="js/app.js?v=31f8c64"></script>
 <script>
 const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
 async function sha256(m) {

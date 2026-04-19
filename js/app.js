@@ -8492,13 +8492,16 @@ const _coach = {
   sending: false,
   loading: false,
   inputBound: false,
+  abortController: null,
+  readOnly: false,
+  activeThreadCache: null, // { thread, messages } for restore after viewing archived
 };
 
 function _coachEndpoint() {
   return SUPABASE_URL + '/functions/v1/coach-chat';
 }
 
-async function _coachFetch(payload) {
+async function _coachFetch(payload, opts = {}) {
   const session = await sb.auth.getSession();
   const token = session.data.session?.access_token;
   if (!token) throw new Error('not_authenticated');
@@ -8510,6 +8513,7 @@ async function _coachFetch(payload) {
       'apikey': SUPABASE_ANON_KEY,
     },
     body: JSON.stringify(payload),
+    signal: opts.signal,
   });
   let data = null;
   try { data = await res.json(); } catch (_) { /* ignore */ }
@@ -8529,6 +8533,167 @@ function _coachFormatTime(iso) {
   } catch (_) {
     return '';
   }
+}
+
+function _coachFormatDateLabel(iso) {
+  try {
+    const d = new Date(iso);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    if (sameDay) return 'Idag';
+    const y = new Date(now); y.setDate(y.getDate() - 1);
+    if (d.toDateString() === y.toDateString()) return 'Igår';
+    const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
+    if (diffDays < 7) {
+      return d.toLocaleDateString('sv-SE', { weekday: 'long' });
+    }
+    if (d.getFullYear() === now.getFullYear()) {
+      return d.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
+    }
+    return d.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' });
+  } catch (_) {
+    return '';
+  }
+}
+
+function _coachRelativeTime(iso) {
+  try {
+    const ms = Date.now() - new Date(iso).getTime();
+    if (ms < 0) return 'nu';
+    const sec = Math.floor(ms / 1000);
+    if (sec < 60) return 'nu';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return min + ' min sedan';
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return hr + ' tim sedan';
+    const day = Math.floor(hr / 24);
+    if (day < 7) return day + ' d sedan';
+    const d = new Date(iso);
+    return d.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
+  } catch (_) {
+    return '';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Markdown renderer for assistant copy. Safe-by-default: HTML-escape the
+// raw string first, then apply a small token pass for **bold**, *italic*,
+// `code`, autolinks, headers, and lists. If anything throws we fall back to
+// plain escaped text with line breaks.
+// ─────────────────────────────────────────────────────────────────────────
+function _coachRenderMarkdown(raw) {
+  if (!raw) return '';
+  try {
+    const escaped = escapeHTML(String(raw));
+    const lines = escaped.split(/\r?\n/);
+    const out = [];
+    let i = 0;
+
+    const inline = (s) => {
+      let t = s;
+      // Inline code first so its contents aren't touched by other rules.
+      t = t.replace(/`([^`\n]+)`/g, (_, code) => `<code>${code}</code>`);
+      // Bold
+      t = t.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+      // Italic (skip leading whitespace handling)
+      t = t.replace(/(^|[\s(])\*([^*\n]+)\*(?=$|[\s.,!?:;)])/g, '$1<em>$2</em>');
+      t = t.replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s.,!?:;)])/g, '$1<em>$2</em>');
+      // Autolinks for http(s) URLs not already inside an href.
+      t = t.replace(/(^|[\s(])(https?:\/\/[^\s)]+)/g, (_, pre, url) => {
+        return `${pre}<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+      });
+      return t;
+    };
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      // Skip blank lines (paragraph breaks handled by paragraph buffer below)
+      if (!line.trim()) { i++; continue; }
+
+      // Headers
+      const h = line.match(/^(#{1,3})\s+(.+)$/);
+      if (h) {
+        const level = h[1].length;
+        out.push(`<h${level}>${inline(h[2])}</h${level}>`);
+        i++; continue;
+      }
+
+      // Horizontal rule
+      if (/^---+\s*$/.test(line)) { out.push('<hr>'); i++; continue; }
+
+      // Unordered list block
+      if (/^\s*[-*]\s+/.test(line)) {
+        const items = [];
+        while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+          items.push('<li>' + inline(lines[i].replace(/^\s*[-*]\s+/, '')) + '</li>');
+          i++;
+        }
+        out.push('<ul>' + items.join('') + '</ul>');
+        continue;
+      }
+
+      // Ordered list block
+      if (/^\s*\d+\.\s+/.test(line)) {
+        const items = [];
+        while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+          items.push('<li>' + inline(lines[i].replace(/^\s*\d+\.\s+/, '')) + '</li>');
+          i++;
+        }
+        out.push('<ol>' + items.join('') + '</ol>');
+        continue;
+      }
+
+      // Paragraph: collect adjacent non-special lines.
+      const para = [];
+      while (
+        i < lines.length &&
+        lines[i].trim() &&
+        !/^(#{1,3})\s+/.test(lines[i]) &&
+        !/^\s*[-*]\s+/.test(lines[i]) &&
+        !/^\s*\d+\.\s+/.test(lines[i]) &&
+        !/^---+\s*$/.test(lines[i])
+      ) {
+        para.push(inline(lines[i]));
+        i++;
+      }
+      if (para.length) out.push('<p>' + para.join('<br>') + '</p>');
+    }
+
+    return out.join('');
+  } catch (_) {
+    // Defensive fallback: escape + line-breaks only.
+    return escapeHTML(String(raw)).replace(/\n/g, '<br>');
+  }
+}
+
+const _coachAvatarSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4l-2 5h4l-3 11"/><circle cx="17" cy="4" r="2"/></svg>`;
+
+const _coachToolStatusLabels = {
+  get_workout: 'Hämtar passet…',
+  get_week_summary: 'Tittar på veckan…',
+  propose_plan_changes: 'Förbereder förslag…',
+  apply_plan_changes: 'Sparar ändringar…',
+  log_workout: 'Loggar passet…',
+  update_memory: 'Uppdaterar minnet…',
+  predict_race_time: 'Räknar prognos…',
+  start_return_to_training: 'Bygger comeback-plan…',
+};
+
+function _coachToolStatusText(toolCalls) {
+  if (!Array.isArray(toolCalls) || !toolCalls.length) return null;
+  const names = toolCalls
+    .map(c => c && (c.name || c.tool_name))
+    .filter(Boolean);
+  if (!names.length) return null;
+  // Prefer the most user-relevant call (proposal > write > read).
+  const priority = [
+    'propose_plan_changes', 'apply_plan_changes', 'start_return_to_training',
+    'predict_race_time', 'log_workout', 'update_memory',
+    'get_week_summary', 'get_workout',
+  ];
+  const pick = priority.find(p => names.includes(p)) || names[0];
+  return _coachToolStatusLabels[pick] || 'Använder verktyg…';
 }
 
 // Local decisions for plan-diff cards that arrived via tool-calls. Keyed by
@@ -8580,13 +8745,18 @@ function _coachRenderDiffCard(diff, decisionState) {
       </label>`;
   }).join('');
 
-  let actions = '';
+  const headerIcon = `<span class="coach-diff-header-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>`;
+  const countLabel = `${changes.length} ${changes.length === 1 ? 'förslag' : 'förslag'}`;
+
+  let footer = '';
   if (decisionState === 'applied') {
-    actions = `<div class="coach-diff-status coach-diff-status--applied">Ändringarna är sparade i nästa vecka.</div>`;
+    footer = `<div class="coach-diff-status coach-diff-status--applied">Ändringarna är sparade i nästa vecka.</div>`;
   } else if (decisionState === 'declined') {
-    actions = `<div class="coach-diff-status coach-diff-status--declined">Ignorerat.</div>`;
+    footer = `<div class="coach-diff-status coach-diff-status--declined">Ignorerat.</div>`;
+  } else if (_coach.readOnly) {
+    footer = `<div class="coach-diff-status coach-diff-status--declined">Arkiverat samtal — kan inte spara.</div>`;
   } else {
-    actions = `
+    footer = `
       <div class="coach-diff-actions">
         <button type="button" class="btn btn-ghost btn-sm" onclick="declineCoachDiff('${escapeHTML(diff.diff_id)}')">Ignorera</button>
         <button type="button" class="btn btn-primary btn-sm" onclick="applyCoachDiff('${escapeHTML(diff.diff_id)}')">Spara ändringar</button>
@@ -8595,33 +8765,211 @@ function _coachRenderDiffCard(diff, decisionState) {
 
   return `
     <div class="coach-diff" data-coach-diff="${escapeHTML(diff.diff_id)}">
-      <div class="coach-diff-title">Förslag på ändringar i nästa vecka</div>
-      <div class="cc-diff-list">${items}</div>
-      ${actions}
+      <div class="coach-diff-header">
+        ${headerIcon}
+        <span class="coach-diff-title">Förslag på ändringar i nästa vecka</span>
+        <span class="coach-diff-count">${escapeHTML(countLabel)}</span>
+      </div>
+      <div class="coach-diff-body">
+        <div class="cc-diff-list">${items}</div>
+      </div>
+      ${footer}
     </div>`;
+}
+
+function _coachWelcomeStarters() {
+  return [
+    {
+      label: 'Veckosammanfattning',
+      sub: 'Hur kändes veckan som gick?',
+      message: 'Hur kändes min senaste vecka? Ge mig en kort sammanfattning.',
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+    },
+    {
+      label: 'Justera nästa vecka',
+      sub: 'Föreslå ändringar i schemat',
+      message: 'Kan du föreslå justeringar för nästa veckas träning?',
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+    },
+    {
+      label: 'Race-prognos',
+      sub: 'Vad ligger jag på just nu?',
+      message: 'Vad är min predikterade tid på 10 km baserat på mina senaste pass?',
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+    },
+    {
+      label: 'Smärta eller skada',
+      sub: 'Få hjälp att backa rätt',
+      message: 'Jag har lite ont och behöver hjälp att lägga upp en återgångsplan.',
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
+    },
+  ];
+}
+
+function _coachRenderWelcomeHTML() {
+  const starters = _coachWelcomeStarters();
+  const cards = starters.map((s, idx) => `
+    <button type="button" class="coach-starter" data-starter-idx="${idx}">
+      <span class="coach-starter-icon" aria-hidden="true">${s.icon}</span>
+      <span class="coach-starter-label">${escapeHTML(s.label)}</span>
+      <span class="coach-starter-sub">${escapeHTML(s.sub)}</span>
+    </button>
+  `).join('');
+
+  return `
+    <div class="coach-welcome" id="coach-welcome">
+      <div class="coach-welcome-header">
+        <span class="coach-avatar coach-avatar--header" aria-hidden="true">${_coachAvatarSvg}</span>
+        <h3>Hej! Jag är din coach.</h3>
+      </div>
+      <p class="coach-welcome-intro">Jag följer din träning, föreslår justeringar och hjälper dig svara på frågor om form, race och återhämtning. Välj något att börja med — eller skriv vad du har på hjärtat.</p>
+      <div class="coach-starter-grid">${cards}</div>
+    </div>
+  `;
+}
+
+function _coachAttachWelcomeHandlers(root) {
+  if (!root) return;
+  const starters = _coachWelcomeStarters();
+  root.querySelectorAll('.coach-starter').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.starterIdx || '-1', 10);
+      const s = starters[idx];
+      if (s) startCoachConversation(s.message);
+    });
+  });
+}
+
+function _coachShouldShowWelcome() {
+  if (_coach.readOnly) return false;
+  if (!_coach.messages.length) return true;
+  // If only an opener nudge sits in the thread, still hide welcome — opener
+  // already greets. Welcome is a true blank-slate experience.
+  return false;
 }
 
 function _coachRenderMessages() {
   const wrap = document.getElementById('coach-messages');
   if (!wrap) return;
-  if (!_coach.messages.length) {
-    wrap.innerHTML = `<div class="coach-empty"><p>Inga meddelanden ännu. Säg hej!</p></div>`;
+
+  if (_coachShouldShowWelcome()) {
+    wrap.innerHTML = _coachRenderWelcomeHTML();
+    _coachAttachWelcomeHandlers(wrap);
     return;
   }
+
+  if (!_coach.messages.length) {
+    wrap.innerHTML = `<div class="coach-loading"><p>Inga meddelanden i denna tråd.</p></div>`;
+    return;
+  }
+
   let html = '';
+  let lastDateKey = null;
+  let lastRole = null;
+
   for (const m of _coach.messages) {
     if (m.role !== 'user' && m.role !== 'assistant' && m.role !== 'system') continue;
-    const cls = 'coach-msg coach-msg--' + m.role;
-    const safe = escapeHTML(m.content || '');
-    const time = m.created_at ? `<span class="coach-msg-time">${_coachFormatTime(m.created_at)}</span>` : '';
+
+    // Date divider
+    if (m.created_at) {
+      const d = new Date(m.created_at);
+      const key = d.toDateString();
+      if (key !== lastDateKey) {
+        html += `<div class="coach-date-divider"><span>${escapeHTML(_coachFormatDateLabel(m.created_at))}</span></div>`;
+        lastDateKey = key;
+        lastRole = null;
+      }
+    }
+
+    // Tool-status row (only for assistant messages with recorded tool calls)
+    if (m.role === 'assistant') {
+      const toolCalls = m.tool_calls || (m.tool_result && m.tool_result.calls) || null;
+      const status = _coachToolStatusText(toolCalls);
+      if (status) {
+        html += `<div class="coach-tool-status coach-tool-status--done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span>${escapeHTML(status)}</span></div>`;
+      }
+    }
+
+    const isFirst = m.role !== lastRole;
+    const rowClasses = [
+      'coach-msg-row',
+      'coach-msg-row--' + m.role,
+      isFirst ? 'coach-msg-row--first' : 'coach-msg-row--continuation',
+    ].join(' ');
+    const bubbleClasses = [
+      'coach-msg',
+      'coach-msg--' + m.role,
+      m.role === 'user' || m.role === 'system' ? 'coach-msg--plain' : '',
+    ].filter(Boolean).join(' ');
+
+    const bodyHtml = m.role === 'assistant'
+      ? `<div class="coach-msg-md">${_coachRenderMarkdown(m.content || '')}</div>`
+      : escapeHTML(m.content || '');
+
+    const time = (m.created_at && m.role !== 'system')
+      ? `<span class="coach-msg-time">${_coachFormatTime(m.created_at)}</span>` : '';
+
     const diff = _coachExtractDiff(m);
     const diffHtml = diff
       ? _coachRenderDiffCard(diff, _coachDiffDecisions.get(diff.diff_id) || 'pending')
       : '';
-    html += `<div class="${cls}">${safe}${time}${diffHtml}</div>`;
+
+    const avatar = m.role === 'assistant'
+      ? `<span class="coach-avatar coach-avatar--msg" aria-hidden="true">${_coachAvatarSvg}</span>`
+      : '';
+
+    html += `
+      <div class="${rowClasses}">
+        ${avatar}
+        <div class="${bubbleClasses}">
+          ${bodyHtml}
+          ${diffHtml}
+          ${time}
+        </div>
+      </div>`;
+
+    lastRole = m.role;
   }
+
   wrap.innerHTML = html;
-  wrap.scrollTop = wrap.scrollHeight;
+  // Scroll to bottom on next frame so layout settles.
+  requestAnimationFrame(() => { wrap.scrollTop = wrap.scrollHeight; });
+}
+
+function _coachUpdateStatus() {
+  const wrap = document.getElementById('coach-status');
+  const text = document.getElementById('coach-status-text');
+  if (!wrap || !text) return;
+
+  if (_coach.readOnly) {
+    wrap.classList.remove('coach-status--online');
+    text.textContent = 'Arkiverat samtal';
+    return;
+  }
+
+  // Find the most recent assistant message to derive freshness.
+  let lastAssistantAt = null;
+  for (let i = _coach.messages.length - 1; i >= 0; i--) {
+    if (_coach.messages[i].role === 'assistant') {
+      lastAssistantAt = _coach.messages[i].created_at;
+      break;
+    }
+  }
+
+  if (!lastAssistantAt) {
+    wrap.classList.add('coach-status--online');
+    text.textContent = 'Aktiv nu';
+    return;
+  }
+
+  const ageMin = (Date.now() - new Date(lastAssistantAt).getTime()) / 60000;
+  if (ageMin < 5) {
+    wrap.classList.add('coach-status--online');
+    text.textContent = 'Aktiv nu';
+  } else {
+    wrap.classList.remove('coach-status--online');
+    text.textContent = 'Senast aktiv ' + _coachRelativeTime(lastAssistantAt);
+  }
 }
 
 async function applyCoachDiff(diffId) {
@@ -8676,7 +9024,7 @@ function _coachRenderChips() {
   for (let i = _coach.messages.length - 1; i >= 0; i--) {
     const m = _coach.messages[i];
     if (m.role === 'assistant') {
-      if (Array.isArray(m.chips)) chips = m.chips.slice(0, 4);
+      if (Array.isArray(m.chips)) chips = m.chips.slice(0, 6);
       break;
     }
   }
@@ -8709,19 +9057,85 @@ function _coachUpdateThreadTitle() {
   el.textContent = _coach.thread?.title || 'Coach';
 }
 
+function _coachUpdateCharCount() {
+  const input = document.getElementById('coach-input');
+  const counter = document.getElementById('coach-char-count');
+  if (!input || !counter) return;
+  const len = (input.value || '').length;
+  if (len < 3500) {
+    counter.hidden = true;
+    counter.classList.remove('coach-char-count--warn');
+    return;
+  }
+  counter.hidden = false;
+  counter.textContent = `${len} / 4000`;
+  counter.classList.toggle('coach-char-count--warn', len >= 3950);
+}
+
+function _coachSetSendButtonState() {
+  const btn = document.getElementById('coach-send-btn');
+  if (!btn) return;
+  if (_coach.sending) {
+    btn.classList.add('coach-send-btn--stop');
+    btn.disabled = false;
+    btn.setAttribute('aria-label', 'Avbryt');
+    btn.setAttribute('title', 'Avbryt');
+  } else {
+    btn.classList.remove('coach-send-btn--stop');
+    btn.disabled = _coach.readOnly;
+    btn.setAttribute('aria-label', 'Skicka');
+    btn.setAttribute('title', 'Skicka');
+  }
+}
+
+function _coachSetReadOnly(readOnly) {
+  _coach.readOnly = !!readOnly;
+  const composer = document.getElementById('coach-composer');
+  const input = document.getElementById('coach-input');
+  const banner = document.getElementById('coach-archived-banner');
+  if (composer) composer.style.opacity = readOnly ? '0.55' : '';
+  if (input) {
+    input.disabled = !!readOnly;
+    if (readOnly) input.placeholder = 'Arkiverat samtal — endast läsläge.';
+    else input.placeholder = 'Skriv ett meddelande…';
+  }
+  if (banner) banner.hidden = !readOnly;
+  _coachSetSendButtonState();
+  _coachUpdateStatus();
+}
+
 function _coachBindComposer() {
   if (_coach.inputBound) return;
   const input = document.getElementById('coach-input');
+  const sendBtn = document.getElementById('coach-send-btn');
   if (!input) return;
   _coach.inputBound = true;
   input.addEventListener('input', () => {
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 140) + 'px';
+    _coachUpdateCharCount();
   });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendCoachMessage(e);
+      if (_coach.sending) cancelCoachSend();
+      else sendCoachMessage(e);
+    }
+  });
+  if (sendBtn) {
+    // Click is wired via form submit; we only need to intercept when sending.
+    sendBtn.addEventListener('click', (e) => {
+      if (_coach.sending) {
+        e.preventDefault();
+        cancelCoachSend();
+      }
+    });
+  }
+  // Global ESC to close history drawer.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const drawer = document.getElementById('coach-history-drawer');
+      if (drawer && !drawer.hidden) closeCoachHistory();
     }
   });
 }
@@ -8731,21 +9145,23 @@ async function loadCoach() {
   if (_coach.loading) return;
   _coach.loading = true;
   _coachBindComposer();
+  _coachSetReadOnly(false);
   const wrap = document.getElementById('coach-messages');
   if (wrap && !_coach.messages.length) {
-    wrap.innerHTML = `<div class="coach-empty"><p>Laddar samtal…</p></div>`;
+    wrap.innerHTML = `<div class="coach-loading"><div class="coach-loading-dots"><span></span><span></span><span></span></div><p>Laddar samtal…</p></div>`;
   }
   try {
     const data = await _coachFetch({ mode: 'open' });
     _coach.thread = data.thread || null;
     _coach.messages = Array.isArray(data.messages) ? data.messages : [];
     _coachUpdateThreadTitle();
+    _coachUpdateStatus();
     _coachRenderMessages();
     _coachRenderChips();
   } catch (e) {
     console.error('coach open failed', e);
     if (wrap) {
-      wrap.innerHTML = `<div class="coach-empty"><p>Kunde inte ladda coachen. ${escapeHTML(e.message || '')}</p></div>`;
+      wrap.innerHTML = `<div class="coach-loading"><p>Kunde inte ladda coachen. ${escapeHTML(e.message || '')}</p></div>`;
     }
   } finally {
     _coach.loading = false;
@@ -8755,14 +9171,18 @@ async function loadCoach() {
 async function sendCoachMessage(ev) {
   if (ev) ev.preventDefault();
   if (_coach.sending) return;
+  if (_coach.readOnly) {
+    showToast('Detta är ett arkiverat samtal. Återgå till nuvarande för att skriva.');
+    return;
+  }
   const input = document.getElementById('coach-input');
   if (!input) return;
   const content = (input.value || '').trim();
   if (!content) return;
 
   _coach.sending = true;
-  const sendBtn = document.getElementById('coach-send-btn');
-  if (sendBtn) sendBtn.disabled = true;
+  _coach.abortController = new AbortController();
+  _coachSetSendButtonState();
 
   // Optimistic user turn so the UI feels snappy.
   const optimistic = {
@@ -8776,49 +9196,85 @@ async function sendCoachMessage(ev) {
   _coachRenderChips();
   input.value = '';
   input.style.height = 'auto';
+  _coachUpdateCharCount();
   _coachShowTyping(true);
 
   try {
-    const data = await _coachFetch({ mode: 'send', content });
+    const data = await _coachFetch({ mode: 'send', content }, { signal: _coach.abortController.signal });
     // Replace optimistic with persisted, append assistant.
     _coach.messages = _coach.messages.filter((m) => m.id !== optimistic.id);
     if (data.user_message) _coach.messages.push(data.user_message);
     if (data.assistant_message) _coach.messages.push(data.assistant_message);
     if (data.thread) _coach.thread = data.thread;
     _coachUpdateThreadTitle();
+    _coachUpdateStatus();
   } catch (e) {
-    console.error('coach send failed', e);
-    _coach.messages.push({
-      id: 'err-' + Date.now(),
-      role: 'system',
-      content: e.status === 429
-        ? 'Du skickar lite för många meddelanden. Försök igen om en stund.'
-        : 'Kunde inte skicka. Försök igen.',
-      created_at: new Date().toISOString(),
-    });
+    if (e.name === 'AbortError') {
+      _coach.messages = _coach.messages.filter((m) => m.id !== optimistic.id);
+      _coach.messages.push({
+        id: 'sys-' + Date.now(),
+        role: 'system',
+        content: 'Avbrutet — börja om igen när du vill.',
+        created_at: new Date().toISOString(),
+      });
+    } else {
+      console.error('coach send failed', e);
+      _coach.messages.push({
+        id: 'err-' + Date.now(),
+        role: 'system',
+        content: e.status === 429
+          ? 'Du skickar lite för många meddelanden. Försök igen om en stund.'
+          : 'Kunde inte skicka. Försök igen.',
+        created_at: new Date().toISOString(),
+      });
+    }
   } finally {
     _coachShowTyping(false);
     _coachRenderMessages();
     _coachRenderChips();
     _coach.sending = false;
-    if (sendBtn) sendBtn.disabled = false;
+    _coach.abortController = null;
+    _coachSetSendButtonState();
+  }
+}
+
+function cancelCoachSend() {
+  if (_coach.abortController) {
+    try { _coach.abortController.abort(); } catch (_) { /* ignore */ }
   }
 }
 
 function sendCoachChip(text) {
+  if (_coach.readOnly) return;
   const input = document.getElementById('coach-input');
   if (!input) return;
   input.value = text;
+  _coachUpdateCharCount();
+  sendCoachMessage();
+}
+
+function startCoachConversation(text) {
+  if (_coach.readOnly) return;
+  const input = document.getElementById('coach-input');
+  if (!input) return;
+  input.value = text;
+  _coachUpdateCharCount();
   sendCoachMessage();
 }
 
 async function archiveCoachThread() {
+  if (_coach.readOnly) {
+    // From an archived view "Nytt samtal" should just bring the user back to
+    // the active thread.
+    return returnToActiveCoachThread();
+  }
   const ok = await showConfirmModal('Nytt samtal', 'Vill du börja ett nytt samtal? Det aktuella sparas i historiken.', 'Starta nytt');
   if (!ok) return;
   try {
     await _coachFetch({ mode: 'archive' });
     _coach.thread = null;
     _coach.messages = [];
+    _coach.activeThreadCache = null;
     _coachRenderMessages();
     _coachRenderChips();
     await loadCoach();
@@ -8828,9 +9284,98 @@ async function archiveCoachThread() {
   }
 }
 
+// ─────────────────────── History drawer ───────────────────────
+async function openCoachHistory() {
+  const drawer = document.getElementById('coach-history-drawer');
+  const backdrop = document.getElementById('coach-history-backdrop');
+  const list = document.getElementById('coach-history-list');
+  if (!drawer || !backdrop || !list) return;
+  drawer.hidden = false;
+  backdrop.hidden = false;
+  list.innerHTML = `<div class="coach-loading"><div class="coach-loading-dots"><span></span><span></span><span></span></div></div>`;
+  try {
+    const data = await _coachFetch({ mode: 'history' });
+    const threads = Array.isArray(data.threads) ? data.threads : [];
+    if (!threads.length) {
+      list.innerHTML = `<div class="coach-history-empty">Inga arkiverade samtal ännu. Tryck på pennan för att börja ett nytt — det förra hamnar här.</div>`;
+      return;
+    }
+    list.innerHTML = threads.map((t) => {
+      const title = t.title || 'Samtal';
+      const when = t.archived_at || t.last_message_at || t.created_at;
+      const meta = when ? _coachFormatDateLabel(when) + ' · ' + _coachFormatTime(when) : '';
+      return `
+        <button type="button" class="coach-history-item" data-thread-id="${escapeHTML(t.id)}">
+          <span class="coach-history-item-title">${escapeHTML(title)}</span>
+          <span class="coach-history-item-meta">${escapeHTML(meta)}</span>
+        </button>`;
+    }).join('');
+    list.querySelectorAll('.coach-history-item').forEach((el) => {
+      el.addEventListener('click', () => loadCoachThread(el.dataset.threadId));
+    });
+  } catch (e) {
+    console.error('coach history failed', e);
+    list.innerHTML = `<div class="coach-history-empty">Kunde inte hämta historiken. ${escapeHTML(e.message || '')}</div>`;
+  }
+}
+
+function closeCoachHistory() {
+  const drawer = document.getElementById('coach-history-drawer');
+  const backdrop = document.getElementById('coach-history-backdrop');
+  if (drawer) drawer.hidden = true;
+  if (backdrop) backdrop.hidden = true;
+}
+
+async function loadCoachThread(threadId) {
+  if (!threadId) return;
+  closeCoachHistory();
+  // Cache the active thread so we can restore it.
+  if (!_coach.readOnly) {
+    _coach.activeThreadCache = {
+      thread: _coach.thread,
+      messages: _coach.messages.slice(),
+    };
+  }
+  const wrap = document.getElementById('coach-messages');
+  if (wrap) wrap.innerHTML = `<div class="coach-loading"><div class="coach-loading-dots"><span></span><span></span><span></span></div><p>Hämtar samtal…</p></div>`;
+  try {
+    const data = await _coachFetch({ mode: 'history', thread_id: threadId });
+    _coach.thread = data.thread || null;
+    _coach.messages = Array.isArray(data.messages) ? data.messages : [];
+    _coachSetReadOnly(true);
+    _coachUpdateThreadTitle();
+    _coachRenderMessages();
+    _coachRenderChips();
+  } catch (e) {
+    console.error('coach load thread failed', e);
+    if (wrap) wrap.innerHTML = `<div class="coach-loading"><p>Kunde inte hämta samtalet. ${escapeHTML(e.message || '')}</p></div>`;
+  }
+}
+
+function returnToActiveCoachThread() {
+  _coachSetReadOnly(false);
+  if (_coach.activeThreadCache) {
+    _coach.thread = _coach.activeThreadCache.thread;
+    _coach.messages = _coach.activeThreadCache.messages;
+    _coach.activeThreadCache = null;
+    _coachUpdateThreadTitle();
+    _coachUpdateStatus();
+    _coachRenderMessages();
+    _coachRenderChips();
+  } else {
+    loadCoach();
+  }
+}
+
 window.loadCoach = loadCoach;
 window.sendCoachMessage = sendCoachMessage;
 window.sendCoachChip = sendCoachChip;
+window.startCoachConversation = startCoachConversation;
 window.archiveCoachThread = archiveCoachThread;
 window.applyCoachDiff = applyCoachDiff;
 window.declineCoachDiff = declineCoachDiff;
+window.cancelCoachSend = cancelCoachSend;
+window.openCoachHistory = openCoachHistory;
+window.closeCoachHistory = closeCoachHistory;
+window.loadCoachThread = loadCoachThread;
+window.returnToActiveCoachThread = returnToActiveCoachThread;
