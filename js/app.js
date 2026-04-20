@@ -2530,6 +2530,10 @@ function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchem
 
 // ── AI Plan Schema Renderer ──
 
+// State for drag-and-drop schedule swapping. Captured by renderSchemaPlan so
+// the Sortable handler can resolve indexes back to plan_workouts rows.
+let _schemaDndState = null;
+
 function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSchema, profile, phase) {
   invitations = invitations || [];
   const container = document.getElementById('schema-content');
@@ -2613,7 +2617,19 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
       clickAttr = canClick ? ` onclick="openPlanModal('${dayStr}', ${JSON.stringify(fakePlan).replace(/"/g, '&quot;')}, '${DAY_NAMES_FULL[i]}')" style="cursor:pointer;"` : '';
     }
 
-    html += `<div class="sr-card${isToday ? ' sr-today' : ''}${_schemaEditMode ? ' sr-edit-mode' : ''} sr-${statusClass}"${clickAttr}>
+    // Drag-handle is shown only for the user's own schedule and only when there
+    // is a plan_workout row to swap. Logged-day swaps are intentionally out of
+    // scope (would require mutating workouts.workout_date).
+    const canDrag = isOwnSchema && planWo && !_schemaEditMode;
+    const dragHandle = canDrag
+      ? '<div class="sr-drag-handle" aria-label="Dra för att flytta" title="Dra för att byta dag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg></div>'
+      : '';
+
+    const dndAttrs = canDrag
+      ? ` data-day-of-week="${i}" data-plan-workout-id="${planWo.id}"`
+      : ' data-day-of-week="' + i + '"';
+
+    html += `<div class="sr-card${isToday ? ' sr-today' : ''}${_schemaEditMode ? ' sr-edit-mode' : ''}${canDrag ? ' sr-draggable' : ''} sr-${statusClass}"${dndAttrs}${clickAttr}>
       <div class="sr-left">
         <div class="sr-day">${DAY_NAMES[i]}</div>
         <div class="sr-date">${dayDate.getDate()}/${dayDate.getMonth() + 1}</div>
@@ -2621,12 +2637,123 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
       <div class="sr-main">
         ${mainContent}
       </div>
-      <div class="sr-right-status">${rightContent}${editIcon}</div>
+      <div class="sr-right-status">${rightContent}${editIcon}${dragHandle}</div>
     </div>`;
   }
 
   container.innerHTML = html;
   requestAnimationFrame(() => initMapThumbnails());
+
+  // Bind / rebind drag-and-drop after every render. State carries the plan
+  // context needed to map dropped indexes back to plan_workouts rows.
+  if (isOwnSchema && !_schemaEditMode) {
+    _schemaDndState = {
+      planWorkouts: planWorkouts.slice(),
+      planWeekId: planWorkouts[0]?.plan_week_id || null,
+      monday: isoDate(monday),
+      hasLoggedByDow: Array.from({ length: 7 }, (_, i) => {
+        const ds = isoDate(addDays(monday, i));
+        return workouts.some(w => w.workout_date === ds);
+      }),
+    };
+    _initScheduleSortable();
+  } else {
+    _schemaDndState = null;
+    _destroyScheduleSortable();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Schedule drag-and-drop: swap two plan_workouts rows by day_of_week.
+//  Reuses server-side semantics from coach-chat.ts move_session.
+// ─────────────────────────────────────────────────────────────
+
+let _scheduleSortableInstance = null;
+
+function _destroyScheduleSortable() {
+  if (_scheduleSortableInstance) {
+    try { _scheduleSortableInstance.destroy(); } catch (_) { /* noop */ }
+    _scheduleSortableInstance = null;
+  }
+}
+
+function _initScheduleSortable() {
+  _destroyScheduleSortable();
+  if (typeof Sortable === 'undefined') {
+    console.warn('SortableJS not loaded — schedule drag disabled');
+    return;
+  }
+  const container = document.getElementById('schema-content');
+  if (!container) return;
+  _scheduleSortableInstance = Sortable.create(container, {
+    animation: 150,
+    handle: '.sr-drag-handle',
+    draggable: '.sr-draggable',
+    ghostClass: 'sr-card-ghost',
+    chosenClass: 'sr-card-chosen',
+    dragClass: 'sr-card-drag',
+    delay: 120,
+    delayOnTouchOnly: true,
+    touchStartThreshold: 4,
+    onEnd: handleScheduleSwap,
+  });
+}
+
+async function handleScheduleSwap(evt) {
+  const state = _schemaDndState;
+  if (!state) return;
+
+  const fromDow = evt.oldIndex;
+  const toDow = evt.newIndex;
+  if (fromDow === toDow || Number.isNaN(fromDow) || Number.isNaN(toDow)) {
+    await _loadSchema();
+    return;
+  }
+
+  const fromPw = state.planWorkouts.find(p => p.day_of_week === fromDow);
+  const toPw = state.planWorkouts.find(p => p.day_of_week === toDow);
+  if (!fromPw || !toPw) {
+    showToast('Kunde inte byta — saknar planerad data för en av dagarna');
+    await _loadSchema();
+    return;
+  }
+
+  if (state.hasLoggedByDow[toDow]) {
+    const ok = confirm('Det finns redan ett loggat pass på destinationsdagen. Vill du byta planen ändå?');
+    if (!ok) {
+      await _loadSchema();
+      return;
+    }
+  }
+
+  showToast('Sparar...', 1200);
+
+  try {
+    const session = (await sb.auth.getSession()).data.session;
+    if (!session) throw new Error('not logged in');
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/swap-plan-days`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        plan_week_id: state.planWeekId,
+        from_day_of_week: fromDow,
+        to_day_of_week: toDow,
+      }),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`HTTP ${resp.status}: ${txt.substring(0, 120)}`);
+    }
+    showToast('Pass bytt');
+  } catch (e) {
+    console.error('swap-plan-days failed', e);
+    showToast('Kunde inte spara — försök igen');
+  }
+
+  await _loadSchema();
 }
 
 // ═══════════════════════

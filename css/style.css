@@ -839,9 +839,36 @@ select option { background: #1a1a2e; color: var(--text); }
   background: rgba(214,99,158,0.1); padding: 2px 8px; border-radius: 10px;
 }
 
-.sr-right-status { flex-shrink: 0; text-align: right; min-width: 40px; }
+.sr-right-status { flex-shrink: 0; text-align: right; min-width: 40px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .sr-done-info { font-size: 0.8rem; color: var(--text-dim); font-weight: 500; }
 .sr-missed-mark { font-size: 0.68rem; color: var(--red); font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+
+/* ── Drag-and-drop schedule swap ── */
+.sr-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--text-dim);
+  opacity: 0.45;
+  cursor: grab;
+  border-radius: 6px;
+  touch-action: none;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+.sr-drag-handle:hover { opacity: 1; color: var(--text); background: rgba(255,255,255,0.06); }
+.sr-drag-handle:active { cursor: grabbing; }
+.sr-card-ghost { opacity: 0.25; border: 2px dashed var(--text-dim); }
+.sr-card-chosen { background: var(--bg-card-hover, rgba(255,255,255,0.04)); }
+.sr-card-drag {
+  opacity: 0.92;
+  transform: scale(0.98);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.45);
+}
+@media (hover: none) and (pointer: coarse) {
+  .sr-drag-handle { opacity: 0.7; width: 32px; height: 32px; }
+}
 
 /* ── Unified Workout Body (wo-*) ── */
 .wo-label { font-weight: 600; font-size: 0.85rem; margin-bottom: 2px; }
