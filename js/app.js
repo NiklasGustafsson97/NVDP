@@ -750,6 +750,11 @@ function navigate(view, param) {
   else if (view === 'social') loadSocial();
   else if (view === 'friend-profile') loadFriendProfile(param);
   else if (view === 'coach') { loadCoach(); markCoachViewed(); }
+
+  // Lock page scroll so only the chat list scrolls when on the Coach tab.
+  if (typeof document !== 'undefined' && document.body) {
+    document.body.classList.toggle('chat-mode', view === 'coach');
+  }
 }
 
 // ═══════════════════════
@@ -2393,8 +2398,8 @@ function workoutScoreChip(w) {
     else if (score >= 1.0) band = 'high';
     else if (score >= 0.5) band = 'med';
     const im = _intensityMultiplier(w);
-    const title = `Belastning: ${score.toFixed(2)} n·h (IM ${im.toFixed(2)})`;
-    return `<span class="score-chip score-chip--${band}" title="${title}">${score.toFixed(1)} n·h</span>`;
+    const title = `Belastning: Effort ${score.toFixed(2)} (IM ${im.toFixed(2)})`;
+    return `<span class="score-chip score-chip--${band}" title="${title}">Effort ${score.toFixed(1)}</span>`;
   } catch (_) {
     return '';
   }
@@ -2703,9 +2708,16 @@ async function handleScheduleSwap(evt) {
   const state = _schemaDndState;
   if (!state) return;
 
+  // Sortable reports the card's original position (oldIndex) and the new
+  // position it was dropped at (newIndex). Each schedule slot maps 1:1 to a
+  // day_of_week (0=Mon ... 6=Sun) since renderSchemaPlan emits exactly seven
+  // cards in order.
   const fromDow = evt.oldIndex;
   const toDow = evt.newIndex;
   if (fromDow === toDow || Number.isNaN(fromDow) || Number.isNaN(toDow)) {
+    // Dropped in place — re-render to undo any visual shift in date labels
+    // (Sortable left the dragged card visually at its drop position even
+    // though we want a swap, not a reorder).
     await _loadSchema();
     return;
   }
@@ -3048,12 +3060,12 @@ async function _loadTrends() {
     return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
   });
   const isNorm = effortMode === 'normalized';
-  const yUnit = isNorm ? ' n·h' : 'h';
+  const yUnit = isNorm ? ' Effort' : 'h';
 
   const weeklyTitleEl = document.getElementById('trends-weekly-title');
   const mixTitleEl = document.getElementById('trends-mix-title');
   if (weeklyTitleEl) {
-    weeklyTitleEl.textContent = isNorm ? 'Belastning per vecka (n·h)' : 'Timmar per vecka';
+    weeklyTitleEl.textContent = isNorm ? 'Belastning per vecka (Effort)' : 'Timmar per vecka';
   }
   // mix title is set later when chart renders (respects _mixUnit toggle)
 
@@ -3088,7 +3100,7 @@ async function _loadTrends() {
     const mixIsKm = _mixUnit === 'km';
     const mixYUnit = mixIsKm ? ' km' : yUnit;
 
-    if (mixTitleEl) mixTitleEl.textContent = mixIsKm ? 'Aktivitetsmix (km)' : (isNorm ? 'Aktivitetsmix (n·h)' : 'Aktivitetsmix (timmar)');
+    if (mixTitleEl) mixTitleEl.textContent = mixIsKm ? 'Aktivitetsmix (km)' : (isNorm ? 'Aktivitetsmix (Effort)' : 'Aktivitetsmix (timmar)');
 
     const weekEffortByType = {};
     if (isNorm && !mixIsKm) {
@@ -3314,14 +3326,28 @@ function _lookupMET(sport, speedMps, rpe) {
   return brackets[brackets.length - 1].met;
 }
 
-function _elevationFactor(elevGainM, distKm) {
-  if (!elevGainM || elevGainM <= 0 || !distKm || distKm <= 0) return 1.0;
+// Outdoor activities with realistic non-flat terrain (used for elevation default).
+const OUTDOOR_ACTIVITY_TYPES = new Set(['Löpning', 'Cykel', 'Längdskidor']);
+// Population-typical gradient assumed when elevation data is missing for an
+// outdoor activity (~5 m/km → factor 1.05). Indoor/no-distance activities → 1.0.
+const DEFAULT_OUTDOOR_ELEV_FACTOR = 1.05;
+// Default HRmax assumed when neither profile user_max_hr nor a reliable proxy
+// is available. Population mean for adults ≈ 190 bpm. Used only as last resort.
+const DEFAULT_HRMAX = 190;
+
+function _elevationFactor(elevGainM, distKm, activityType) {
+  const isOutdoor = OUTDOOR_ACTIVITY_TYPES.has(activityType);
+  if (!elevGainM || elevGainM <= 0 || !distKm || distKm <= 0) {
+    return isOutdoor ? DEFAULT_OUTDOOR_ELEV_FACTOR : 1.0;
+  }
   const gradient = elevGainM / (distKm * 1000);
   return Math.min(2.0, 1.0 + gradient * 10);
 }
 
 function _intensityMultiplier(w) {
   // Per ALGORITHM.md §4: IM range [0.70, 1.50] across all 4 fallback levels.
+  // Anchor points: 60% HRmax → 0.70 (Z1 ceiling), 75% HRmax → 1.00 (mid-Z3,
+  // typical tempo / steady distance), 100% HRmax → 1.50 (pure Z5).
   const LO = 0.7, HI = 1.5;
   // Level 1: Edwards HR zone distribution. IM = 0.7 + (WI − 1.0) × 0.2.
   const zs = w.hr_zone_seconds;
@@ -3332,20 +3358,23 @@ function _intensityMultiplier(w) {
       return Math.max(LO, Math.min(HI, 0.7 + (wi - 1.0) * 0.2));
     }
   }
-  // Level 2: average HR (use profile max HR if available, else workout max HR).
-  // Linear map 50% HRmax → 0.70, 100% HRmax → 1.50 (slope 0.8/0.5).
+  // Level 2: average HR. HRmax priority: profile → DEFAULT_HRMAX.
+  // NOTE: w.max_hr (session peak) is intentionally NOT used as a fallback —
+  // session peak ≈ 1.05–1.15 × avg_hr, which inflates pctMax and thus IM.
+  // Linear map: 60% HRmax → 0.70, 75% → 1.00, 100% → 1.50 (slope 2.0).
   const maxHr = (currentProfile?.user_max_hr && currentProfile.user_max_hr >= 100)
-    ? currentProfile.user_max_hr : w.max_hr;
-  if (w.avg_hr && w.avg_hr >= 30 && maxHr && maxHr >= 100) {
+    ? currentProfile.user_max_hr
+    : DEFAULT_HRMAX;
+  if (w.avg_hr && w.avg_hr >= 30) {
     const pctMax = w.avg_hr / maxHr;
-    return Math.max(LO, Math.min(HI, 0.7 + (pctMax - 0.5) * (0.8 / 0.5)));
+    return Math.max(LO, Math.min(HI, 2.0 * pctMax - 0.5));
   }
   // Level 3: RPE 1–10. IM = 0.7 + (RPE − 1) × (0.8 / 9).
   if (w.perceived_exertion && w.perceived_exertion >= 1) {
     const rpe = Math.min(10, w.perceived_exertion);
     return Math.max(LO, Math.min(HI, 0.7 + (rpe - 1) * (0.8 / 9)));
   }
-  // Level 4: no intensity data → IM = 1.0.
+  // Level 4: no intensity data → IM = 1.0 (symmetric range, neutral default).
   return 1.0;
 }
 
@@ -3355,12 +3384,12 @@ function calcWorkoutEffort(w) {
   const speedMps = w.avg_speed_kmh ? w.avg_speed_kmh / 3.6 : null;
   const rpe = w.intensity ? (INTENSITY_TO_RPE[w.intensity] ?? null) : null;
   const met = _lookupMET(sport, speedMps, rpe);
-  const elev = _elevationFactor(w.elevation_gain_m, w.distance_km);
+  const elev = _elevationFactor(w.elevation_gain_m, w.distance_km, w.activity_type);
   const im = _intensityMultiplier(w);
   return w.duration_minutes * met * elev * im;
 }
 
-/** Rå effort → visningsvärde (n·h) så veckosummor hamnar nära faktiska träningstimmar. */
+/** Rå effort → visningsvärde (Effort) så veckosummor hamnar nära faktiska träningstimmar. */
 function effortRawToDisplay(rawEffort) {
   const div = typeof EFFORT_DISPLAY_DIVISOR === 'number' && EFFORT_DISPLAY_DIVISOR > 0
     ? EFFORT_DISPLAY_DIVISOR
@@ -3476,7 +3505,7 @@ function renderEffortChart(workouts) {
       labels,
       datasets: [
         {
-          label: 'Belastning (n·h)',
+          label: 'Belastning (Effort)',
           data: effortData,
           backgroundColor: 'rgba(214,99,158,0.5)',
           borderColor: 'rgba(214,99,158,0.8)',
@@ -3504,21 +3533,21 @@ function renderEffortChart(workouts) {
         legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, boxWidth: 12 } },
         tooltip: {
           callbacks: {
-            label: c => c.dataset.label === 'Belastning (n·h)'
-              ? `Belastning: ${c.parsed.y.toFixed(1)} n·h`
+            label: c => c.dataset.label === 'Belastning (Effort)'
+              ? `Belastning: Effort ${c.parsed.y.toFixed(1)}`
               : `Timmar: ${c.parsed.y.toFixed(1)} h`,
             afterBody: (items) => {
               if (!items.length) return [];
               const i = items[0].dataIndex;
               const e = effortData[i];
               const h = hoursData[i];
-              return [`Sammanhang: ${e.toFixed(1)} n·h  ·  ${h.toFixed(1)} h faktisk tid`];
+              return [`Sammanhang: Effort ${e.toFixed(1)}  ·  ${h.toFixed(1)} h faktisk tid`];
             },
           }
         }
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor, callback: v => v + ' n·h' }, title: { display: true, text: 'n·h (skalad)', color: textColor } },
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor }, title: { display: true, text: 'Effort (skalad)', color: textColor } },
         y1: { beginAtZero: true, position: 'right', grid: { display: false }, ticks: { color: textColor, callback: v => v + 'h' }, title: { display: true, text: 'Timmar', color: textColor } },
         x: { grid: { display: false }, ticks: { color: textColor, maxRotation: 45, minRotation: 0 } }
       }
@@ -3528,7 +3557,7 @@ function renderEffortChart(workouts) {
   const legendEl = document.getElementById('effort-legend');
   if (legendEl) {
     legendEl.innerHTML = `
-      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> n·h = normaliserade timmar: rå effort delat med ${EFFORT_DISPLAY_DIVISOR} (≈ 1 h @ MET 10), samma skala som graferna ovan. Timmar-linjen är faktisk tid.</div>
+      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> Effort = normaliserad belastning: rå score delat med ${EFFORT_DISPLAY_DIVISOR} (≈ 1 h @ MET 10), samma skala som graferna ovan. Timmar-linjen är faktisk tid.</div>
     `;
   }
 }
@@ -3581,7 +3610,7 @@ function renderPmcChart(workouts) {
     return;
   }
 
-  // Scale raw effort to n·h display to align with the effort chart.
+  // Scale raw effort to Effort display to align with the effort chart.
   const loads = series.map((s) => effortRawToDisplay(s.load));
   const ctl = _ewma(loads, 42);
   const atl = _ewma(loads, 7);
@@ -3643,7 +3672,7 @@ function renderPmcChart(workouts) {
         legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, boxWidth: 10 } },
         tooltip: {
           callbacks: {
-            label: (c) => `${c.dataset.label}: ${c.parsed.y.toFixed(1)} n·h`,
+            label: (c) => `${c.dataset.label}: Effort ${c.parsed.y.toFixed(1)}`,
           },
         },
       },
@@ -3651,8 +3680,8 @@ function renderPmcChart(workouts) {
         y: {
           beginAtZero: true,
           grid: { color: 'rgba(255,255,255,0.05)' },
-          ticks: { color: textColor, callback: (v) => v + ' n·h' },
-          title: { display: true, text: 'CTL / ATL (n·h)', color: textColor },
+          ticks: { color: textColor },
+          title: { display: true, text: 'CTL / ATL (Effort)', color: textColor },
         },
         y1: {
           position: 'right',
@@ -3677,7 +3706,7 @@ function renderPmcChart(workouts) {
   const sub = document.getElementById('pmc-subtitle');
   if (sub) {
     const deltaStr = (ctlDelta >= 0 ? '+' : '') + ctlDelta.toFixed(1);
-    sub.textContent = `Fitness ${lastCtl.toFixed(1)} n·h (${deltaStr} senaste veckan)`;
+    sub.textContent = `Fitness Effort ${lastCtl.toFixed(1)} (${deltaStr} senaste veckan)`;
   }
 
   const legendEl = document.getElementById('pmc-legend');
@@ -3696,7 +3725,7 @@ function renderPmcChart(workouts) {
     else if (lastTsb > -10) { band = 'neutral'; msg = `Neutral (TSB ${lastTsb.toFixed(0)}). Du bygger jämnt.`; }
     else if (lastTsb > -30) { band = 'productive'; msg = `Produktiv belastning (TSB ${lastTsb.toFixed(0)}). Håll i, planera deload snart.`; }
     else { band = 'risk'; msg = `Hög trötthet (TSB ${lastTsb.toFixed(0)}). Dra ner — risk för överträning.`; }
-    statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(msg)} <span class="pmc-atl-note">ATL ${lastAtl.toFixed(1)} n·h</span>`;
+    statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(msg)} <span class="pmc-atl-note">ATL Effort ${lastAtl.toFixed(1)}</span>`;
   }
 }
 
@@ -4077,7 +4106,7 @@ function setGrpEffortMode(mode) {
 function renderGroupChart(allWorkouts, members) {
   const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
   const isGrpNorm = grpEffortMode === 'normalized';
-  const gUnit = isGrpNorm ? ' n·h' : 'h';
+  const gUnit = isGrpNorm ? ' Effort' : 'h';
   const weekData = {};
   allWorkouts.forEach(w => {
     const mon = mondayOfWeek(new Date(w.workout_date));
@@ -4101,7 +4130,7 @@ function renderGroupChart(allWorkouts, members) {
   if (!canvas) return;
 
   const titleEl = document.getElementById('grp-chart-title');
-  if (titleEl) titleEl.textContent = isGrpNorm ? 'Belastning per vecka (n·h)' : 'Timmar per vecka';
+  if (titleEl) titleEl.textContent = isGrpNorm ? 'Belastning per vecka (Effort)' : 'Timmar per vecka';
 
   const datasets = members.map((m, i) => ({
     label: m.name.split(' ')[0],
@@ -4170,10 +4199,10 @@ function renderGroupEffortChart(allWorkouts, members) {
       interaction: { intersect: false, mode: 'index' },
       plugins: {
         legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, padding: 16 } },
-        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)} n·h` } }
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: Effort ${c.parsed.y.toFixed(1)}` } }
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor, callback: v => v + ' n·h' }, title: { display: true, text: 'n·h', color: textColor } },
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor }, title: { display: true, text: 'Effort', color: textColor } },
         x: { grid: { display: false }, ticks: { color: textColor } }
       }
     }
@@ -4181,7 +4210,7 @@ function renderGroupEffortChart(allWorkouts, members) {
 
   const legendEl = document.getElementById('group-effort-legend');
   if (legendEl) {
-    legendEl.innerHTML = `<div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> n·h = skalad belastning (rå effort ÷ ${EFFORT_DISPLAY_DIVISOR}), samma som på Din progress.</div>`;
+    legendEl.innerHTML = `<div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> Effort = skalad belastning (rå score ÷ ${EFFORT_DISPLAY_DIVISOR}), samma som på Din progress.</div>`;
   }
 }
 
@@ -8795,7 +8824,7 @@ function _coachRenderMarkdown(raw) {
   }
 }
 
-const _coachAvatarSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4l-2 5h4l-3 11"/><circle cx="17" cy="4" r="2"/></svg>`;
+const _coachAvatarSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M9 13v2"/><path d="M15 13v2"/></svg>`;
 
 const _coachToolStatusLabels = {
   get_workout: 'Hämtar passet…',
@@ -9009,14 +9038,10 @@ function _coachRenderMessages() {
       }
     }
 
-    // Tool-status row (only for assistant messages with recorded tool calls)
-    if (m.role === 'assistant') {
-      const toolCalls = m.tool_calls || (m.tool_result && m.tool_result.calls) || null;
-      const status = _coachToolStatusText(toolCalls);
-      if (status) {
-        html += `<div class="coach-tool-status coach-tool-status--done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span>${escapeHTML(status)}</span></div>`;
-      }
-    }
+    // Tool-status used to render here for every historical assistant message,
+    // which made past replies look noisy ("Förbereder förslag…" repeated under
+    // every old answer). Tool progress is now only shown live inside the
+    // typing indicator while the coach is working — see _coachShowTyping().
 
     const isFirst = m.role !== lastRole;
     const rowClasses = [
@@ -9162,7 +9187,7 @@ function _coachRenderChips() {
   ).join('');
 }
 
-function _coachShowTyping(on) {
+function _coachShowTyping(on, statusLabel) {
   const wrap = document.getElementById('coach-messages');
   if (!wrap) return;
   let typing = wrap.querySelector('.coach-typing');
@@ -9170,9 +9195,21 @@ function _coachShowTyping(on) {
     if (!typing) {
       typing = document.createElement('div');
       typing.className = 'coach-typing';
-      typing.innerHTML = '<span></span><span></span><span></span>';
+      typing.innerHTML = `
+        <span class="coach-typing-dots"><span></span><span></span><span></span></span>
+        <span class="coach-typing-label" hidden></span>`;
       wrap.appendChild(typing);
       wrap.scrollTop = wrap.scrollHeight;
+    }
+    const label = typing.querySelector('.coach-typing-label');
+    if (label) {
+      if (statusLabel) {
+        label.textContent = statusLabel;
+        label.hidden = false;
+      } else {
+        label.textContent = '';
+        label.hidden = true;
+      }
     }
   } else if (typing) {
     typing.remove();
@@ -9268,6 +9305,68 @@ function _coachBindComposer() {
   });
 }
 
+// Set to true once per page-load when the user resolves the resume prompt
+// (continue or start new). Prevents nagging on every tab switch.
+let _coachResumeResolved = false;
+
+function _coachThreadHasUserMessages() {
+  return _coach.messages.some((m) => m.role === 'user');
+}
+
+function _coachShowResumePrompt() {
+  const wrap = document.getElementById('coach-messages');
+  if (!wrap) return;
+  // Find the most recent user/assistant message for a preview line.
+  let lastMsg = null;
+  for (let i = _coach.messages.length - 1; i >= 0; i--) {
+    const m = _coach.messages[i];
+    if (m.role === 'user' || m.role === 'assistant') { lastMsg = m; break; }
+  }
+  const previewRaw = (lastMsg?.content || '').replace(/\s+/g, ' ').trim();
+  const preview = previewRaw.length > 140 ? previewRaw.slice(0, 137) + '…' : previewRaw;
+  const when = lastMsg?.created_at ? _coachRelativeTime(lastMsg.created_at) : '';
+
+  wrap.innerHTML = `
+    <div class="coach-resume" id="coach-resume" role="dialog" aria-labelledby="coach-resume-title">
+      <div class="coach-resume-header">
+        <span class="coach-avatar coach-avatar--header" aria-hidden="true">${_coachAvatarSvg}</span>
+        <div>
+          <h3 id="coach-resume-title">Du har en pågående dialog</h3>
+          <p class="coach-resume-meta">${when ? 'Senast aktiv ' + escapeHTML(when) : 'Redan startad'}</p>
+        </div>
+      </div>
+      ${preview ? `<blockquote class="coach-resume-preview">${escapeHTML(preview)}</blockquote>` : ''}
+      <p class="coach-resume-intro">Vill du fortsätta där ni slutade, eller börja en ny avstämning med din coach?</p>
+      <div class="coach-resume-actions">
+        <button type="button" class="btn btn-ghost" id="coach-resume-new">Starta ny avstämning</button>
+        <button type="button" class="btn btn-primary" id="coach-resume-continue">Fortsätt dialogen</button>
+      </div>
+    </div>`;
+
+  const continueBtn = wrap.querySelector('#coach-resume-continue');
+  const newBtn = wrap.querySelector('#coach-resume-new');
+  if (continueBtn) continueBtn.addEventListener('click', () => {
+    _coachResumeResolved = true;
+    _coachRenderMessages();
+    _coachRenderChips();
+  });
+  if (newBtn) newBtn.addEventListener('click', async () => {
+    _coachResumeResolved = true;
+    try {
+      await _coachFetch({ mode: 'archive' });
+    } catch (e) {
+      console.error('coach archive failed', e);
+      showToast('Kunde inte arkivera samtalet');
+      return;
+    }
+    _coach.thread = null;
+    _coach.messages = [];
+    _coach.activeThreadCache = null;
+    // Re-open will create a fresh thread (and possibly an opener).
+    await loadCoach();
+  });
+}
+
 async function loadCoach() {
   if (!currentProfile) return;
   if (_coach.loading) return;
@@ -9284,6 +9383,11 @@ async function loadCoach() {
     _coach.messages = Array.isArray(data.messages) ? data.messages : [];
     _coachUpdateThreadTitle();
     _coachUpdateStatus();
+    if (!_coachResumeResolved && _coachThreadHasUserMessages()) {
+      _coachShowResumePrompt();
+      _coachRenderChips();
+      return;
+    }
     _coachRenderMessages();
     _coachRenderChips();
   } catch (e) {
@@ -9325,7 +9429,7 @@ async function sendCoachMessage(ev) {
   input.value = '';
   input.style.height = 'auto';
   _coachUpdateCharCount();
-  _coachShowTyping(true);
+  _coachShowTyping(true, 'Coachen tänker…');
 
   try {
     const data = await _coachFetch({ mode: 'send', content }, { signal: _coach.abortController.signal });

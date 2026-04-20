@@ -219,6 +219,40 @@ serve(async (req) => {
         .eq("id", conn.id);
     }
 
+    // Derive user_max_hr from the highest max_hr observed in the last ~180
+    // days of workouts. Only bump the profile value upwards — never downwards —
+    // so a manually entered maximum is respected unless Strava proves it low.
+    try {
+      const sinceIso = new Date(Date.now() - 180 * 24 * 3600 * 1000).toISOString();
+      const { data: hrRows } = await db
+        .from("workouts")
+        .select("max_hr")
+        .eq("profile_id", profile_id)
+        .gte("start_time", sinceIso)
+        .not("max_hr", "is", null)
+        .order("max_hr", { ascending: false })
+        .limit(1);
+
+      const observedMax = hrRows && hrRows[0]?.max_hr ? Number(hrRows[0].max_hr) : null;
+      if (observedMax && observedMax >= 120 && observedMax <= 230) {
+        const { data: prof } = await db
+          .from("profiles")
+          .select("user_max_hr")
+          .eq("id", profile_id)
+          .maybeSingle();
+        const currentMax = prof?.user_max_hr ? Number(prof.user_max_hr) : 0;
+        if (observedMax > currentMax) {
+          await db
+            .from("profiles")
+            .update({ user_max_hr: observedMax })
+            .eq("id", profile_id);
+          debug.user_max_hr_updated = { from: currentMax || null, to: observedMax };
+        }
+      }
+    } catch (e) {
+      console.error("strava-sync: max HR derivation failed", e);
+    }
+
     if (firstError) debug.firstError = firstError;
     return new Response(
       JSON.stringify({

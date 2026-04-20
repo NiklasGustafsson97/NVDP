@@ -50,6 +50,7 @@
     integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws"
     crossorigin="anonymous"
     referrerpolicy="no-referrer"></script>
+  <!-- SortableJS for drag-and-drop on the weekly schedule. Touch + mouse support. -->
   <script
     src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"
     crossorigin="anonymous"
@@ -409,8 +410,12 @@
         <div class="coach-header">
           <div class="coach-avatar coach-avatar--header" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M13 4l-2 5h4l-3 11"/>
-              <circle cx="17" cy="4" r="2"/>
+              <path d="M12 8V4H8"/>
+              <rect x="4" y="8" width="16" height="12" rx="2"/>
+              <path d="M2 14h2"/>
+              <path d="M20 14h2"/>
+              <path d="M9 13v2"/>
+              <path d="M15 13v2"/>
             </svg>
           </div>
           <div class="coach-header-text">
