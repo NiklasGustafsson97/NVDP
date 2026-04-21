@@ -2899,11 +2899,6 @@ input.code-input {
 .dash-schema-toggle[aria-expanded="false"] .dash-schema-chevron { transform: rotate(-90deg); }
 .dash-week-collapsible.dash-week-collapsed { display: none; }
 
-.dash-schema-empty {
-  text-align: center; padding: 20px 16px; margin-top: 8px;
-}
-.dash-schema-empty-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 12px; }
-
 .card-header--stack { margin-bottom: 10px; flex-direction: column; align-items: flex-start; gap: 4px; }
 
 .effort-help-btn {

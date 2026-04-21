@@ -1505,23 +1505,6 @@ function toggleDashWeekSection() {
   localStorage.setItem('nvdp_dash_week_collapsed', collapsed ? '1' : '0');
 }
 
-function updateSchemaEmptyBanner() {
-  const container = document.getElementById('schema-content');
-  const banner = document.getElementById('dash-schema-empty');
-  const planBtn = document.getElementById('dash-empty-plan-btn');
-  if (!container || !banner) return;
-  const hasWorkoutCards = container.querySelector('.clickable-workout');
-  let hasPlanContent = false;
-  container.querySelectorAll('.sr-card').forEach(card => {
-    if (card.querySelector('.clickable-workout')) hasPlanContent = true;
-    const t = card.querySelector('.sr-plan-text');
-    if (t && t.textContent.replace(/\s+/g, ' ').trim().length > 0) hasPlanContent = true;
-  });
-  const empty = !hasWorkoutCards && !hasPlanContent;
-  banner.classList.toggle('hidden', !empty);
-  if (planBtn) planBtn.classList.toggle('hidden', !PLAN_GENERATION_ENABLED);
-}
-
 function toggleEffortHelp() {
   const p = document.getElementById('effort-help-panel');
   const b = document.querySelector('.effort-help-btn');
@@ -2268,7 +2251,6 @@ async function _loadSchema() {
 
     renderSchema(workouts, plans, targetMonday, deload, invitations, isOwnSchema, profile);
   }
-  updateSchemaEmptyBanner();
   try { await updateCoachCheckinBanner(); } catch (_e) { /* non-blocking */ }
 }
 
