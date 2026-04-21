@@ -683,6 +683,27 @@
         <div class="pmc-status" id="easy-hr-status"></div>
       </div>
 
+      <div class="card" id="vo2max-card">
+        <div class="card-header">
+          <span class="card-title">
+            VO2max (estimerad)
+            <span
+              class="card-help"
+              tabindex="0"
+              role="button"
+              aria-label="Vad är VO2max?"
+              title="Beräknad från dina löppass via Jack Daniels VDOT-formel (samma definition som Strava och Garmin använder). Per pass: vi tar fart och varaktighet, räknar ut syreförbrukning vid pacen och vilken andel av VO2max det motsvarar för den varaktigheten. Per vecka visas ditt bästa pass — VDOT speglar aktuell tävlingsform. Veckor utan löpning lämnas som lucka. Tempopass och tävlingar lyfter kurvan; rena Z1-jogg gör det inte."
+            >&#9432;</span>
+          </span>
+          <span class="card-sub" id="vo2max-subtitle"></span>
+        </div>
+        <div class="chart-container chart-container--skeleton" id="chart-vo2max-wrap">
+          <div class="chart-skeleton" id="chart-skeleton-vo2max"></div>
+          <canvas id="chart-vo2max"></canvas>
+        </div>
+        <div class="pmc-status" id="vo2max-status"></div>
+      </div>
+
       <div class="card">
         <div class="card-header">
           <span class="card-title" id="trends-mix-title">Aktivitetsmix (timmar)</span>

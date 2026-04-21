@@ -2539,6 +2539,71 @@ function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchem
 // the Sortable handler can resolve indexes back to plan_workouts rows.
 let _schemaDndState = null;
 
+// ─────────────────────────────────────────────────────────────
+//  Greedy pairing of planned and logged workouts on the same day.
+//  Returns { planMatched: Map<planId, loggedId>, loggedMatched: Set<loggedId> }.
+//  Matching rule: same activity_type, in plan sort_order order. Loose pair —
+//  no FK between workouts and plan_workouts.
+// ─────────────────────────────────────────────────────────────
+function _pairPlanAndLogged(planList, loggedList) {
+  const planMatched = new Map();
+  const loggedMatched = new Set();
+  const remainingLogged = loggedList.slice();
+  for (const pw of planList) {
+    if (pw.is_rest) continue;
+    const idx = remainingLogged.findIndex(w => (w.activity_type || '') === (pw.activity_type || ''));
+    if (idx >= 0) {
+      const matched = remainingLogged.splice(idx, 1)[0];
+      planMatched.set(pw.id, matched.id);
+      loggedMatched.add(matched.id);
+    }
+  }
+  return { planMatched, loggedMatched };
+}
+
+// Build a single plan_workout's HTML inside the PLAN zone.
+function _renderPlanCard(planWo, opts) {
+  const { canDrag, isOwnSchema, isFuture, isToday, statusPill, dayOfWeek, dayStr } = opts;
+
+  const dragHandle = canDrag
+    ? '<div class="sr-drag-handle" aria-label="Dra för att flytta" title="Dra för att flytta passet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg></div>'
+    : '';
+
+  const editable = _schemaEditMode && planWo && !planWo.is_rest;
+  const clickAttr = editable
+    ? ` onclick="openPlanWorkoutEdit(${escapeHTML(JSON.stringify(planWo)).replace(/"/g, '&quot;')})" style="cursor:pointer;"`
+    : (isOwnSchema && (isFuture || isToday) && !planWo.is_rest
+        ? ` onclick="openPlanModal('${dayStr}', ${JSON.stringify({ label: planWo.label, description: planWo.description, is_rest: planWo.is_rest, day_of_week: planWo.day_of_week, plan_workout_id: planWo.id }).replace(/"/g, '&quot;')}, '${DAY_NAMES_FULL[dayOfWeek]}')" style="cursor:pointer;"`
+        : '');
+
+  let body;
+  if (planWo.is_rest) {
+    body = '<div class="sr-plan-label sr-rest-label">Vila</div>';
+  } else {
+    const zoneBadge = planWo.intensity_zone
+      ? ` <span class="zone-badge zone-${planWo.intensity_zone.toLowerCase()}">${planWo.intensity_zone}</span>`
+      : '';
+    const lbl = planWo.label || planWo.activity_type || 'Pass';
+    const desc = stripProgressionText(planWo.description || '');
+    const estMin = estimateDurationFromDescription(planWo.description, planWo.target_duration_minutes);
+    const durStr = estMin > 0 ? `${estMin} min` : '';
+    const meta = (estMin > 0 || planWo.target_distance_km)
+      ? `<span class="sr-target">${durStr}${planWo.target_distance_km ? (durStr ? ' · ' : '') + planWo.target_distance_km + ' km' : ''}</span>`
+      : '';
+    body = `<div class="sr-plan-label">${lbl}${zoneBadge} ${meta}</div>`;
+    if (desc) body += `<div class="sr-plan-desc">${desc}</div>`;
+  }
+
+  const dndAttrs = canDrag
+    ? ` data-day-of-week="${dayOfWeek}" data-plan-workout-id="${planWo.id}" data-sort-order="${planWo.sort_order ?? 0}"`
+    : ` data-day-of-week="${dayOfWeek}" data-sort-order="${planWo.sort_order ?? 0}"`;
+
+  return `<div class="sr-pass-card sr-pass-plan${canDrag ? ' sr-draggable' : ''}${planWo.is_rest ? ' sr-pass-rest' : ''}"${dndAttrs}${clickAttr}>
+    <div class="sr-pass-body">${body}${statusPill || ''}</div>
+    ${dragHandle}
+  </div>`;
+}
+
 function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSchema, profile, phase) {
   invitations = invitations || [];
   const container = document.getElementById('schema-content');
@@ -2550,100 +2615,99 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
     const dayDate = addDays(monday, i);
     const dayStr = isoDate(dayDate);
     const dayWorkouts = workouts.filter(w => w.workout_date === dayStr);
-    const planWo = planWorkouts.find(pw => pw.day_of_week === i);
+    const dayPlans = planWorkouts
+      .filter(pw => pw.day_of_week === i)
+      .slice()
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
     const isToday = dayStr === todayStr;
     const isFuture = dayDate > new Date();
+    const isPast = !isFuture && !isToday;
 
     const dayInvs = invitations.filter(inv => inv.workout_date === dayStr);
     const acceptedInv = dayInvs.find(inv => inv.status === 'accepted');
     const pendingInv = dayInvs.find(inv => inv.status === 'pending');
 
+    // Pair plan vs logged for status pill computation.
+    const { planMatched, loggedMatched } = _pairPlanAndLogged(dayPlans, dayWorkouts);
+    const nonRestPlans = dayPlans.filter(p => !p.is_rest);
+    const allRest = dayPlans.length > 0 && nonRestPlans.length === 0;
+    const anyMissed = nonRestPlans.some(p => !planMatched.has(p.id));
+    const anyMatched = nonRestPlans.some(p => planMatched.has(p.id));
+
+    // Day-level status (used for outer card chrome / today highlight).
     let statusClass = 'future';
-    if (dayWorkouts.length > 0) statusClass = 'done';
-    else if (planWo?.is_rest) statusClass = 'rest';
-    else if (!isFuture) statusClass = 'missed';
+    if (allRest) statusClass = 'rest';
+    else if (nonRestPlans.length === 0 && dayWorkouts.length > 0) statusClass = 'done';
+    else if (nonRestPlans.length > 0 && !anyMissed) statusClass = 'done';
+    else if (isPast && anyMissed) statusClass = 'missed';
+    else if (isToday && anyMatched) statusClass = 'done';
 
-    let planText = '';
-    if (acceptedInv) {
-      const partnerId = acceptedInv.sender_id === profileId ? acceptedInv.receiver_id : acceptedInv.sender_id;
-      const partner = allProfiles.find(p => p.id === partnerId);
-      const initials = partner ? partner.name.split(' ').map(n => n[0]).join('').toUpperCase() : '?';
-      planText = `<span class="shared-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>${initials}</span> `;
-      planText += acceptedInv.description || acceptedInv.activity_type;
-    } else if (planWo?.is_rest) {
-      planText = '<span class="sr-rest-label">Vila</span>';
-    } else if (planWo) {
-      const zoneBadge = planWo.intensity_zone
-        ? ` <span class="zone-badge zone-${planWo.intensity_zone.toLowerCase()}">${planWo.intensity_zone}</span>`
-        : '';
-      const lbl = planWo.label || planWo.activity_type;
-      const desc = stripProgressionText(planWo.description || '');
-      const estMin = estimateDurationFromDescription(planWo.description, planWo.target_duration_minutes);
-      const durStr = estMin > 0 ? `${estMin} min` : '';
-      const meta = (estMin > 0 || planWo.target_distance_km)
-        ? `<span class="sr-target">${durStr}${planWo.target_distance_km ? (durStr ? ' · ' : '') + planWo.target_distance_km + ' km' : ''}</span>`
-        : '';
-      planText = `<div class="sr-plan-label">${lbl}${zoneBadge} ${meta}</div>`;
-      if (desc) planText += `<div class="sr-plan-desc">${desc}</div>`;
-    }
+    // Build PLAN zone — one card per plan_workout (or a placeholder).
+    const planCardsHtml = dayPlans.length === 0
+      ? (acceptedInv
+          ? `<div class="sr-pass-card sr-pass-shared"><div class="sr-pass-body">${(() => {
+              const partnerId = acceptedInv.sender_id === profileId ? acceptedInv.receiver_id : acceptedInv.sender_id;
+              const partner = allProfiles.find(p => p.id === partnerId);
+              const initials = partner ? partner.name.split(' ').map(n => n[0]).join('').toUpperCase() : '?';
+              const text = acceptedInv.description || acceptedInv.activity_type;
+              return `<span class="shared-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>${initials}</span> ${text}`;
+            })()}</div></div>`
+          : '<div class="sr-pass-empty">Ingen plan</div>')
+      : dayPlans.map(planWo => {
+          const isMatched = planMatched.has(planWo.id);
+          let statusPill = '';
+          if (planWo.is_rest) {
+            statusPill = '<span class="sr-pill sr-pill--rest">Vila</span>';
+          } else if (isMatched) {
+            statusPill = '<span class="sr-pill sr-pill--matched">Gjort</span>';
+          } else if (isPast) {
+            statusPill = '<span class="sr-pill sr-pill--missed">Missat</span>';
+          } else if (isToday) {
+            statusPill = '<span class="sr-pill sr-pill--planned">Idag</span>';
+          } else {
+            statusPill = '<span class="sr-pill sr-pill--planned">Planerat</span>';
+          }
+          const canDrag = isOwnSchema && _schemaEditMode;
+          return _renderPlanCard(planWo, {
+            canDrag, isOwnSchema, isFuture, isToday, statusPill,
+            dayOfWeek: i, dayStr,
+          });
+        }).join('');
 
-    if (pendingInv && !acceptedInv) {
-      const isSender = pendingInv.sender_id === profileId;
-      planText += isSender
-        ? ' <span class="invite-pending-badge">Inbjudan skickad</span>'
-        : ' <span class="invite-pending-badge">Inbjudan mottagen</span>';
-    }
+    // Build ACTUAL (Gjort) zone — only render if there's anything logged.
+    const actualCardsHtml = dayWorkouts.length === 0
+      ? ''
+      : dayWorkouts.map(w => {
+          const isExtra = !loggedMatched.has(w.id) && nonRestPlans.length > 0;
+          const extraPill = isExtra ? '<span class="sr-pill sr-pill--extra">Extra</span>' : '';
+          return `<div class="sr-pass-card sr-pass-actual" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})' style="cursor:pointer;">
+            <div class="sr-pass-body">${buildWorkoutBody(w)}${extraPill}</div>
+          </div>`;
+        }).join('');
 
-    let mainContent = '';
-    if (dayWorkouts.length > 0) {
-      mainContent = dayWorkouts.map(w => {
-        return `<div class="clickable-workout" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
-          ${buildWorkoutBody(w)}
-        </div>`;
-      }).join('');
-    } else {
-      mainContent = `<div class="sr-plan-text">${planText}</div>`;
-    }
-
-    let rightContent = '';
-    if (statusClass === 'missed') {
-      rightContent = '<div class="sr-missed-mark">Missat</div>';
-    }
-
-    const fakePlan = planWo ? { label: planWo.label, description: planWo.description, is_rest: planWo.is_rest, day_of_week: planWo.day_of_week } : {};
-
-    let clickAttr = '';
-    const editIcon = _schemaEditMode && planWo && dayWorkouts.length === 0 ? '<div class="sr-edit-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>' : '';
-
-    if (_schemaEditMode && planWo && dayWorkouts.length === 0) {
-      clickAttr = ` onclick="openPlanWorkoutEdit(${escapeHTML(JSON.stringify(planWo)).replace(/"/g, '&quot;')})" style="cursor:pointer;"`;
-    } else {
-      const canClick = isOwnSchema && (isFuture || isToday) && !planWo?.is_rest && dayWorkouts.length === 0;
-      clickAttr = canClick ? ` onclick="openPlanModal('${dayStr}', ${JSON.stringify(fakePlan).replace(/"/g, '&quot;')}, '${DAY_NAMES_FULL[i]}')" style="cursor:pointer;"` : '';
-    }
-
-    // Drag-handle is shown only for the user's own schedule, only inside
-    // manual edit mode, and only when there is a plan_workout row to swap.
-    // Logged-day swaps are intentionally out of scope (would require mutating
-    // workouts.workout_date).
-    const canDrag = isOwnSchema && planWo && _schemaEditMode;
-    const dragHandle = canDrag
-      ? '<div class="sr-drag-handle" aria-label="Dra för att flytta" title="Dra för att byta dag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg></div>'
+    const inviteBadge = (pendingInv && !acceptedInv)
+      ? (pendingInv.sender_id === profileId
+          ? '<span class="invite-pending-badge">Inbjudan skickad</span>'
+          : '<span class="invite-pending-badge">Inbjudan mottagen</span>')
       : '';
 
-    const dndAttrs = canDrag
-      ? ` data-day-of-week="${i}" data-plan-workout-id="${planWo.id}"`
-      : ' data-day-of-week="' + i + '"';
-
-    html += `<div class="sr-card${isToday ? ' sr-today' : ''}${_schemaEditMode ? ' sr-edit-mode' : ''}${canDrag ? ' sr-draggable' : ''} sr-${statusClass}"${dndAttrs}${clickAttr}>
+    html += `<div class="sr-card${isToday ? ' sr-today' : ''}${_schemaEditMode ? ' sr-edit-mode' : ''} sr-${statusClass}" data-day-of-week="${i}">
       <div class="sr-left">
         <div class="sr-day">${DAY_NAMES[i]}</div>
         <div class="sr-date">${dayDate.getDate()}/${dayDate.getMonth() + 1}</div>
       </div>
       <div class="sr-main">
-        ${mainContent}
+        <div class="sr-zones">
+          <div class="sr-plan-zone" data-day-of-week="${i}">
+            ${planCardsHtml}
+          </div>
+          ${actualCardsHtml ? `<div class="sr-actual-zone">
+            <div class="sr-zone-label">Gjort</div>
+            ${actualCardsHtml}
+          </div>` : ''}
+          ${inviteBadge ? `<div class="sr-invite-row">${inviteBadge}</div>` : ''}
+        </div>
       </div>
-      <div class="sr-right-status">${rightContent}${editIcon}${dragHandle}</div>
     </div>`;
   }
 
@@ -2651,17 +2715,13 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
   requestAnimationFrame(() => initMapThumbnails());
 
   // Bind / rebind drag-and-drop after every render. State carries the plan
-  // context needed to map dropped indexes back to plan_workouts rows.
+  // context needed to map dropped DOM positions back to plan_workouts rows.
   // Drag-and-drop is only active in manual edit mode.
   if (isOwnSchema && _schemaEditMode) {
     _schemaDndState = {
       planWorkouts: planWorkouts.slice(),
       planWeekId: planWorkouts[0]?.plan_week_id || null,
       monday: isoDate(monday),
-      hasLoggedByDow: Array.from({ length: 7 }, (_, i) => {
-        const ds = isoDate(addDays(monday, i));
-        return workouts.some(w => w.workout_date === ds);
-      }),
     };
     _initScheduleSortable();
   } else {
@@ -2671,17 +2731,19 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Schedule drag-and-drop: swap two plan_workouts rows by day_of_week.
-//  Reuses server-side semantics from coach-chat.ts move_session.
+//  Schedule drag-and-drop: move a single plan_workout to another day or
+//  another slot within the same day. Talks to the move-plan-workout edge
+//  function which atomically updates day_of_week, sort_order and recomputes
+//  workout_date for the row.
 // ─────────────────────────────────────────────────────────────
 
-let _scheduleSortableInstance = null;
+let _scheduleSortableInstances = [];
 
 function _destroyScheduleSortable() {
-  if (_scheduleSortableInstance) {
-    try { _scheduleSortableInstance.destroy(); } catch (_) { /* noop */ }
-    _scheduleSortableInstance = null;
+  for (const inst of _scheduleSortableInstances) {
+    try { inst.destroy(); } catch (_) { /* noop */ }
   }
+  _scheduleSortableInstances = [];
 }
 
 function _initScheduleSortable() {
@@ -2690,54 +2752,45 @@ function _initScheduleSortable() {
     console.warn('SortableJS not loaded — schedule drag disabled');
     return;
   }
-  const container = document.getElementById('schema-content');
-  if (!container) return;
-  _scheduleSortableInstance = Sortable.create(container, {
-    animation: 150,
-    handle: '.sr-drag-handle',
-    draggable: '.sr-draggable',
-    ghostClass: 'sr-card-ghost',
-    chosenClass: 'sr-card-chosen',
-    dragClass: 'sr-card-drag',
-    delay: 120,
-    delayOnTouchOnly: true,
-    touchStartThreshold: 4,
-    onEnd: handleScheduleSwap,
+  const zones = document.querySelectorAll('#schema-content .sr-plan-zone');
+  zones.forEach(zone => {
+    const inst = Sortable.create(zone, {
+      group: 'schedule-plans',
+      animation: 150,
+      handle: '.sr-drag-handle',
+      draggable: '.sr-draggable',
+      ghostClass: 'sr-card-ghost',
+      chosenClass: 'sr-card-chosen',
+      dragClass: 'sr-card-drag',
+      delay: 120,
+      delayOnTouchOnly: true,
+      touchStartThreshold: 4,
+      onEnd: handleScheduleMove,
+    });
+    _scheduleSortableInstances.push(inst);
   });
 }
 
-async function handleScheduleSwap(evt) {
+async function handleScheduleMove(evt) {
   const state = _schemaDndState;
   if (!state) return;
 
-  // Sortable reports the card's original position (oldIndex) and the new
-  // position it was dropped at (newIndex). Each schedule slot maps 1:1 to a
-  // day_of_week (0=Mon ... 6=Sun) since renderSchemaPlan emits exactly seven
-  // cards in order.
-  const fromDow = evt.oldIndex;
-  const toDow = evt.newIndex;
-  if (fromDow === toDow || Number.isNaN(fromDow) || Number.isNaN(toDow)) {
-    // Dropped in place — re-render to undo any visual shift in date labels
-    // (Sortable left the dragged card visually at its drop position even
-    // though we want a swap, not a reorder).
+  const item = evt.item;
+  const planWorkoutId = item?.dataset?.planWorkoutId;
+  const toZone = evt.to;
+  const toDow = toZone ? Number(toZone.dataset?.dayOfWeek) : NaN;
+  const newIndex = typeof evt.newDraggableIndex === 'number' ? evt.newDraggableIndex : evt.newIndex;
+  const fromDow = evt.from ? Number(evt.from.dataset?.dayOfWeek) : NaN;
+  const oldIndex = typeof evt.oldDraggableIndex === 'number' ? evt.oldDraggableIndex : evt.oldIndex;
+
+  if (!planWorkoutId || Number.isNaN(toDow)) {
     await _loadSchema();
     return;
   }
 
-  const fromPw = state.planWorkouts.find(p => p.day_of_week === fromDow);
-  const toPw = state.planWorkouts.find(p => p.day_of_week === toDow);
-  if (!fromPw || !toPw) {
-    showToast('Kunde inte byta — saknar planerad data för en av dagarna');
-    await _loadSchema();
+  // Same zone, same slot → no-op.
+  if (fromDow === toDow && oldIndex === newIndex) {
     return;
-  }
-
-  if (state.hasLoggedByDow[toDow]) {
-    const ok = confirm('Det finns redan ett loggat pass på destinationsdagen. Vill du byta planen ändå?');
-    if (!ok) {
-      await _loadSchema();
-      return;
-    }
   }
 
   showToast('Sparar...', 1200);
@@ -2745,7 +2798,7 @@ async function handleScheduleSwap(evt) {
   try {
     const session = (await sb.auth.getSession()).data.session;
     if (!session) throw new Error('not logged in');
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/swap-plan-days`, {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/move-plan-workout`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${session.access_token}`,
@@ -2753,18 +2806,18 @@ async function handleScheduleSwap(evt) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        plan_week_id: state.planWeekId,
-        from_day_of_week: fromDow,
+        plan_workout_id: planWorkoutId,
         to_day_of_week: toDow,
+        to_sort_order: newIndex,
       }),
     });
     if (!resp.ok) {
       const txt = await resp.text();
-      throw new Error(`HTTP ${resp.status}: ${txt.substring(0, 120)}`);
+      throw new Error(`HTTP ${resp.status}: ${txt.substring(0, 200)}`);
     }
-    showToast('Pass bytt');
+    showToast('Pass flyttat');
   } catch (e) {
-    console.error('swap-plan-days failed', e);
+    console.error('move-plan-workout failed', e);
     showToast('Kunde inte spara — försök igen');
   }
 
@@ -3166,6 +3219,7 @@ async function _loadTrends() {
   // Polarization (senaste 4 v) + easy-pace HR trend
   renderPolarizationCard(myWorkouts);
   renderEasyHrChart(myWorkouts);
+  renderVo2maxChart(myWorkouts);
 
   // Weekly summary + recent workouts (moved from dashboard)
   const now2 = new Date();
@@ -3475,111 +3529,13 @@ function renderSeasonActivityBars(workouts, mode) {
   }).join('');
 }
 
-// ─────────────────────────────────────────────────────────────
-//  Chart time-window navigation
-//
-//  Every time-series chart on Progress / Group defaults to the most
-//  recent 12 weeks. Each chart owns its own back/forward state so the
-//  user can browse one chart's history (e.g. "show me last winter's
-//  PMC") without dragging the others along.
-//
-//  Public surface used by chart render fns:
-//    - getChartWindow(key)              → { startDate, endDate, offset }
-//    - filterWorkoutsToWindow(arr,...)  → workouts inside [start, end]
-//    - mountChartNav(key, canvasId, fn) → injects ← label → above chart
-// ─────────────────────────────────────────────────────────────
-
-const CHART_WINDOW_WEEKS = 12;
-const CHART_WINDOW_DAYS = CHART_WINDOW_WEEKS * 7;
-
-// Per-chart state. Key is a slug matching the canvas id suffix
-// (e.g. 'effort' for #chart-effort, 'group-weekly' for #chart-group-weekly).
-// 0 = most recent 12 weeks, 1 = preceding 12 weeks, etc.
-const _chartWindowOffset = {};
-
-function getChartWindow(chartKey) {
-  const offset = _chartWindowOffset[chartKey] || 0;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const endDate = addDays(today, -offset * CHART_WINDOW_DAYS);
-  // Inclusive 12-week window: [end - 12*7 + 1, end]
-  const startDate = addDays(endDate, -(CHART_WINDOW_DAYS - 1));
-  return { startDate, endDate, offset };
-}
-
-function _formatChartWindowLabel(start, end) {
-  const startWk = weekNumber(start);
-  const endWk = weekNumber(end);
-  const startYr = start.getFullYear();
-  const endYr = end.getFullYear();
-  if (startYr === endYr) return `V${startWk}–V${endWk} ${endYr}`;
-  return `V${startWk} ${startYr}–V${endWk} ${endYr}`;
-}
-
-function filterWorkoutsToWindow(workouts, startDate, endDate) {
-  const startIso = isoDate(startDate);
-  const endIso = isoDate(endDate);
-  return workouts.filter((w) =>
-    w.workout_date && w.workout_date >= startIso && w.workout_date <= endIso
-  );
-}
-
-// Inject the back/forward navigation row right above a chart's canvas.
-// Idempotent — if a nav already exists for this chart it gets re-rendered
-// in place (so labels and disabled-state stay in sync after a toggle).
-//
-//   chartKey:    state slug (must match the suffix of #chart-<slug>).
-//   canvasId:    DOM id of the <canvas> element.
-//   rerenderFn:  invoked after offset changes so the chart can re-draw.
-function mountChartNav(chartKey, canvasId, rerenderFn) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return;
-  const wrap = canvas.closest('.chart-container');
-  if (!wrap || !wrap.parentElement) return;
-
-  const navId = `${canvasId}-nav`;
-  let nav = document.getElementById(navId);
-  if (!nav) {
-    nav = document.createElement('div');
-    nav.className = 'chart-nav';
-    nav.id = navId;
-    wrap.parentElement.insertBefore(nav, wrap);
-  }
-
-  const { startDate, endDate, offset } = getChartWindow(chartKey);
-  const label = _formatChartWindowLabel(startDate, endDate);
-  const offsetSuffix = offset === 0 ? '' : ` · ${offset * CHART_WINDOW_WEEKS}v bakåt`;
-  // Forward arrow only appears once the user has stepped back at least once,
-  // matching the "default state shows just one back arrow" requirement.
-  const forwardBtn = offset > 0
-    ? '<button class="chart-nav-btn" data-dir="forward" aria-label="Gå framåt 12 veckor" title="Gå framåt 12 veckor">→</button>'
-    : '<span class="chart-nav-spacer" aria-hidden="true"></span>';
-  nav.innerHTML =
-    '<button class="chart-nav-btn" data-dir="back" aria-label="Visa föregående 12 veckor" title="Visa föregående 12 veckor">←</button>' +
-    `<span class="chart-nav-label">${escapeHTML(label)}${escapeHTML(offsetSuffix)}</span>` +
-    forwardBtn;
-
-  nav.querySelectorAll('.chart-nav-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const dir = btn.dataset.dir;
-      const cur = _chartWindowOffset[chartKey] || 0;
-      _chartWindowOffset[chartKey] = dir === 'back' ? cur + 1 : Math.max(0, cur - 1);
-      rerenderFn();
-    });
-  });
-}
-
 function renderEffortChart(workouts) {
   const effortCanvas = document.getElementById('chart-effort');
   if (!effortCanvas) return;
   if (window._chartEffort) window._chartEffort.destroy();
 
-  const { startDate, endDate } = getChartWindow('effort');
-  const windowed = filterWorkoutsToWindow(workouts, startDate, endDate);
-  mountChartNav('effort', 'chart-effort', () => renderEffortChart(workouts));
-
   const weekMap = {};
-  windowed.forEach(w => {
+  workouts.forEach(w => {
     const d = new Date(w.workout_date);
     const mon = mondayOfWeek(d);
     const key = isoDate(mon);
@@ -3667,13 +3623,9 @@ function renderEffortChart(workouts) {
 //  Impulse = per-day summed calcWorkoutEffort (raw), then EWMA per TrainingPeaks.
 // ─────────────────────────────────────────────────────────────
 
-// Build a contiguous daily-effort series ending at `anchorDate` (or today
-// if omitted). Length = `days` rows. Used by PMC so the same EWMA pipeline
-// can be re-anchored when the user navigates back through 12-week windows.
-function _dailyLoadSeries(workouts, days = 120, anchorDate = null) {
-  const anchor = anchorDate ? new Date(anchorDate) : new Date();
-  anchor.setHours(0, 0, 0, 0);
-  const start = addDays(anchor, -(days - 1));
+function _dailyLoadSeries(workouts, days = 120) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const start = addDays(today, -(days - 1));
   const series = [];
   const byDate = new Map();
   for (const w of workouts) {
@@ -3705,33 +3657,28 @@ function renderPmcChart(workouts) {
   if (!canvas || typeof Chart === 'undefined') return;
   if (window._chartPmc) window._chartPmc.destroy();
 
-  // Compute over a longer pre-window (12w + 6w ramp-up) so CTL has time
-  // to converge before the displayed window starts; show only the last
-  // 12 weeks. When the user navigates back, the anchor moves with the
-  // window so historical CTL/ATL stay accurate.
-  const { endDate } = getChartWindow('pmc');
-  const RAMPUP_DAYS = 6 * 7;
-  const COMPUTE_DAYS = CHART_WINDOW_DAYS + RAMPUP_DAYS;
-  const fullSeries = _dailyLoadSeries(workouts, COMPUTE_DAYS, endDate);
-  mountChartNav('pmc', 'chart-pmc', () => renderPmcChart(workouts));
+  const heroBadge = document.getElementById('pmc-hero-badge');
+  const heroTitle = document.getElementById('pmc-hero-title');
+  const heroSub = document.getElementById('pmc-hero-sub');
+  const heroTsb = document.getElementById('pmc-hero-tsb');
 
-  const displaySeries = fullSeries.slice(-CHART_WINDOW_DAYS);
-  if (displaySeries.every((s) => s.load === 0)) {
-    const statusEl = document.getElementById('pmc-status');
-    if (statusEl) statusEl.textContent = 'För lite data — logga några pass så fylls grafen.';
+  const series = _dailyLoadSeries(workouts, 120);
+  if (series.every((s) => s.load === 0)) {
+    if (heroTitle) heroTitle.textContent = 'För lite data';
+    if (heroSub) heroSub.textContent = 'Logga några pass så fylls formen i.';
+    if (heroTsb) heroTsb.textContent = '';
+    if (heroBadge) heroBadge.className = 'pmc-hero-badge pmc-hero-badge--neutral';
     const sub = document.getElementById('pmc-subtitle');
     if (sub) sub.textContent = '';
     return;
   }
 
   // Scale raw effort to Effort display to align with the effort chart.
-  const fullLoads = fullSeries.map((s) => effortRawToDisplay(s.load));
-  const fullCtl = _ewma(fullLoads, 42);
-  const fullAtl = _ewma(fullLoads, 7);
-  const ctl = fullCtl.slice(-CHART_WINDOW_DAYS);
-  const atl = fullAtl.slice(-CHART_WINDOW_DAYS);
+  const loads = series.map((s) => effortRawToDisplay(s.load));
+  const ctl = _ewma(loads, 42);
+  const atl = _ewma(loads, 7);
   const tsb = ctl.map((c, i) => c - atl[i]);
-  const labels = displaySeries.map((s) => {
+  const labels = series.map((s) => {
     const d = new Date(s.date + 'T00:00:00');
     return `${d.getDate()}/${d.getMonth() + 1}`;
   });
@@ -3796,13 +3743,20 @@ function renderPmcChart(workouts) {
         y: {
           beginAtZero: true,
           grid: { color: 'rgba(255,255,255,0.05)' },
-          ticks: { color: textColor },
+          ticks: { color: textColor, callback: (v) => Number(v).toFixed(1) },
           title: { display: true, text: 'CTL / ATL (Effort)', color: textColor },
         },
         y1: {
           position: 'right',
           grid: { display: false },
-          ticks: { color: textColor, callback: (v) => (v > 0 ? '+' : '') + v },
+          ticks: {
+            color: textColor,
+            callback: (v) => {
+              const n = Number(v);
+              const sign = n > 0 ? '+' : '';
+              return sign + n.toFixed(1);
+            },
+          },
           title: { display: true, text: 'TSB', color: textColor },
         },
         x: {
@@ -3834,15 +3788,76 @@ function renderPmcChart(workouts) {
     `;
   }
 
+  // Hero — the one number most people actually look at.
+  let band, title, sub2;
+  if (lastTsb > 5) {
+    band = 'fresh';
+    title = 'Utvilad';
+    sub2 = 'Bra tajming för ett nyckelpass eller tävling.';
+  } else if (lastTsb > -10) {
+    band = 'neutral';
+    title = 'Neutral';
+    sub2 = 'Du bygger jämnt — fortsätt som planerat.';
+  } else if (lastTsb > -30) {
+    band = 'productive';
+    title = 'Bygger fitness';
+    sub2 = 'Produktiv belastning. Planera in en deload snart.';
+  } else {
+    band = 'risk';
+    title = 'Hög trötthet';
+    sub2 = 'Dra ner — risk för överträning.';
+  }
+
+  const tsbStr = (lastTsb >= 0 ? '+' : '') + lastTsb.toFixed(1);
+  if (heroBadge) heroBadge.className = `pmc-hero-badge pmc-hero-badge--${band}`;
+  if (heroTitle) heroTitle.textContent = title;
+  if (heroSub) heroSub.textContent = sub2;
+  if (heroTsb) heroTsb.innerHTML = `<span class="pmc-hero-tsb-value">${escapeHTML(tsbStr)}</span><span class="pmc-hero-tsb-label">TSB · form</span>`;
+
+  // Legacy hidden status node — keep populated in case something else reads it.
   const statusEl = document.getElementById('pmc-status');
   if (statusEl) {
-    let band, msg;
-    if (lastTsb > 5) { band = 'fresh'; msg = `Bra form (TSB ${lastTsb.toFixed(0)}). Bra tajming för ett nyckelpass eller tävling.`; }
-    else if (lastTsb > -10) { band = 'neutral'; msg = `Neutral (TSB ${lastTsb.toFixed(0)}). Du bygger jämnt.`; }
-    else if (lastTsb > -30) { band = 'productive'; msg = `Produktiv belastning (TSB ${lastTsb.toFixed(0)}). Håll i, planera deload snart.`; }
-    else { band = 'risk'; msg = `Hög trötthet (TSB ${lastTsb.toFixed(0)}). Dra ner — risk för överträning.`; }
-    statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(msg)} <span class="pmc-atl-note">ATL Effort ${lastAtl.toFixed(1)}</span>`;
+    statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(title)} (TSB ${tsbStr}). ${escapeHTML(sub2)} <span class="pmc-atl-note">ATL Effort ${lastAtl.toFixed(1)}</span>`;
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  PMC card UX helpers — info popover + collapsible details.
+// ─────────────────────────────────────────────────────────────
+function togglePmcInfo() {
+  const pop = document.getElementById('pmc-info-popover');
+  const btn = document.getElementById('pmc-info-btn');
+  if (!pop || !btn) return;
+  const open = pop.classList.toggle('hidden') === false;
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function togglePmcDetails() {
+  const details = document.getElementById('pmc-details');
+  const toggle = document.getElementById('pmc-details-toggle');
+  if (!details || !toggle) return;
+  const willOpen = details.hasAttribute('hidden');
+  if (willOpen) {
+    details.removeAttribute('hidden');
+    toggle.setAttribute('aria-expanded', 'true');
+    toggle.classList.add('pmc-details-toggle--open');
+    toggle.querySelector('span').textContent = 'Dölj graf och detaljer';
+    // Chart was rendered into a hidden container — force resize so it
+    // measures the now-visible area correctly.
+    requestAnimationFrame(() => {
+      try { window._chartPmc && window._chartPmc.resize(); } catch (_) { /* ignore */ }
+    });
+  } else {
+    details.setAttribute('hidden', '');
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.classList.remove('pmc-details-toggle--open');
+    toggle.querySelector('span').textContent = 'Visa graf och detaljer';
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.togglePmcInfo = togglePmcInfo;
+  window.togglePmcDetails = togglePmcDetails;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -3947,9 +3962,72 @@ function renderPolarizationCard(workouts) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Easy-pace HR trend: rolling weekly avg HR for Z1-Z2 running.
-//  Lower avg HR at same pace = aerobic adaptation.
+//  Aerob effektivitet (EF):  EF = GAP_kmh / avg_HR × 100
+//  Per-km splits filtreras: skippa första 10 min av varje pass,
+//  behåll splits där avg_hr ligger i 60–80 % av maxHR (Z2-band).
+//  GAP justerar farten för stigning via Minetti-polynom.
+//  Stigande EF = fortare till samma puls = bättre aerob form.
 // ─────────────────────────────────────────────────────────────
+
+const EF_WARMUP_CUT_SEC = 600;
+const EF_Z2_MIN_PCT = 0.60;
+const EF_Z2_MAX_PCT = 0.80;
+const EF_DEFAULT_MAX_HR = 195;
+const EF_MIN_KM_AFTER_FILTER = 2;
+
+function gapAdjustSpeedKmh(speedKmh, gradeDecimal) {
+  if (!speedKmh || speedKmh <= 0) return null;
+  const g = Math.max(-0.30, Math.min(0.30, gradeDecimal || 0));
+  // Minetti et al. (2002) cost of running, J/(kg·m). Cr(0) = 3.6.
+  const Cr = 155.4 * g ** 5 - 30.4 * g ** 4 - 43.3 * g ** 3 + 46.3 * g ** 2 + 19.5 * g + 3.6;
+  if (Cr <= 0) return speedKmh;
+  return speedKmh * (3.6 / Cr);
+}
+
+function efPassAggregate(workout, hrMin, hrMax) {
+  const raw = workout.splits_data;
+  if (!raw) return null;
+  let splits;
+  try { splits = typeof raw === 'string' ? JSON.parse(raw) : raw; }
+  catch { return null; }
+  if (!Array.isArray(splits) || splits.length === 0) return null;
+
+  let elapsed = 0;
+  let gapKmhSum = 0, hrSum = 0, weightSum = 0, distMeters = 0;
+
+  for (const s of splits) {
+    const moving = Number(s.moving_time) || 0;
+    const startElapsed = elapsed;
+    elapsed += moving;
+    if (startElapsed < EF_WARMUP_CUT_SEC) continue;
+
+    const hr = Number(s.average_heartrate);
+    if (!hr || hr < hrMin || hr > hrMax) continue;
+
+    const speedMps = Number(s.average_speed);
+    const dist = Number(s.distance);
+    if (!speedMps || speedMps <= 0 || !dist || dist <= 0) continue;
+
+    const grade = (Number(s.elevation_difference) || 0) / dist;
+    const speedKmh = speedMps * 3.6;
+    const gapKmh = gapAdjustSpeedKmh(speedKmh, grade);
+    if (!gapKmh) continue;
+
+    const w = moving;
+    gapKmhSum += gapKmh * w;
+    hrSum += hr * w;
+    weightSum += w;
+    distMeters += dist;
+  }
+
+  if (weightSum === 0 || distMeters < EF_MIN_KM_AFTER_FILTER * 1000) return null;
+  return {
+    weight: weightSum,
+    gapKmh: gapKmhSum / weightSum,
+    avgHr: hrSum / weightSum,
+    km: distMeters / 1000,
+  };
+}
 
 function renderEasyHrChart(workouts) {
   const canvas = document.getElementById('chart-easy-hr');
@@ -3958,117 +4036,305 @@ function renderEasyHrChart(workouts) {
   if (!canvas || !statusEl || !subEl || typeof Chart === 'undefined') return;
   if (window._chartEasyHr) window._chartEasyHr.destroy();
 
-  const { startDate, endDate } = getChartWindow('easy-hr');
-  const windowed = filterWorkoutsToWindow(workouts, startDate, endDate);
-  mountChartNav('easy-hr', 'chart-easy-hr', () => renderEasyHrChart(workouts));
+  const maxHr = (currentProfile && Number(currentProfile.user_max_hr)) || EF_DEFAULT_MAX_HR;
+  const hrMin = Math.round(maxHr * EF_Z2_MIN_PCT);
+  const hrMax = Math.round(maxHr * EF_Z2_MAX_PCT);
 
-  const runs = windowed.filter((w) =>
-    w.activity_type === 'Löpning' &&
-    w.avg_hr && w.avg_hr >= 80 &&
-    (w.intensity === 'Z1' || w.intensity === 'Z2') &&
-    w.workout_date
+  const runs = workouts.filter((w) =>
+    w.activity_type === 'Löpning' && w.workout_date && w.splits_data
   );
 
   const byWeek = new Map();
+  let qualifiedPasses = 0;
   for (const w of runs) {
+    const agg = efPassAggregate(w, hrMin, hrMax);
+    if (!agg) continue;
+    qualifiedPasses++;
     const mon = mondayOfWeek(new Date(w.workout_date + 'T00:00:00'));
     const key = isoDate(mon);
-    if (!byWeek.has(key)) byWeek.set(key, { hrSum: 0, minSum: 0, paceSum: 0, paceMinSum: 0 });
+    if (!byWeek.has(key)) byWeek.set(key, { gapSum: 0, hrSum: 0, weightSum: 0, kmSum: 0, passes: 0 });
     const entry = byWeek.get(key);
-    entry.hrSum += w.avg_hr * w.duration_minutes;
-    entry.minSum += w.duration_minutes;
-    if (w.avg_speed_kmh && w.avg_speed_kmh > 0) {
-      entry.paceSum += w.avg_speed_kmh * w.duration_minutes;
-      entry.paceMinSum += w.duration_minutes;
-    }
+    entry.gapSum += agg.gapKmh * agg.weight;
+    entry.hrSum += agg.avgHr * agg.weight;
+    entry.weightSum += agg.weight;
+    entry.kmSum += agg.km;
+    entry.passes++;
   }
   const keys = [...byWeek.keys()].sort();
 
   if (keys.length < 2) {
-    statusEl.textContent = 'Behöver minst 2 veckor med loggad Z1/Z2-löpning och puls.';
     subEl.textContent = '';
+    statusEl.textContent = qualifiedPasses === 0
+      ? `Inga kvalificerade pass än. Behöver löppass med splits från Strava och puls i ${hrMin}–${hrMax} bpm efter de första 10 min.`
+      : 'Behöver minst 2 veckor med kvalificerade Z2-pass för att rita trenden.';
     return;
   }
 
-  const labels = keys.map((k) => {
-    const mon = parseISOWeekKeyLocal(k);
-    return `V${weekNumber(mon)}`;
-  });
-  const hrData = keys.map((k) => +((byWeek.get(k).hrSum / byWeek.get(k).minSum) || 0).toFixed(1));
-  const paceData = keys.map((k) => {
+  const labels = keys.map((k) => `V${weekNumber(parseISOWeekKeyLocal(k))}`);
+  const efData = keys.map((k) => {
     const e = byWeek.get(k);
-    return e.paceMinSum > 0 ? +(e.paceSum / e.paceMinSum).toFixed(2) : null;
+    const gap = e.gapSum / e.weightSum;
+    const hr = e.hrSum / e.weightSum;
+    return +(gap / hr * 100).toFixed(2);
   });
-  const hasPace = paceData.some((v) => v !== null);
+  const ctxData = keys.map((k) => {
+    const e = byWeek.get(k);
+    return {
+      gap: +(e.gapSum / e.weightSum).toFixed(2),
+      hr: Math.round(e.hrSum / e.weightSum),
+      km: +e.kmSum.toFixed(1),
+      passes: e.passes,
+    };
+  });
 
   const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
-  const datasets = [
-    {
-      label: 'Avg HR (bpm)',
-      data: hrData,
-      borderColor: 'rgba(231, 76, 60, 0.9)',
-      backgroundColor: 'rgba(231, 76, 60, 0.1)',
-      borderWidth: 2,
-      pointRadius: 3,
-      fill: true,
-      tension: 0.25,
-      yAxisID: 'y',
-    },
-  ];
-  if (hasPace) {
-    datasets.push({
-      label: 'Tempo (km/h)',
-      data: paceData,
-      borderColor: 'rgba(46, 134, 193, 0.9)',
-      borderWidth: 2,
-      pointRadius: 3,
-      fill: false,
-      tension: 0.25,
-      yAxisID: 'y1',
-      spanGaps: true,
-    });
-  }
-
   window._chartEasyHr = new Chart(canvas.getContext('2d'), {
     type: 'line',
-    data: { labels, datasets },
+    data: {
+      labels,
+      datasets: [{
+        label: 'EF (GAP km/h ÷ HR × 100)',
+        data: efData,
+        borderColor: 'rgba(56, 178, 124, 0.95)',
+        backgroundColor: 'rgba(56, 178, 124, 0.12)',
+        borderWidth: 2.5,
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        fill: true,
+        tension: 0.25,
+      }],
+    },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, boxWidth: 10 } },
+        legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (c) => c.dataset.label === 'Avg HR (bpm)'
-              ? `Puls: ${c.parsed.y.toFixed(0)} bpm`
-              : `Tempo: ${c.parsed.y.toFixed(2)} km/h`,
+            label: (c) => `EF: ${c.parsed.y.toFixed(2)}`,
+            afterLabel: (c) => {
+              const d = ctxData[c.dataIndex];
+              if (!d) return '';
+              return [
+                `GAP: ${d.gap.toFixed(2)} km/h`,
+                `Puls: ${d.hr} bpm`,
+                `${d.passes} pass · ${d.km.toFixed(1)} km kvalificerad`,
+              ];
+            },
           },
         },
       },
       scales: {
-        y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor, callback: (v) => v + ' bpm' }, title: { display: true, text: 'Avg HR', color: textColor } },
-        y1: { position: 'right', grid: { display: false }, ticks: { color: textColor, callback: (v) => v.toFixed(1) + ' km/h' }, title: { display: true, text: 'Tempo', color: textColor } },
-        x: { grid: { display: false }, ticks: { color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
+        y: {
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          ticks: { color: textColor, callback: (v) => v.toFixed(1) },
+          title: { display: true, text: 'EF', color: textColor },
+        },
+        x: {
+          grid: { display: false },
+          ticks: { color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 },
+        },
       },
     },
   });
 
-  const recentWeeks = hrData.slice(-4);
-  const earlierWeeks = hrData.slice(-8, -4);
-  const avgRecent = recentWeeks.reduce((a, b) => a + b, 0) / (recentWeeks.length || 1);
-  const avgEarlier = earlierWeeks.length ? earlierWeeks.reduce((a, b) => a + b, 0) / earlierWeeks.length : null;
-  subEl.textContent = `Senaste 4 veckor: ${avgRecent.toFixed(0)} bpm`;
+  const recentEf = efData.slice(-4);
+  const earlierEf = efData.slice(-8, -4);
+  const avgRecent = recentEf.reduce((a, b) => a + b, 0) / recentEf.length;
+  subEl.textContent = `Senaste 4 v: EF ${avgRecent.toFixed(2)} · Z2-band ${hrMin}–${hrMax} bpm`;
 
-  if (avgEarlier === null) {
-    statusEl.textContent = 'Bygg historik: logga Z1/Z2-löpning med puls minst 8 veckor för att se aerob-trenden.';
+  if (earlierEf.length === 0) {
+    statusEl.textContent = 'Bygg historik: behöver ~8 veckor med kvalificerade Z2-pass för att jämföra trenden.';
     return;
   }
+  const avgEarlier = earlierEf.reduce((a, b) => a + b, 0) / earlierEf.length;
+  const deltaPct = (avgRecent - avgEarlier) / avgEarlier * 100;
+  let band, msg;
+  if (deltaPct >= 3) {
+    band = 'fresh';
+    msg = `Aerob form starkare — EF upp ${deltaPct.toFixed(1)} % mot förra 4-veckors-perioden (samma puls bär ${(avgRecent - avgEarlier).toFixed(2)} km/h fortare GAP).`;
+  } else if (deltaPct <= -3) {
+    band = 'risk';
+    msg = `EF ner ${Math.abs(deltaPct).toFixed(1)} % mot förra 4-veckors. Kolla sömn, stress, värme — eller om du smyger upp pulsen i Z2.`;
+  } else {
+    band = 'neutral';
+    msg = `Stabil aerob profil (${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)} % EF mot förra 4-veckors).`;
+  }
+  statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(msg)}`;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  VO2max (estimerad) — Jack Daniels VDOT
+//  Per pass:  v = (km * 1000) / min   (m/min)
+//             VO2 = -4.60 + 0.182258·v + 0.000104·v²
+//             %max = 0.8 + 0.1894393·exp(-0.012778·t) + 0.2989558·exp(-0.1932605·t)
+//             VDOT = VO2 / %max
+//  Bara löppass med duration ≥ 12 min och rimligt VDOT (20-90).
+//  Per vecka visas bästa pass — VDOT speglar aktuell tävlingsform.
+// ─────────────────────────────────────────────────────────────
+
+function _vdotFromWorkout(w) {
+  if (!w || w.activity_type !== 'Löpning') return null;
+  const dur = Number(w.duration_minutes);
+  const km = Number(w.distance_km);
+  if (!dur || dur < 12 || !km || km <= 0) return null;
+  const v = (km * 1000) / dur;
+  const vo2 = -4.60 + 0.182258 * v + 0.000104 * v * v;
+  const pct = 0.8
+    + 0.1894393 * Math.exp(-0.012778 * dur)
+    + 0.2989558 * Math.exp(-0.1932605 * dur);
+  if (pct <= 0) return null;
+  const vdot = vo2 / pct;
+  if (!Number.isFinite(vdot) || vdot < 20 || vdot > 90) return null;
+  return vdot;
+}
+
+function renderVo2maxChart(workouts) {
+  const canvas = document.getElementById('chart-vo2max');
+  const statusEl = document.getElementById('vo2max-status');
+  const subEl = document.getElementById('vo2max-subtitle');
+  if (!canvas || !statusEl || !subEl || typeof Chart === 'undefined') return;
+  if (window._chartVo2max) window._chartVo2max.destroy();
+
+  // Bucket all qualifying runs by ISO-week (Mon-Sun) → keep best VDOT and the
+  // pass that produced it for the tooltip.
+  const byWeek = new Map();
+  let qualifiedPasses = 0;
+  for (const w of workouts) {
+    if (!w.workout_date) continue;
+    const vdot = _vdotFromWorkout(w);
+    if (vdot === null) continue;
+    qualifiedPasses++;
+    const mon = mondayOfWeek(new Date(w.workout_date + 'T00:00:00'));
+    const key = isoDate(mon);
+    const prev = byWeek.get(key);
+    if (!prev || vdot > prev.vdot) {
+      byWeek.set(key, {
+        vdot,
+        date: w.workout_date,
+        km: Number(w.distance_km),
+        min: Number(w.duration_minutes),
+        intensity: w.intensity || null,
+        label: w.label || w.activity_type,
+      });
+    }
+  }
+
+  if (byWeek.size < 2) {
+    subEl.textContent = '';
+    statusEl.textContent = qualifiedPasses === 0
+      ? 'Inga kvalificerade löppass än. Behöver löppass på minst 12 min med distans loggad.'
+      : 'Behöver minst 2 veckor med löppass för att rita trenden.';
+    return;
+  }
+
+  // Build a continuous week axis from first to last week so empty weeks
+  // render as gaps (spanGaps=false). Other progress charts compress to the
+  // qualified weeks, but VDOT-grafen handlar om att se utvecklingen — då vill
+  // vi inte gömma att man tappade några veckor.
+  const sortedKeys = [...byWeek.keys()].sort();
+  const firstMon = new Date(sortedKeys[0] + 'T00:00:00');
+  const lastMon = new Date(sortedKeys[sortedKeys.length - 1] + 'T00:00:00');
+  const allKeys = [];
+  for (let d = new Date(firstMon); d <= lastMon; d = addDays(d, 7)) {
+    allKeys.push(isoDate(d));
+  }
+
+  const labels = allKeys.map((k) => `V${weekNumber(parseISOWeekKeyLocal(k))}`);
+  const data = allKeys.map((k) => {
+    const e = byWeek.get(k);
+    return e ? +e.vdot.toFixed(1) : null;
+  });
+  const ctxData = allKeys.map((k) => byWeek.get(k) || null);
+
+  const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
+
+  const filledValues = data.filter((v) => v !== null);
+  const minVal = Math.max(20, Math.floor(Math.min(...filledValues) - 2));
+  const maxVal = Math.ceil(Math.max(...filledValues) + 2);
+
+  window._chartVo2max = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'VDOT (ml/kg/min)',
+        data,
+        borderColor: 'rgba(214, 99, 158, 0.95)',
+        backgroundColor: 'rgba(214, 99, 158, 0.12)',
+        borderWidth: 2.5,
+        pointRadius: (c) => (c.raw === null ? 0 : 3),
+        pointHoverRadius: 5,
+        fill: true,
+        tension: 0.3,
+        spanGaps: false,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (c) => `VDOT: ${c.parsed.y.toFixed(1)}`,
+            afterLabel: (c) => {
+              const d = ctxData[c.dataIndex];
+              if (!d) return '';
+              const pace = (d.min / d.km);
+              const paceMin = Math.floor(pace);
+              const paceSec = Math.round((pace - paceMin) * 60).toString().padStart(2, '0');
+              return [
+                `Bästa pass: ${d.date}`,
+                `${d.km.toFixed(1)} km · ${d.min} min · ${paceMin}:${paceSec}/km`,
+                d.intensity ? `Zon: ${d.intensity}` : '',
+              ].filter(Boolean);
+            },
+          },
+        },
+      },
+      scales: {
+        y: {
+          min: minVal,
+          max: maxVal,
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          ticks: { color: textColor, callback: (v) => v.toFixed(0) },
+          title: { display: true, text: 'VDOT (ml/kg/min)', color: textColor },
+        },
+        x: {
+          grid: { display: false },
+          ticks: { color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 },
+        },
+      },
+    },
+  });
+
+  // Status text: latest VDOT + 4-veckors-trend.
+  const recent = filledValues.slice(-4);
+  const earlier = filledValues.slice(-8, -4);
+  const latest = filledValues[filledValues.length - 1];
+  subEl.textContent = `Senaste: VDOT ${latest.toFixed(1)} · ${qualifiedPasses} pass över ${byWeek.size} v`;
+
+  if (earlier.length === 0 || recent.length === 0) {
+    statusEl.textContent = 'Bygg historik: behöver ~8 veckor med löppass för att jämföra trenden.';
+    return;
+  }
+  const avgRecent = recent.reduce((a, b) => a + b, 0) / recent.length;
+  const avgEarlier = earlier.reduce((a, b) => a + b, 0) / earlier.length;
   const delta = avgRecent - avgEarlier;
   let band, msg;
-  if (delta <= -2) { band = 'fresh'; msg = `Aerob förbättring — snittpulsen på easy har sjunkit ${Math.abs(delta).toFixed(1)} bpm mot förra 4-veckors-perioden.`; }
-  else if (delta >= 3) { band = 'risk'; msg = `Pulsen på easy har stigit ${delta.toFixed(1)} bpm — kolla sömn, stress och att Z2 fortfarande är pratstempo.`; }
-  else { band = 'neutral'; msg = `Stabil aerob profil (${delta >= 0 ? '+' : ''}${delta.toFixed(1)} bpm mot förra 4-veckors).`; }
+  if (delta >= 1.0) {
+    band = 'fresh';
+    msg = `Form upp: VDOT +${delta.toFixed(1)} mot förra 4-veckors-perioden. Snabbare på samma puls.`;
+  } else if (delta <= -1.0) {
+    band = 'risk';
+    msg = `Form ner: VDOT ${delta.toFixed(1)} mot förra 4-veckors. Kolla återhämtning, värme eller om kvalitetspassen tappat skärpa.`;
+  } else {
+    band = 'neutral';
+    msg = `Stabil VDOT (${delta >= 0 ? '+' : ''}${delta.toFixed(1)} mot förra 4-veckors).`;
+  }
   statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(msg)}`;
 }
 
@@ -4233,13 +4499,8 @@ function renderGroupChart(allWorkouts, members) {
   const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
   const isGrpNorm = grpEffortMode === 'normalized';
   const gUnit = isGrpNorm ? ' Effort' : 'h';
-
-  const { startDate, endDate } = getChartWindow('group-weekly');
-  const windowed = filterWorkoutsToWindow(allWorkouts, startDate, endDate);
-  mountChartNav('group-weekly', 'chart-group-weekly', () => renderGroupChart(allWorkouts, members));
-
   const weekData = {};
-  windowed.forEach(w => {
+  allWorkouts.forEach(w => {
     const mon = mondayOfWeek(new Date(w.workout_date));
     const key = isoDate(mon);
     if (!weekData[key]) weekData[key] = {};
@@ -4294,13 +4555,9 @@ function renderGroupEffortChart(allWorkouts, members) {
   if (!canvas) return;
   if (window._chartGroupEffort) window._chartGroupEffort.destroy();
 
-  const { startDate, endDate } = getChartWindow('group-effort');
-  const windowed = filterWorkoutsToWindow(allWorkouts, startDate, endDate);
-  mountChartNav('group-effort', 'chart-group-effort', () => renderGroupEffortChart(allWorkouts, members));
-
   const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
   const weekMap = {};
-  windowed.forEach(w => {
+  allWorkouts.forEach(w => {
     const mon = mondayOfWeek(new Date(w.workout_date));
     const key = isoDate(mon);
     if (!weekMap[key]) weekMap[key] = {};
