@@ -15,3 +15,4 @@
 20260420_coach_chat.sql
 20260421_multi_pass_per_day.sql
 20260421_search_profiles_by_name.sql
+20260422_user_goals.sql
