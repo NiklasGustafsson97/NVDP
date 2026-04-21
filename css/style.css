@@ -1094,16 +1094,6 @@ select option { background: #1a1a2e; color: var(--text); }
 .vd-compact.delta-warn .vd-pct, .vd-compact.delta-warn .vd-msg { color: var(--amber); }
 .vd-compact.delta-neutral .vd-pct { color: var(--text-muted); }
 
-/* ── Streak ── */
-.streak-card {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px;
-}
-.streak-badge {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 12px; border-radius: 14px; font-size: 0.8rem; font-weight: 600;
-  background: rgba(243,156,18,0.12); color: var(--amber);
-}
 .chart-container-sm { height: 240px; position: relative; overflow: visible; }
 
 /* ── Loading ── */

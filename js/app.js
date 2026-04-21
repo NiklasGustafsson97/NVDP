@@ -3182,13 +3182,6 @@ async function _loadTrends() {
     });
   }
 
-  // Streak
-  const streak = calcStreak(myWorkouts, currentProfile.id);
-  const streakEl = document.getElementById('personal-streak');
-  if (streakEl) {
-    streakEl.innerHTML = `<span class="streak-badge">${streak} veckor i rad</span>`;
-  }
-
   // Season totals: summary card + horizontal bar charts
   renderSeasonTotals(myWorkouts);
 
@@ -4123,6 +4116,7 @@ function renderEasyHrChart(workouts) {
       },
       scales: {
         y: {
+          beginAtZero: true,
           grid: { color: 'rgba(255,255,255,0.05)' },
           ticks: { color: textColor, callback: (v) => v.toFixed(1) },
           title: { display: true, text: 'EF', color: textColor },
@@ -4328,8 +4322,10 @@ function _drawVo2maxChart(canvas, points, withTrend) {
   if (withTrend) {
     for (const p of points) yValues.push(p.smoothed);
   }
-  const minVal = Math.max(20, Math.floor(Math.min(...yValues) - 2));
-  const maxVal = Math.ceil(Math.max(...yValues) + 2);
+  // Y-axis anchored at 0 so a small dip doesn't visually look like a 90 %
+  // collapse. Trade-off: the trend line lives in the upper portion of the
+  // canvas, but absolute scale is honest. Upper bound gets ~10 % headroom.
+  const maxVal = Math.ceil(Math.max(...yValues) * 1.1);
 
   // Two layers:
   //   1. Faint scattered dots = each individual qualifying pass.
@@ -4413,7 +4409,8 @@ function _drawVo2maxChart(canvas, points, withTrend) {
       },
       scales: {
         y: {
-          min: minVal,
+          beginAtZero: true,
+          min: 0,
           max: maxVal,
           grid: { color: 'rgba(255,255,255,0.05)' },
           ticks: { color: textColor, callback: (v) => v.toFixed(0) },
@@ -4434,35 +4431,6 @@ function _drawVo2maxChart(canvas, points, withTrend) {
       },
     },
   });
-}
-
-function calcStreak(workouts, profileId) {
-  if (!profileId) return 0;
-  const pw = workouts.filter(w => w.profile_id === profileId);
-  const now = new Date();
-  const todayDow = (now.getDay() + 6) % 7;
-  let checkMonday = mondayOfWeek(now);
-
-  // If current week is incomplete (not Sunday yet), check if it qualifies so far;
-  // if not, skip it and start counting from last week
-  if (todayDow < 6) {
-    const sun = addDays(checkMonday, 6);
-    const weekW = pw.filter(w => w.workout_date >= isoDate(checkMonday) && w.workout_date <= isoDate(sun));
-    const totalMins = weekW.reduce((s, w) => s + w.duration_minutes, 0);
-    if (totalMins < 60) {
-      checkMonday = addDays(checkMonday, -7);
-    }
-  }
-
-  let streak = 0;
-  while (true) {
-    const sun = addDays(checkMonday, 6);
-    const weekW = pw.filter(w => w.workout_date >= isoDate(checkMonday) && w.workout_date <= isoDate(sun));
-    const totalMins = weekW.reduce((s, w) => s + w.duration_minutes, 0);
-    if (totalMins >= 60) { streak++; checkMonday = addDays(checkMonday, -7); }
-    else break;
-  }
-  return streak;
 }
 
 // ═══════════════════════
@@ -4742,25 +4710,31 @@ async function joinGroup() {
   errEl.classList.add('hidden');
   if (code.length !== 6) { errEl.textContent = 'Koden ska vara 6 tecken'; errEl.classList.remove('hidden'); return; }
 
-  const token = (await sb.auth.getSession()).data.session.access_token;
   try {
-    const resp = await fetch(SUPABASE_URL + '/rest/v1/groups?code=eq.' + code + '&select=id,name', {
-      headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + token }
-    });
-    const groups = await resp.json();
-    if (groups.length === 0) { errEl.textContent = 'Ingen grupp med den koden'; errEl.classList.remove('hidden'); return; }
-    await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + currentProfile.id, {
-      method: 'PATCH',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ group_id: groups[0].id })
-    });
+    // RLS lockdown (20260418_rls_lockdown.sql) hides the groups table from
+    // non-members, so a direct REST query returns 0 rows even when the code
+    // is valid. The SECURITY DEFINER RPC `join_group_by_code` bypasses RLS
+    // and only leaks (id, name) for an exact code match — that's what we use.
+    const { data: groups, error: lookupErr } = await sb.rpc('join_group_by_code', { p_code: code });
+    if (lookupErr) throw lookupErr;
+    if (!groups || groups.length === 0) {
+      errEl.textContent = 'Ingen grupp med den koden';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    const { error: patchErr } = await sb
+      .from('profiles')
+      .update({ group_id: groups[0].id })
+      .eq('id', currentProfile.id);
+    if (patchErr) throw patchErr;
     currentProfile.group_id = groups[0].id;
     showToast('Du gick med i gruppen!');
     loadGroup();
-  } catch (e) { errEl.textContent = 'Något gick fel'; errEl.classList.remove('hidden'); }
+  } catch (e) {
+    console.error('joinGroup error:', e);
+    errEl.textContent = 'Något gick fel';
+    errEl.classList.remove('hidden');
+  }
 }
 
 async function leaveGroup() {
@@ -7869,16 +7843,21 @@ async function updateFriendRequestBadge() {
 }
 
 async function topbarSearchUsers() {
-  const q = document.getElementById('topbar-search-input').value.trim().toLowerCase();
+  const rawQ = document.getElementById('topbar-search-input').value.trim();
   const resultsEl = document.getElementById('topbar-search-results');
-  if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+  if (rawQ.length < 2) { resultsEl.innerHTML = ''; return; }
 
-  await refreshAllProfiles();
-
-  const matches = allProfiles.filter(p =>
-    p.id !== currentProfile.id &&
-    p.name.toLowerCase().includes(q)
-  );
+  // RLS lockdown means allProfiles only contains self + friends + same group.
+  // For discovery we need the SECURITY DEFINER RPC that returns minimal
+  // (id, name, avatar, color) for any matching profile. See migration
+  // 20260421_search_profiles_by_name.sql.
+  const { data: rpcMatches, error: searchErr } = await sb.rpc('search_profiles_by_name', { p_query: rawQ });
+  if (searchErr) {
+    console.error('topbarSearchUsers RPC error:', searchErr);
+    resultsEl.innerHTML = '<div style="padding:12px;color:var(--text-dim);font-size:0.82rem;text-align:center;">Sökningen misslyckades</div>';
+    return;
+  }
+  const matches = (rpcMatches || []).filter((p) => p.id !== currentProfile.id);
 
   const { data: friendships } = await sb.from('friendships')
     .select('*')
@@ -7952,16 +7931,19 @@ function toggleFriendSearch() {
 }
 
 async function searchFriends() {
-  const q = document.getElementById('friend-search-input').value.trim().toLowerCase();
+  const rawQ = document.getElementById('friend-search-input').value.trim();
   const resultsEl = document.getElementById('friend-search-results');
-  if (q.length < 2) { resultsEl.innerHTML = ''; return; }
+  if (rawQ.length < 2) { resultsEl.innerHTML = ''; return; }
 
-  await refreshAllProfiles();
-
-  const matches = allProfiles.filter(p =>
-    p.id !== currentProfile.id &&
-    p.name.toLowerCase().includes(q)
-  );
+  // Same rationale as topbarSearchUsers: RLS hides non-friend profiles, so
+  // we go through the search_profiles_by_name RPC for discovery.
+  const { data: rpcMatches, error: searchErr } = await sb.rpc('search_profiles_by_name', { p_query: rawQ });
+  if (searchErr) {
+    console.error('searchFriends RPC error:', searchErr);
+    resultsEl.innerHTML = '<div style="padding:8px;color:var(--text-dim);font-size:0.82rem;">Sökningen misslyckades</div>';
+    return;
+  }
+  const matches = (rpcMatches || []).filter((p) => p.id !== currentProfile.id);
 
   const { data: existing } = await sb.from('friendships')
     .select('*')
