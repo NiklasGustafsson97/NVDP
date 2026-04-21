@@ -2622,10 +2622,11 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
       clickAttr = canClick ? ` onclick="openPlanModal('${dayStr}', ${JSON.stringify(fakePlan).replace(/"/g, '&quot;')}, '${DAY_NAMES_FULL[i]}')" style="cursor:pointer;"` : '';
     }
 
-    // Drag-handle is shown only for the user's own schedule and only when there
-    // is a plan_workout row to swap. Logged-day swaps are intentionally out of
-    // scope (would require mutating workouts.workout_date).
-    const canDrag = isOwnSchema && planWo && !_schemaEditMode;
+    // Drag-handle is shown only for the user's own schedule, only inside
+    // manual edit mode, and only when there is a plan_workout row to swap.
+    // Logged-day swaps are intentionally out of scope (would require mutating
+    // workouts.workout_date).
+    const canDrag = isOwnSchema && planWo && _schemaEditMode;
     const dragHandle = canDrag
       ? '<div class="sr-drag-handle" aria-label="Dra för att flytta" title="Dra för att byta dag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg></div>'
       : '';
@@ -2651,7 +2652,8 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
 
   // Bind / rebind drag-and-drop after every render. State carries the plan
   // context needed to map dropped indexes back to plan_workouts rows.
-  if (isOwnSchema && !_schemaEditMode) {
+  // Drag-and-drop is only active in manual edit mode.
+  if (isOwnSchema && _schemaEditMode) {
     _schemaDndState = {
       planWorkouts: planWorkouts.slice(),
       planWeekId: planWorkouts[0]?.plan_week_id || null,
@@ -5462,8 +5464,23 @@ function toggleSchemaEditMode() {
   _schemaEditMode = !_schemaEditMode;
   const label = document.getElementById('schema-edit-label');
   const toggle = document.getElementById('schema-edit-toggle');
-  if (label) label.textContent = _schemaEditMode ? 'Avsluta redigering' : 'Redigera pass';
-  if (toggle) toggle.classList.toggle('active', _schemaEditMode);
+  const aiBtn = document.getElementById('schema-edit-ai-btn');
+  const icon = document.getElementById('schema-edit-icon');
+  if (label) label.textContent = _schemaEditMode ? 'Klar' : 'Redigera manuellt';
+  if (toggle) {
+    toggle.classList.toggle('active', _schemaEditMode);
+    toggle.classList.toggle('schema-edit-toggle--done', _schemaEditMode);
+  }
+  // Hide the AI-edit button while in manual edit mode so the toolbar
+  // collapses to a single prominent "Klar" button (matches the auto-save
+  // model — there's no separate cancel state to surface).
+  if (aiBtn) aiBtn.classList.toggle('hidden', _schemaEditMode);
+  // Swap pencil icon for a checkmark while editing.
+  if (icon) {
+    icon.innerHTML = _schemaEditMode
+      ? '<polyline points="20 6 9 17 4 12"/>'
+      : '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>';
+  }
   loadSchema();
 }
 

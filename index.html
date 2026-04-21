@@ -382,10 +382,10 @@
 
       <div id="schema-edit-bar" class="schema-edit-bar hidden">
         <button class="schema-edit-toggle" id="schema-edit-toggle" onclick="toggleSchemaEditMode()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-          <span id="schema-edit-label">Redigera pass</span>
+          <svg id="schema-edit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          <span id="schema-edit-label">Redigera manuellt</span>
         </button>
-        <button class="schema-edit-ai-btn" onclick="closePlanManager();openPlanEditModal();">
+        <button class="schema-edit-ai-btn" id="schema-edit-ai-btn" onclick="closePlanManager();openPlanEditModal();">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
           Redigera med AI
         </button>

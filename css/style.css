@@ -782,6 +782,20 @@ select option { background: #1a1a2e; color: var(--text); }
 .schema-edit-toggle:hover, .schema-edit-ai-btn:hover { border-color: var(--accent); color: var(--text); }
 .schema-edit-toggle.active { background: rgba(214,99,158,0.12); border-color: var(--accent); color: var(--accent); }
 .schema-edit-ai-btn { border-style: dashed; }
+/* "Klar" state — taking up the row alone, styled as a primary done button. */
+.schema-edit-toggle.schema-edit-toggle--done {
+  flex: 1;
+  justify-content: center;
+  padding: 10px 16px;
+  font-size: 0.85rem;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.schema-edit-toggle.schema-edit-toggle--done:hover {
+  background: color-mix(in srgb, var(--accent) 85%, #000);
+  color: #fff;
+}
 
 /* ── Schema Edit Mode Card Indicators ── */
 .sr-card.sr-edit-mode { border-style: dashed; }
