@@ -3039,11 +3039,39 @@ async function respondToInvitation(invitationId, accept) {
 // ═══════════════════════
 let chartMixPersonal = null;
 let effortMode = 'absolute';
+// Sprint 2: Progress sub-tabs (Allmän / Dina mål / Aktiviteter).
+// Default = allmän. Persisted in-memory only — leaving and returning to
+// the Progress view resets to default, which is the right behaviour for
+// the "primary signals first" mental model.
+let _progressSubtab = 'allman';
+function setProgressSubtab(id) {
+  if (!['allman', 'mal', 'aktiviteter'].includes(id)) return;
+  _progressSubtab = id;
+  document.querySelectorAll('.progress-subnav-btn').forEach((btn) => {
+    const isActive = btn.id === `progress-subtab-${id}-btn`;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+  document.querySelectorAll('.progress-subtab').forEach((el) => {
+    const isActive = el.id === `progress-subtab-${id}`;
+    el.classList.toggle('active', isActive);
+    if (isActive) el.removeAttribute('hidden');
+    else el.setAttribute('hidden', '');
+  });
+}
+
 let _mixUnit = 'hours';
 
 function setTrendMode(mode) { trendMode = mode; loadTrends(); }
 function setEffortMode(mode) { effortMode = mode; loadTrends(); }
-function setMixUnit(unit) { _mixUnit = unit; loadTrends(); }
+function setMixUnit(unit) {
+  _mixUnit = unit;
+  // Sprint 2: combined Aktivitetsmix card has both per-week stacked bar
+  // and lifetime per-activity totals, controlled by the same Tid/Distans
+  // toggle. Keep them in sync here so we don't need a second control.
+  _seasonBarMode = unit;
+  loadTrends();
+}
 
 async function loadTrends() {
   if (!currentProfile) return;
@@ -3062,15 +3090,8 @@ async function loadTrends() {
     hideViewLoading('view-trends');
     document.querySelectorAll('#view-trends .chart-skeleton').forEach(el => el.classList.remove('active'));
   }
-  // Weekly coach check-in history strip (collapsed by default, safe to fail).
-  try {
-    const body = document.getElementById('trends-coach-history-body');
-    const card = document.getElementById('trends-coach-history');
-    if (body && card) {
-      await renderWeeklyCheckinHistory(body);
-      card.classList.toggle('hidden', !body.innerHTML.trim());
-    }
-  } catch (_e) { /* ignore */ }
+  // Sprint 2: weekly check-in history moved from Progress to the Coach
+  // history drawer (see openCoachHistory). Nothing to render here anymore.
 }
 async function _loadTrends() {
   const myWorkouts = await fetchWorkouts(currentProfile.id);
@@ -3184,6 +3205,10 @@ async function _loadTrends() {
 
   // Season totals: summary card + horizontal bar charts
   renderSeasonTotals(myWorkouts);
+
+  // Sprint 2: "Den här veckan" — quick week-vs-prev-week stats card at the
+  // top of Allmän progress.
+  renderProgressWeekSummary(myWorkouts);
 
   // Effort per week chart
   renderEffortChart(myWorkouts);
@@ -3442,34 +3467,141 @@ function setSeasonBarMode(mode) {
   if (window._lastSeasonWorkouts) renderSeasonActivityBars(window._lastSeasonWorkouts, mode);
 }
 
-function renderSeasonTotals(workouts) {
-  window._lastSeasonWorkouts = workouts;
-  const totalMins = workouts.reduce((s, w) => s + w.duration_minutes, 0);
-  const totalHours = (totalMins / 60).toFixed(1);
-  const totalSessions = workouts.length;
-  const totalDist = workouts.reduce((s, w) => s + (w.distance_km || 0), 0);
-  const totalEffort = workouts.reduce((s, w) => s + calcWorkoutEffort(w), 0);
+// Sprint 2: "Den här veckan" — three primary stats with a delta vs the
+// equivalent stretch of the previous week. Both windows are clamped to
+// the same weekday-of-week count so we don't compare a Tuesday-so-far
+// against a full prior week (which would always look "down").
+function renderProgressWeekSummary(workouts) {
+  const card = document.getElementById('progress-week-summary-card');
+  const body = document.getElementById('progress-week-summary-body');
+  const subEl = document.getElementById('progress-week-summary-sub');
+  if (!card || !body) return;
 
   const now = new Date();
-  const yearStart = new Date(now.getFullYear(), 0, 1);
-  const dayOfYear = Math.floor((now - yearStart) / 86400000) + 1;
-  const prevYearStart = new Date(now.getFullYear() - 1, 0, 1);
-  const prevYearSameDay = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+  const todayDow = (now.getDay() + 6) % 7; // 0 = Mon
+  const thisMon = mondayOfWeek(now);
+  const prevMon = addDays(thisMon, -7);
+  // For "förra veckan" we compare the same Mon..(today's weekday) slice.
+  // Earlier in the week (Mon → small slice) the comparison still makes sense
+  // because we're comparing *equivalent days lived*, not a full vs partial.
+  const prevSameSlice = addDays(prevMon, todayDow);
 
-  function yoyDelta(cur, prev) {
-    if (!prev || prev === 0) return '<span class="season-stat-delta flat">—</span>';
+  function inWindow(w, start, end) {
+    if (!w.workout_date) return false;
+    const d = new Date(w.workout_date + 'T00:00:00');
+    return d >= start && d <= end;
+  }
+  const thisWeek = workouts.filter((w) => inWindow(w, thisMon, now));
+  const prevWeek = workouts.filter((w) => inWindow(w, prevMon, prevSameSlice));
+
+  const passesNow = thisWeek.length;
+  const passesPrev = prevWeek.length;
+  const distNow = thisWeek.reduce((s, w) => s + (w.distance_km || 0), 0);
+  const distPrev = prevWeek.reduce((s, w) => s + (w.distance_km || 0), 0);
+  const longestNow = thisWeek.reduce((m, w) => Math.max(m, w.distance_km || 0), 0);
+  const longestPrev = prevWeek.reduce((m, w) => Math.max(m, w.distance_km || 0), 0);
+
+  function delta(cur, prev, unit) {
+    if (prev === 0 && cur === 0) return '<span class="pws-stat-delta flat">—</span>';
+    if (prev === 0) return `<span class="pws-stat-delta up">+${cur.toFixed(unit === 'count' ? 0 : 1)}${unit === 'count' ? '' : ' ' + unit} mot förra v</span>`;
+    const diff = cur - prev;
+    const cls = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
+    const sign = diff > 0 ? '+' : '';
+    if (unit === 'count') return `<span class="pws-stat-delta ${cls}">${sign}${diff} mot förra v</span>`;
+    return `<span class="pws-stat-delta ${cls}">${sign}${diff.toFixed(1)} ${unit} mot förra v</span>`;
+  }
+
+  const dayName = ['mån', 'tis', 'ons', 'tors', 'fre', 'lör', 'sön'][todayDow];
+  if (subEl) subEl.textContent = `mån–${dayName} jämfört med samma sträcka förra veckan`;
+
+  if (passesNow === 0 && passesPrev === 0) {
+    body.innerHTML = '<div class="pws-empty">Inga pass loggade ännu denna vecka. Logga ett pass så fyller vi i sammanfattningen.</div>';
+    return;
+  }
+
+  body.innerHTML = `<div class="pws-grid">
+    <div class="pws-stat">
+      <span class="pws-stat-val">${passesNow}</span>
+      <span class="pws-stat-label">Pass</span>
+      ${delta(passesNow, passesPrev, 'count')}
+    </div>
+    <div class="pws-stat">
+      <span class="pws-stat-val">${distNow.toFixed(1)} km</span>
+      <span class="pws-stat-label">Total distans</span>
+      ${delta(distNow, distPrev, 'km')}
+    </div>
+    <div class="pws-stat">
+      <span class="pws-stat-val">${longestNow.toFixed(1)} km</span>
+      <span class="pws-stat-label">Längsta pass</span>
+      ${delta(longestNow, longestPrev, 'km')}
+    </div>
+  </div>`;
+}
+
+function renderSeasonTotals(workouts) {
+  window._lastSeasonWorkouts = workouts;
+
+  const now = new Date();
+  const curYear = now.getFullYear();
+  const curYearStart = new Date(curYear, 0, 1);
+  // Same calendar day in previous year. Truncating both windows to the
+  // same year-relative day-of-year gives us an apples-to-apples YTD-vs-YTD
+  // comparison ("Where are you now compared to where you were on this
+  // exact date last year?").
+  const prevYearSameDay = new Date(curYear - 1, now.getMonth(), now.getDate());
+  const prevYearStart = new Date(curYear - 1, 0, 1);
+
+  function inWindow(w, start, end) {
+    if (!w.workout_date) return false;
+    const d = new Date(w.workout_date + 'T00:00:00');
+    return d >= start && d <= end;
+  }
+  const ytdNow = workouts.filter((w) => inWindow(w, curYearStart, now));
+  const ytdPrev = workouts.filter((w) => inWindow(w, prevYearStart, prevYearSameDay));
+
+  const sumHours = (arr) => arr.reduce((s, w) => s + (w.duration_minutes || 0), 0) / 60;
+  const sumKm = (arr) => arr.reduce((s, w) => s + (w.distance_km || 0), 0);
+
+  const totalSessions = workouts.length;
+  const totalHours = (workouts.reduce((s, w) => s + (w.duration_minutes || 0), 0) / 60).toFixed(1);
+  const totalDist = workouts.reduce((s, w) => s + (w.distance_km || 0), 0);
+
+  const ytdSessionsNow = ytdNow.length;
+  const ytdSessionsPrev = ytdPrev.length;
+  const ytdHoursNow = sumHours(ytdNow);
+  const ytdHoursPrev = sumHours(ytdPrev);
+  const ytdKmNow = sumKm(ytdNow);
+  const ytdKmPrev = sumKm(ytdPrev);
+
+  // Format the YoY delta as a small pill under each stat. We hide the pill
+  // entirely if there's no history a year back (`prev === 0`) instead of
+  // showing a misleading "+∞%" or a noisy "—".
+  function yoyPill(cur, prev) {
+    if (!prev || prev === 0) return '';
     const pct = Math.round(((cur - prev) / prev) * 100);
     const sign = pct > 0 ? '+' : '';
     const cls = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
-    return `<span class="season-stat-delta ${cls}">${sign}${pct}% vs förra året</span>`;
+    return `<span class="season-stat-yoy ${cls}">${sign}${pct}% vs ${curYear - 1}</span>`;
   }
 
   const summaryEl = document.getElementById('season-totals-summary');
   if (summaryEl) {
     summaryEl.innerHTML = `<div class="season-totals-grid">
-      <div class="season-stat"><span class="season-stat-val">${totalSessions}</span><span class="season-stat-label">Pass</span></div>
-      <div class="season-stat"><span class="season-stat-val">${totalHours}h</span><span class="season-stat-label">Timmar</span></div>
-      <div class="season-stat"><span class="season-stat-val">${totalDist.toFixed(0)}km</span><span class="season-stat-label">Distans</span></div>
+      <div class="season-stat">
+        <span class="season-stat-val">${totalSessions}</span>
+        <span class="season-stat-label">Pass</span>
+        ${yoyPill(ytdSessionsNow, ytdSessionsPrev)}
+      </div>
+      <div class="season-stat">
+        <span class="season-stat-val">${totalHours}h</span>
+        <span class="season-stat-label">Timmar</span>
+        ${yoyPill(ytdHoursNow, ytdHoursPrev)}
+      </div>
+      <div class="season-stat">
+        <span class="season-stat-val">${totalDist.toFixed(0)}km</span>
+        <span class="season-stat-label">Distans</span>
+        ${yoyPill(ytdKmNow, ytdKmPrev)}
+      </div>
     </div>`;
   }
 
@@ -10012,6 +10144,18 @@ async function openCoachHistory() {
   drawer.hidden = false;
   backdrop.hidden = false;
   list.innerHTML = `<div class="coach-loading"><div class="coach-loading-dots"><span></span><span></span><span></span></div></div>`;
+  // Sprint 2: weekly check-in history moved from Progress to here.
+  // Render it in parallel with the threads fetch so the drawer never
+  // looks empty during the network round-trip.
+  (async () => {
+    try {
+      const ciSection = document.getElementById('coach-checkin-history-section');
+      const ciBody = document.getElementById('coach-checkin-history-body');
+      if (!ciSection || !ciBody) return;
+      await renderWeeklyCheckinHistory(ciBody);
+      ciSection.hidden = !ciBody.innerHTML.trim();
+    } catch (_e) { /* non-fatal */ }
+  })();
   try {
     const data = await _coachFetch({ mode: 'history' });
     const threads = Array.isArray(data.threads) ? data.threads : [];

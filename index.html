@@ -495,8 +495,17 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </header>
-        <div class="coach-drawer-body" id="coach-history-list">
-          <div class="coach-loading"><div class="coach-loading-dots"><span></span><span></span><span></span></div></div>
+        <div class="coach-drawer-body">
+          <section class="coach-drawer-section" id="coach-checkin-history-section" hidden>
+            <h4 class="coach-drawer-section-title">Veckoavstämningar</h4>
+            <div id="coach-checkin-history-body"></div>
+          </section>
+          <section class="coach-drawer-section">
+            <h4 class="coach-drawer-section-title">Tidigare samtal</h4>
+            <div id="coach-history-list">
+              <div class="coach-loading"><div class="coach-loading-dots"><span></span><span></span><span></span></div></div>
+            </div>
+          </section>
         </div>
       </aside>
     </section>
@@ -586,7 +595,23 @@
         <button type="button" class="btn btn-outline btn-sm trends-log-shortcut" onclick="navigate('log')" aria-label="Logga ett pass">+ Logga pass</button>
       </div>
 
+      <nav class="progress-subnav" role="tablist" aria-label="Progress-vyer">
+        <button type="button" role="tab" id="progress-subtab-allman-btn" aria-controls="progress-subtab-allman" aria-selected="true" class="progress-subnav-btn active" onclick="setProgressSubtab('allman')">Allmän progress</button>
+        <button type="button" role="tab" id="progress-subtab-mal-btn" aria-controls="progress-subtab-mal" aria-selected="false" class="progress-subnav-btn" onclick="setProgressSubtab('mal')">Dina mål</button>
+        <button type="button" role="tab" id="progress-subtab-aktiviteter-btn" aria-controls="progress-subtab-aktiviteter" aria-selected="false" class="progress-subnav-btn" onclick="setProgressSubtab('aktiviteter')">Aktiviteter</button>
+      </nav>
+
+      <div class="progress-subtab active" id="progress-subtab-allman" role="tabpanel" aria-labelledby="progress-subtab-allman-btn">
+
       <div id="volume-delta"></div>
+
+      <div class="card" id="progress-week-summary-card">
+        <div class="card-header">
+          <span class="card-title">Den här veckan</span>
+          <span class="card-sub" id="progress-week-summary-sub"></span>
+        </div>
+        <div id="progress-week-summary-body"></div>
+      </div>
 
       <div class="card" id="effort-card">
         <div class="card-header">
@@ -698,36 +723,9 @@
         <div class="pmc-status" id="vo2max-status"></div>
       </div>
 
-      <div class="card">
-        <div class="card-header">
-          <span class="card-title" id="trends-mix-title">Aktivitetsmix (timmar)</span>
-          <div class="ios-toggle-row" style="margin:0;gap:6px;">
-            <span class="ios-toggle-label" style="font-size:0.75rem;">Tid</span>
-            <label class="ios-switch ios-switch-sm" id="mix-unit-toggle">
-              <input type="checkbox" onchange="setMixUnit(this.checked?'km':'hours')">
-              <span class="ios-slider"></span>
-            </label>
-            <span class="ios-toggle-label" style="font-size:0.75rem;">Distans</span>
-          </div>
-        </div>
-        <div class="chart-container chart-container--skeleton" id="chart-mix-wrap"><div class="chart-skeleton" id="chart-skeleton-mix"></div><canvas id="chart-mix-personal"></canvas></div>
-      </div>
-
       <div class="card" id="season-totals-card">
         <div class="card-title mb-8">Säsongstotaler</div>
         <div id="season-totals-summary"></div>
-      </div>
-
-      <div class="card" id="season-activity-card">
-        <div class="card-header">
-          <span class="card-title">Per aktivitet</span>
-        </div>
-        <div id="season-activity-bars"></div>
-      </div>
-
-      <div id="trends-coach-history" class="card cc-hist-card hidden">
-        <div class="card-header"><span class="card-title">Coachen och veckorna</span></div>
-        <div id="trends-coach-history-body"></div>
       </div>
 
       <div id="weekly-summary-card" class="card hidden">
@@ -735,9 +733,41 @@
         <div id="weekly-summary"></div>
       </div>
 
-      <div class="card">
-        <div class="card-header"><span class="card-title">Senaste pass</span></div>
-        <div id="recent-workouts"></div>
+      </div><!-- /progress-subtab-allman -->
+
+      <div class="progress-subtab" id="progress-subtab-mal" role="tabpanel" aria-labelledby="progress-subtab-mal-btn" hidden>
+        <div class="card progress-goals-empty">
+          <div class="goals-empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="36" height="36"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+          </div>
+          <h3 class="goals-empty-title">Mål-tracking kommer snart</h3>
+          <p class="goals-empty-body">Här ska du kunna sätta egna mål (km/månad, antal pass/år, tidsmål på distans) och se hur ditt nuvarande schema spårar mot ditt racemål med EF, VO2max och volym som indikatorer. Sprint 4 i Raggelito-reviewen.</p>
+        </div>
+      </div>
+
+      <div class="progress-subtab" id="progress-subtab-aktiviteter" role="tabpanel" aria-labelledby="progress-subtab-aktiviteter-btn" hidden>
+        <div class="card" id="combined-activity-mix-card">
+          <div class="card-header">
+            <span class="card-title" id="trends-mix-title">Aktivitetsmix (timmar)</span>
+            <div class="ios-toggle-row" style="margin:0;gap:6px;">
+              <span class="ios-toggle-label" style="font-size:0.75rem;">Tid</span>
+              <label class="ios-switch ios-switch-sm" id="mix-unit-toggle">
+                <input type="checkbox" onchange="setMixUnit(this.checked?'km':'hours')">
+                <span class="ios-slider"></span>
+              </label>
+              <span class="ios-toggle-label" style="font-size:0.75rem;">Distans</span>
+            </div>
+          </div>
+          <div class="chart-container chart-container--skeleton" id="chart-mix-wrap"><div class="chart-skeleton" id="chart-skeleton-mix"></div><canvas id="chart-mix-personal"></canvas></div>
+          <div class="combined-mix-divider" aria-hidden="true"></div>
+          <div class="combined-mix-totals-label">Totalt per aktivitet</div>
+          <div id="season-activity-bars"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span class="card-title">Senaste pass</span></div>
+          <div id="recent-workouts"></div>
+        </div>
       </div>
     </section>
 

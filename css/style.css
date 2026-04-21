@@ -1096,6 +1096,116 @@ select option { background: #1a1a2e; color: var(--text); }
 
 .chart-container-sm { height: 240px; position: relative; overflow: visible; }
 
+/* ── Progress sub-tabs (Sprint 2) ── */
+.progress-subnav {
+  display: flex; gap: 4px;
+  margin: 0 0 16px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.progress-subnav::-webkit-scrollbar { display: none; }
+.progress-subnav-btn {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  background: transparent; border: none;
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: 0.88rem; font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.progress-subnav-btn:hover { color: var(--text-muted); }
+.progress-subnav-btn.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.progress-subtab[hidden] { display: none; }
+
+/* Week summary card */
+#progress-week-summary-card { padding: 14px 16px; }
+.pws-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.pws-stat {
+  display: flex; flex-direction: column; align-items: flex-start;
+  gap: 2px;
+}
+.pws-stat-val {
+  font-size: 1.25rem; font-weight: 700; color: var(--text);
+  line-height: 1.1;
+}
+.pws-stat-label {
+  font-size: 0.7rem; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.4px;
+}
+.pws-stat-delta {
+  font-size: 0.72rem; font-weight: 600;
+  margin-top: 2px;
+}
+.pws-stat-delta.up { color: var(--green); }
+.pws-stat-delta.down { color: var(--red); }
+.pws-stat-delta.flat { color: var(--text-dim); }
+.pws-empty {
+  font-size: 0.82rem; color: var(--text-dim);
+  padding: 4px 0;
+}
+
+/* Combined activity mix card divider */
+.combined-mix-divider {
+  height: 1px; background: var(--border);
+  margin: 14px 0 12px;
+}
+.combined-mix-totals-label {
+  font-size: 0.72rem; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.4px;
+  margin-bottom: 8px;
+}
+
+/* Season totals YoY pill */
+.season-stat-yoy {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 0.68rem; font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.season-stat-yoy.up { color: var(--green); background: rgba(56,178,124,0.10); }
+.season-stat-yoy.down { color: var(--red); background: rgba(231,76,60,0.10); }
+.season-stat-yoy.flat { color: var(--text-dim); }
+
+/* Dina mål — empty state */
+.progress-goals-empty {
+  text-align: center;
+  padding: 32px 20px;
+}
+.goals-empty-icon { color: var(--accent); margin-bottom: 12px; opacity: 0.7; }
+.goals-empty-title {
+  font-size: 1.05rem; font-weight: 700;
+  margin: 0 0 8px; color: var(--text);
+}
+.goals-empty-body {
+  font-size: 0.85rem; color: var(--text-dim);
+  line-height: 1.5; margin: 0 auto; max-width: 420px;
+}
+
+/* Coach drawer sections (Sprint 2: weekly check-in history moved here) */
+.coach-drawer-section { padding: 16px 16px 8px; }
+.coach-drawer-section + .coach-drawer-section { border-top: 1px solid var(--border); }
+.coach-drawer-section-title {
+  font-size: 0.72rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.6px;
+  color: var(--text-dim); margin: 0 0 10px;
+}
+
 /* ── Loading ── */
 .spinner {
   width: 24px; height: 24px; border: 3px solid var(--border);
