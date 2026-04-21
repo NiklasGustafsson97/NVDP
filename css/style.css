@@ -2206,7 +2206,6 @@ input.code-input {
   overflow: hidden; white-space: nowrap;
 }
 .polarization-seg--easy { background: rgba(46, 204, 113, 0.85); }
-.polarization-seg--mod  { background: rgba(243, 156, 18, 0.85); }
 .polarization-seg--hard { background: rgba(231, 76, 60, 0.90); }
 .polarization-legend {
   display: flex; flex-direction: column; gap: 4px;
@@ -2215,7 +2214,6 @@ input.code-input {
 .polarization-legend-item { display: flex; align-items: center; gap: 8px; }
 .pol-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .pol-dot--easy { background: rgba(46, 204, 113, 0.85); }
-.pol-dot--mod  { background: rgba(243, 156, 18, 0.85); }
 .pol-dot--hard { background: rgba(231, 76, 60, 0.90); }
 .effort-legend-dot { width: 8px; height: 8px; border-radius: 50%; }
 

@@ -3763,24 +3763,29 @@ function renderPolarizationCard(workouts) {
   const legendEl = document.getElementById('polarization-legend');
   const statusEl = document.getElementById('polarization-status');
   const segEasy = document.getElementById('pol-seg-easy');
-  const segMod = document.getElementById('pol-seg-mod');
   const segHard = document.getElementById('pol-seg-hard');
-  if (!subEl || !legendEl || !statusEl || !segEasy || !segMod || !segHard) return;
+  if (!subEl || !legendEl || !statusEl || !segEasy || !segHard) return;
 
   const today = new Date();
   const cutoff = addDays(today, -28);
   const cutoffIso = isoDate(cutoff);
   const recent = workouts.filter((w) => w.workout_date && w.workout_date >= cutoffIso);
 
-  let easy = 0, mod = 0, hard = 0;
+  // Polarized model: only two buckets — easy (Z1-Z2) vs hard (Z3-Z5).
+  // Z3 ("gråzonen") is folded into hard on purpose so time spent there
+  // counts against the easy share, in line with the principle "Ingen
+  // gråzon — antingen lugnt eller tydligt kvalitet".
+  let easy = 0, hard = 0, modSeconds = 0;
   for (const w of recent) {
     const cls = _classifyWorkoutIntensity(w);
     if (!cls) continue;
-    easy += cls.easy; mod += cls.mod; hard += cls.hard;
+    easy += cls.easy;
+    hard += cls.hard + cls.mod;
+    modSeconds += cls.mod;
   }
-  const total = easy + mod + hard;
+  const total = easy + hard;
   if (total === 0) {
-    segEasy.style.width = '100%'; segMod.style.width = '0%'; segHard.style.width = '0%';
+    segEasy.style.width = '100%'; segHard.style.width = '0%';
     segEasy.style.background = 'var(--bg-card-hover)';
     legendEl.innerHTML = '';
     statusEl.textContent = 'För lite data — logga några pass så fylls mätaren.';
@@ -3789,39 +3794,40 @@ function renderPolarizationCard(workouts) {
   }
 
   const pEasy = (easy / total) * 100;
-  const pMod = (mod / total) * 100;
   const pHard = (hard / total) * 100;
+  const pMod = (modSeconds / total) * 100;
 
   segEasy.style.width = pEasy.toFixed(1) + '%';
-  segMod.style.width = pMod.toFixed(1) + '%';
   segHard.style.width = pHard.toFixed(1) + '%';
   segEasy.style.background = '';
   segEasy.textContent = pEasy >= 12 ? Math.round(pEasy) + '%' : '';
-  segMod.textContent = pMod >= 12 ? Math.round(pMod) + '%' : '';
   segHard.textContent = pHard >= 12 ? Math.round(pHard) + '%' : '';
 
   const fmt = (sec) => (sec / 3600).toFixed(1) + ' h';
   legendEl.innerHTML = `
     <div class="polarization-legend-item"><span class="pol-dot pol-dot--easy"></span>Easy (Z1-Z2) — ${fmt(easy)} · ${Math.round(pEasy)}%</div>
-    <div class="polarization-legend-item"><span class="pol-dot pol-dot--mod"></span>Moderat (Z3) — ${fmt(mod)} · ${Math.round(pMod)}%</div>
-    <div class="polarization-legend-item"><span class="pol-dot pol-dot--hard"></span>Hårt (Z4-Z5) — ${fmt(hard)} · ${Math.round(pHard)}%</div>
+    <div class="polarization-legend-item"><span class="pol-dot pol-dot--hard"></span>Hårt (Z3-Z5) — ${fmt(hard)} · ${Math.round(pHard)}%</div>
   `;
 
   subEl.textContent = `Mål: ~80% easy, ~20% hårt`;
 
+  // Z3-time is still tracked separately so we can warn when "hard" is
+  // really just a bunch of unintentional gray-zone work.
+  const z3DominantHard = pMod >= 12 && modSeconds > (hard - modSeconds);
+
   let band, msg;
-  if (pEasy >= 75 && pHard >= 10 && pHard <= 25 && pMod <= 15) {
-    band = 'fresh'; msg = `Polariserad mix (${Math.round(pEasy)}/${Math.round(pMod)}/${Math.round(pHard)}). Exakt där du ska vara.`;
+  if (pEasy >= 75 && pHard >= 10 && pHard <= 25) {
+    band = 'fresh'; msg = `Polariserad mix (${Math.round(pEasy)}/${Math.round(pHard)}). Exakt där du ska vara.`;
   } else if (pEasy < 70) {
     band = 'risk'; msg = `Bara ${Math.round(pEasy)}% easy. För lite lågintensivt — bygg mer aerob bas i Z1-Z2.`;
   } else if (pHard > 25) {
-    band = 'risk'; msg = `${Math.round(pHard)}% i Z4-Z5. För mycket hårt — risk för överträning.`;
+    band = 'risk'; msg = `${Math.round(pHard)}% hårt. Risk för överträning — backa intensiteten.`;
   } else if (pHard < 8) {
     band = 'neutral'; msg = `Bara ${Math.round(pHard)}% hårt. Du kan lägga in mer kvalitet om formen tillåter.`;
-  } else if (pMod > 20) {
-    band = 'productive'; msg = `${Math.round(pMod)}% i Z3 ("gråzonen"). Försök styra mer mot Z2 eller Z4 istället.`;
+  } else if (z3DominantHard) {
+    band = 'productive'; msg = `${Math.round(pMod)}% i Z3 ("gråzonen"). Styr mer mot Z2 (lugnt) eller Z4 (tydligt hårt) istället.`;
   } else {
-    band = 'neutral'; msg = `Mix: ${Math.round(pEasy)}/${Math.round(pMod)}/${Math.round(pHard)}. OK balans.`;
+    band = 'neutral'; msg = `Mix: ${Math.round(pEasy)}/${Math.round(pHard)}. OK balans.`;
   }
   statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(msg)}`;
 }
