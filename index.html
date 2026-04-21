@@ -21,6 +21,11 @@
         inline <style> blocks; removing those is tracked as a follow-up.
       * Pinned CDN versions + Subresource Integrity hashes stop a compromised
         jsDelivr / unpkg from swapping in malicious code.
+      * NOTE: `frame-ancestors`, `report-uri`, `report-to` and `sandbox` MUST
+        be delivered via HTTP response headers — browsers silently ignore them
+        in <meta http-equiv="Content-Security-Policy"> (logs a console warning).
+        GitHub Pages does not let us set custom response headers, so click-
+        jacking protection is enforced by the JS frame-buster below instead.
   -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
@@ -29,11 +34,26 @@
     img-src 'self' data: blob: https:;
     font-src 'self' data:;
     connect-src 'self' https://*.supabase.co https://*.supabase.in wss://*.supabase.co https://cdn.jsdelivr.net https://unpkg.com;
-    frame-ancestors 'none';
     base-uri 'self';
     form-action 'self';
     object-src 'none';
   ">
+  <!--
+    Click-jacking protection: replaces the would-be `frame-ancestors 'none'`
+    CSP directive (see note above). If the page is loaded inside any frame
+    we redirect the top-level window to ourselves, breaking out of the frame.
+  -->
+  <script>
+    if (window.self !== window.top) {
+      window.top.location = window.self.location;
+    }
+  </script>
+  <!--
+    Inline SVG favicon as a data URI — avoids a 404 on /favicon.ico without
+    adding a binary asset to the repo. Allowed by `img-src ... data:` above.
+  -->
+  <link rel="icon" type="image/svg+xml"
+    href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Crect%20width='100'%20height='100'%20rx='20'%20fill='%233498DB'/%3E%3Ctext%20x='50'%20y='70'%20font-family='Arial,sans-serif'%20font-size='62'%20font-weight='bold'%20text-anchor='middle'%20fill='white'%3EN%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/style.css?v=d1d3fc8">
   <script
     src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"
@@ -586,15 +606,47 @@
 
       <div class="card" id="pmc-card">
         <div class="card-header">
-          <span class="card-title">Formtopp (CTL · ATL · TSB)</span>
-          <span class="card-sub" id="pmc-subtitle"></span>
+          <span class="card-title">Formtopp</span>
+          <button type="button" class="pmc-info-btn" id="pmc-info-btn" onclick="togglePmcInfo()" aria-label="Förklara CTL, ATL och TSB" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          </button>
         </div>
-        <div class="chart-container chart-container--skeleton" id="chart-pmc-wrap">
-          <div class="chart-skeleton" id="chart-skeleton-pmc"></div>
-          <canvas id="chart-pmc"></canvas>
+
+        <div class="pmc-info-popover hidden" id="pmc-info-popover" role="region" aria-label="Förklaring">
+          <p><strong>Formtopp</strong> visar var du är i tränings­cykeln just nu. Det enda värdet du behöver titta på dagligen är <strong>TSB (form)</strong>:</p>
+          <ul>
+            <li><strong>&gt; +5</strong> — utvilad, redo för nyckelpass eller tävling.</li>
+            <li><strong>−10 till −30</strong> — bygger fitness, normalt trött.</li>
+            <li><strong>&lt; −30</strong> — för hög belastning, dra ner.</li>
+          </ul>
+          <p class="pmc-info-meta">CTL = långsiktig fitness (42 dagar). ATL = akut trötthet (7 dagar). TSB = CTL − ATL.</p>
         </div>
-        <div class="pmc-legend" id="pmc-legend"></div>
-        <div class="pmc-status" id="pmc-status"></div>
+
+        <div class="pmc-hero" id="pmc-hero">
+          <span class="pmc-hero-badge pmc-hero-badge--neutral" id="pmc-hero-badge" aria-hidden="true"></span>
+          <div class="pmc-hero-text">
+            <div class="pmc-hero-title" id="pmc-hero-title">Beräknar form…</div>
+            <div class="pmc-hero-sub" id="pmc-hero-sub"></div>
+          </div>
+          <div class="pmc-hero-tsb" id="pmc-hero-tsb" aria-hidden="true"></div>
+        </div>
+
+        <div class="pmc-fitness-line" id="pmc-subtitle"></div>
+
+        <button type="button" class="pmc-details-toggle" id="pmc-details-toggle" onclick="togglePmcDetails()" aria-controls="pmc-details" aria-expanded="false">
+          <span>Visa graf och detaljer</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+
+        <div class="pmc-details" id="pmc-details" hidden>
+          <div class="chart-container chart-container--skeleton" id="chart-pmc-wrap">
+            <div class="chart-skeleton" id="chart-skeleton-pmc"></div>
+            <canvas id="chart-pmc"></canvas>
+          </div>
+          <div class="pmc-legend" id="pmc-legend"></div>
+        </div>
+
+        <div class="pmc-status hidden" id="pmc-status" aria-hidden="true"></div>
       </div>
 
       <div class="card" id="polarization-card">
@@ -613,7 +665,16 @@
 
       <div class="card" id="easy-hr-card">
         <div class="card-header">
-          <span class="card-title">Easy-pace puls-trend</span>
+          <span class="card-title">
+            Aerob effektivitet (EF)
+            <span
+              class="card-help"
+              tabindex="0"
+              role="button"
+              aria-label="Vad är EF?"
+              title="EF = GAP-fart (km/h) ÷ snittpuls × 100, beräknat på splits i Z2 (60–80 % av maxHR), efter att de första 10 minuterna av varje pass kapats. GAP är höjd-justerad fart (Minetti). Högre EF = du springer fortare till samma puls = bättre aerob form."
+            >&#9432;</span>
+          </span>
           <span class="card-sub" id="easy-hr-subtitle"></span>
         </div>
         <div class="chart-container chart-container--skeleton" id="chart-easy-hr-wrap">

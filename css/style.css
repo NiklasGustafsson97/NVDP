@@ -300,16 +300,29 @@ select option { background: #1a1a2e; color: var(--text); }
 
 /* ── Bottom Nav ── */
 .bottom-nav {
-  display: flex; align-items: center; justify-content: space-around;
+  display: flex; align-items: stretch; justify-content: space-between;
   position: fixed; bottom: 0; left: 0; right: 0; height: var(--nav-h);
   background: rgba(11,13,23,0.95); backdrop-filter: blur(12px);
   border-top: 1px solid var(--border); z-index: 1000;
+  /* Respect iOS notch/home-indicator on left/right too (was only top/bottom) */
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 .nav-item {
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  padding: 8px 12px; color: var(--text-dim); font-size: 0.65rem;
+  /* flex:1 with min-width:0 guarantees N items always sum to exactly 100%
+     of the available width, regardless of label length, so we never push
+     the bottom-nav past the viewport (which used to crop the last tab and
+     leave a 1-px sliver on the right edge of the page on mobile). */
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  padding: 8px 4px; color: var(--text-dim); font-size: 0.65rem;
   text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer;
   transition: color 0.2s; text-decoration: none; font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .nav-item svg { width: 22px; height: 22px; }
 .nav-item.active {
@@ -375,6 +388,15 @@ select option { background: #1a1a2e; color: var(--text); }
 .card:hover { background: var(--bg-card-hover); }
 .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .card-title { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+.card-help {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-left: 6px; width: 16px; height: 16px; border-radius: 50%;
+  font-size: 0.7rem; font-weight: 600; cursor: help;
+  color: var(--text-muted); background: rgba(255,255,255,0.06);
+  text-transform: none; letter-spacing: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.card-help:hover, .card-help:focus { background: rgba(255,255,255,0.14); color: var(--text); outline: none; }
 
 /* ── Today / Tomorrow Cards ── */
 /* ── Day Detail Card ── */
@@ -677,11 +699,12 @@ select option { background: #1a1a2e; color: var(--text); }
     padding-bottom: max(6px, env(safe-area-inset-bottom, 0px));
   }
   .nav-item {
-    padding: 6px 4px;
+    padding: 6px 2px;
     font-size: 0.58rem;
     letter-spacing: 0.35px;
     line-height: 1.15;
-    max-width: 20vw;
+    /* Drop max-width: 20vw — flex:1 above already handles equal widths
+       without needing viewport-relative caps that overflow with 5 items. */
   }
   .nav-item svg { width: 20px; height: 20px; }
 
@@ -759,7 +782,7 @@ select option { background: #1a1a2e; color: var(--text); }
 }
 
 @media (max-width: 380px) {
-  .nav-item { font-size: 0.52rem; padding: 5px 2px; max-width: 22vw; }
+  .nav-item { font-size: 0.52rem; padding: 5px 1px; }
 }
 
 .schema-week-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
@@ -882,6 +905,110 @@ select option { background: #1a1a2e; color: var(--text); }
 }
 @media (hover: none) and (pointer: coarse) {
   .sr-drag-handle { opacity: 0.7; width: 32px; height: 32px; }
+}
+
+/* ── Plan / Actual zones inside each day card ── */
+.sr-zones {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.sr-plan-zone,
+.sr-actual-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 40px;
+}
+.sr-zone-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-top: 4px;
+  margin-bottom: 1px;
+}
+.sr-pass-empty {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  font-style: italic;
+  opacity: 0.6;
+  padding: 4px 0;
+}
+.sr-pass-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: background 0.15s, border-color 0.15s;
+}
+.sr-pass-card .sr-pass-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sr-pass-card.sr-draggable .sr-pass-body { padding-right: 4px; }
+.sr-pass-actual {
+  background: rgba(60, 200, 130, 0.06);
+  border-color: rgba(60, 200, 130, 0.18);
+}
+.sr-pass-actual:hover { background: rgba(60, 200, 130, 0.1); }
+.sr-pass-shared {
+  background: rgba(214, 99, 158, 0.06);
+  border-color: rgba(214, 99, 158, 0.18);
+}
+.sr-pass-rest {
+  background: transparent;
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Status pills shown inside each plan-card / actual-card body. */
+.sr-pill {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+.sr-pill--matched {
+  background: rgba(60, 200, 130, 0.15);
+  color: rgb(140, 220, 175);
+}
+.sr-pill--missed {
+  background: rgba(220, 80, 90, 0.18);
+  color: rgb(240, 150, 155);
+}
+.sr-pill--planned {
+  background: rgba(214, 99, 158, 0.12);
+  color: rgb(220, 160, 195);
+}
+.sr-pill--rest {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+}
+.sr-pill--extra {
+  background: rgba(180, 180, 180, 0.1);
+  color: var(--text-dim);
+}
+
+.sr-invite-row { margin-top: 4px; }
+
+@media (max-width: 600px) {
+  .sr-pass-card { padding: 7px 8px; }
+  .sr-zone-label { font-size: 0.56rem; }
 }
 
 /* ── Unified Workout Body (wo-*) ── */
