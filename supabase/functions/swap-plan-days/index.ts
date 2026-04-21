@@ -14,7 +14,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // Inlined to keep this function as a single file (so it can be pasted into
 // the Supabase dashboard editor without bundling). Mirrors pickWorkoutBody
-// in site/supabase/functions/_shared/checkin-engine.ts ΓÇö keep in sync.
+// in site/supabase/functions/_shared/checkin-engine.ts — keep in sync.
 interface PlanWorkout {
   id: string;
   day_of_week: number;
@@ -97,7 +97,7 @@ serve(async (req) => {
       return json(400, { error: "Missing plan_week_id, from_day_of_week, or to_day_of_week" }, req);
     }
     if (fromDow < 0 || fromDow > 6 || toDow < 0 || toDow > 6) {
-      return json(400, { error: "day_of_week must be 0ΓÇô6" }, req);
+      return json(400, { error: "day_of_week must be 0–6" }, req);
     }
     if (fromDow === toDow) {
       return json(200, { ok: true, noop: true }, req);
