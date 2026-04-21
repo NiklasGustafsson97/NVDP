@@ -3668,7 +3668,12 @@ function renderPmcChart(workouts) {
   const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
   const ctlColor = 'rgba(46, 134, 193, 0.9)';
   const atlColor = 'rgba(231, 76, 60, 0.9)';
-  const tsbColor = 'rgba(46, 204, 113, 0.85)';
+  const tsbColor = 'rgba(46, 204, 113, 0.95)';
+
+  // Default view = bara TSB-linjen, CTL/ATL döljs tills användaren expanderar
+  // "Visa CTL, ATL och förklaring". Vi kollar om panelen redan står öppen
+  // (t.ex. efter en re-render) så toggle-tillståndet bevaras.
+  const detailsOpen = !document.getElementById('pmc-details')?.hasAttribute('hidden');
 
   window._chartPmc = new Chart(canvas.getContext('2d'), {
     type: 'line',
@@ -3685,6 +3690,7 @@ function renderPmcChart(workouts) {
           fill: true,
           tension: 0.25,
           yAxisID: 'y',
+          hidden: !detailsOpen,
         },
         {
           label: 'ATL (trötthet)',
@@ -3695,14 +3701,14 @@ function renderPmcChart(workouts) {
           fill: false,
           tension: 0.25,
           yAxisID: 'y',
+          hidden: !detailsOpen,
         },
         {
           label: 'TSB (form)',
           data: tsb.map((v) => +v.toFixed(2)),
           borderColor: tsbColor,
-          borderWidth: 2,
+          borderWidth: 2.5,
           pointRadius: 0,
-          borderDash: [5, 4],
           fill: false,
           tension: 0.25,
           yAxisID: 'y1',
@@ -3714,7 +3720,7 @@ function renderPmcChart(workouts) {
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, boxWidth: 10 } },
+        legend: { display: detailsOpen, position: 'bottom', labels: { color: textColor, usePointStyle: true, boxWidth: 10 } },
         tooltip: {
           callbacks: {
             label: (c) => `${c.dataset.label}: Effort ${c.parsed.y.toFixed(1)}`,
@@ -3723,14 +3729,15 @@ function renderPmcChart(workouts) {
       },
       scales: {
         y: {
+          display: detailsOpen,
           beginAtZero: true,
           grid: { color: 'rgba(255,255,255,0.05)' },
           ticks: { color: textColor, callback: (v) => Number(v).toFixed(1) },
           title: { display: true, text: 'CTL / ATL (Effort)', color: textColor },
         },
         y1: {
-          position: 'right',
-          grid: { display: false },
+          position: detailsOpen ? 'right' : 'left',
+          grid: { color: 'rgba(255,255,255,0.05)' },
           ticks: {
             color: textColor,
             callback: (v) => {
@@ -3739,7 +3746,7 @@ function renderPmcChart(workouts) {
               return sign + n.toFixed(1);
             },
           },
-          title: { display: true, text: 'TSB', color: textColor },
+          title: { display: true, text: 'TSB (form)', color: textColor },
         },
         x: {
           grid: { display: false },
@@ -3778,8 +3785,8 @@ function renderPmcChart(workouts) {
     sub2 = 'Bra tajming för ett nyckelpass eller tävling.';
   } else if (lastTsb > -10) {
     band = 'neutral';
-    title = 'Neutral';
-    sub2 = 'Du bygger jämnt — fortsätt som planerat.';
+    title = 'I balans';
+    sub2 = 'Form och trötthet i balans — kör enligt plan.';
   } else if (lastTsb > -30) {
     band = 'productive';
     title = 'Bygger fitness';
@@ -3823,17 +3830,24 @@ function togglePmcDetails() {
     details.removeAttribute('hidden');
     toggle.setAttribute('aria-expanded', 'true');
     toggle.classList.add('pmc-details-toggle--open');
-    toggle.querySelector('span').textContent = 'Dölj graf och detaljer';
-    // Chart was rendered into a hidden container — force resize so it
-    // measures the now-visible area correctly.
-    requestAnimationFrame(() => {
-      try { window._chartPmc && window._chartPmc.resize(); } catch (_) { /* ignore */ }
-    });
+    toggle.querySelector('span').textContent = 'Dölj CTL, ATL och förklaring';
   } else {
     details.setAttribute('hidden', '');
     toggle.setAttribute('aria-expanded', 'false');
     toggle.classList.remove('pmc-details-toggle--open');
-    toggle.querySelector('span').textContent = 'Visa graf och detaljer';
+    toggle.querySelector('span').textContent = 'Visa CTL, ATL och förklaring';
+  }
+
+  const chart = window._chartPmc;
+  if (chart) {
+    try {
+      chart.setDatasetVisibility(0, willOpen);
+      chart.setDatasetVisibility(1, willOpen);
+      if (chart.options?.scales?.y) chart.options.scales.y.display = willOpen;
+      if (chart.options?.scales?.y1) chart.options.scales.y1.position = willOpen ? 'right' : 'left';
+      if (chart.options?.plugins?.legend) chart.options.plugins.legend.display = willOpen;
+      chart.update();
+    } catch (_) { /* ignore */ }
   }
 }
 
@@ -4179,99 +4193,91 @@ function renderVo2maxChart(workouts) {
   if (!canvas || !statusEl || !subEl || typeof Chart === 'undefined') return;
   if (window._chartVo2max) window._chartVo2max.destroy();
 
-  // Bucket all qualifying runs by ISO-week (Mon-Sun) → keep best VDOT and the
-  // pass that produced it for the tooltip.
-  const byWeek = new Map();
-  let qualifiedPasses = 0;
+  // One data point per qualifying run (not bucketed to week-max). This
+  // surfaces within-week dispersion — if there are three qualifying passes
+  // the same week, the user sees three dots at their actual dates — and
+  // combined with a time-scale x-axis lets the line draw straight through
+  // empty weeks (V11 → V13 no longer leaves a break at V12).
+  const points = [];
+  const weekBest = new Map(); // ISO-week key → best VDOT that week, for the trend text
   for (const w of workouts) {
     if (!w.workout_date) continue;
     const vdot = _vdotFromWorkout(w);
     if (vdot === null) continue;
-    qualifiedPasses++;
-    const mon = mondayOfWeek(new Date(w.workout_date + 'T00:00:00'));
-    const key = isoDate(mon);
-    const prev = byWeek.get(key);
-    if (!prev || vdot > prev.vdot) {
-      byWeek.set(key, {
-        vdot,
+    const dateObj = new Date(w.workout_date + 'T00:00:00');
+    const y = +vdot.toFixed(1);
+    points.push({
+      x: dateObj.valueOf(),
+      y,
+      meta: {
         date: w.workout_date,
         km: Number(w.distance_km),
         min: Number(w.duration_minutes),
         intensity: w.intensity || null,
         label: w.label || w.activity_type,
-      });
-    }
+      },
+    });
+    const wkKey = isoDate(mondayOfWeek(dateObj));
+    const prev = weekBest.get(wkKey);
+    if (prev === undefined || y > prev) weekBest.set(wkKey, y);
   }
 
-  if (byWeek.size < 2) {
+  if (points.length < 2) {
     subEl.textContent = '';
-    statusEl.textContent = qualifiedPasses === 0
+    statusEl.textContent = points.length === 0
       ? 'Inga kvalificerade löppass än. Behöver löppass på minst 12 min med distans loggad.'
-      : 'Behöver minst 2 veckor med löppass för att rita trenden.';
+      : 'Behöver minst 2 kvalificerade löppass för att rita trenden.';
     return;
   }
 
-  // Build a continuous week axis from first to last week so empty weeks
-  // render as gaps (spanGaps=false). Other progress charts compress to the
-  // qualified weeks, but VDOT-grafen handlar om att se utvecklingen — då vill
-  // vi inte gömma att man tappade några veckor.
-  const sortedKeys = [...byWeek.keys()].sort();
-  const firstMon = new Date(sortedKeys[0] + 'T00:00:00');
-  const lastMon = new Date(sortedKeys[sortedKeys.length - 1] + 'T00:00:00');
-  const allKeys = [];
-  for (let d = new Date(firstMon); d <= lastMon; d = addDays(d, 7)) {
-    allKeys.push(isoDate(d));
-  }
+  points.sort((a, b) => a.x - b.x);
 
-  const labels = allKeys.map((k) => `V${weekNumber(parseISOWeekKeyLocal(k))}`);
-  const data = allKeys.map((k) => {
-    const e = byWeek.get(k);
-    return e ? +e.vdot.toFixed(1) : null;
-  });
-  const ctxData = allKeys.map((k) => byWeek.get(k) || null);
-
+  const yValues = points.map((p) => p.y);
   const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
-
-  const filledValues = data.filter((v) => v !== null);
-  const minVal = Math.max(20, Math.floor(Math.min(...filledValues) - 2));
-  const maxVal = Math.ceil(Math.max(...filledValues) + 2);
+  const minVal = Math.max(20, Math.floor(Math.min(...yValues) - 2));
+  const maxVal = Math.ceil(Math.max(...yValues) + 2);
 
   window._chartVo2max = new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: {
-      labels,
       datasets: [{
         label: 'VDOT (ml/kg/min)',
-        data,
+        data: points,
+        parsing: false,
         borderColor: 'rgba(214, 99, 158, 0.95)',
         backgroundColor: 'rgba(214, 99, 158, 0.12)',
         borderWidth: 2.5,
-        pointRadius: (c) => (c.raw === null ? 0 : 3),
+        pointRadius: 3,
         pointHoverRadius: 5,
         fill: true,
         tension: 0.3,
-        spanGaps: false,
+        spanGaps: true,
       }],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
+      parsing: false,
+      interaction: { mode: 'nearest', intersect: false, axis: 'x' },
       plugins: {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (c) => `VDOT: ${c.parsed.y.toFixed(1)}`,
-            afterLabel: (c) => {
-              const d = ctxData[c.dataIndex];
+            title: (items) => {
+              const d = items[0]?.raw?.meta?.date;
               if (!d) return '';
-              const pace = (d.min / d.km);
+              return `V${weekNumber(new Date(d + 'T00:00:00'))} · ${d}`;
+            },
+            label: (c) => `VDOT: ${c.raw.y.toFixed(1)}`,
+            afterLabel: (c) => {
+              const m = c.raw?.meta;
+              if (!m) return '';
+              const pace = (m.min / m.km);
               const paceMin = Math.floor(pace);
               const paceSec = Math.round((pace - paceMin) * 60).toString().padStart(2, '0');
               return [
-                `Bästa pass: ${d.date}`,
-                `${d.km.toFixed(1)} km · ${d.min} min · ${paceMin}:${paceSec}/km`,
-                d.intensity ? `Zon: ${d.intensity}` : '',
+                `${m.km.toFixed(1)} km · ${m.min} min · ${paceMin}:${paceSec}/km`,
+                m.intensity ? `Zon: ${m.intensity}` : '',
               ].filter(Boolean);
             },
           },
@@ -4286,18 +4292,33 @@ function renderVo2maxChart(workouts) {
           title: { display: true, text: 'VDOT (ml/kg/min)', color: textColor },
         },
         x: {
+          type: 'time',
+          time: { unit: 'week', isoWeekday: 1 },
           grid: { display: false },
-          ticks: { color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 },
+          ticks: {
+            color: textColor,
+            maxRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 12,
+            // Render ticks as "V<isoweek>" so the axis still matches the
+            // week-labelled charts on the rest of the Progress tab.
+            callback: (value) => 'V' + weekNumber(new Date(value)),
+          },
         },
       },
     },
   });
 
-  // Status text: latest VDOT + 4-veckors-trend.
-  const recent = filledValues.slice(-4);
-  const earlier = filledValues.slice(-8, -4);
-  const latest = filledValues[filledValues.length - 1];
-  subEl.textContent = `Senaste: VDOT ${latest.toFixed(1)} · ${qualifiedPasses} pass över ${byWeek.size} v`;
+  // Trend copy still leans on week-max values — averaging per-run VDOTs
+  // would over-weight weeks with many easy miles. Using the best pass per
+  // week keeps "Form upp/ner" aligned with actual racing form.
+  const weekKeys = [...weekBest.keys()].sort();
+  const weeklyBest = weekKeys.map((k) => weekBest.get(k));
+  const latest = weeklyBest[weeklyBest.length - 1];
+  subEl.textContent = `Senaste: VDOT ${latest.toFixed(1)} · ${points.length} pass över ${weekBest.size} v`;
+
+  const recent = weeklyBest.slice(-4);
+  const earlier = weeklyBest.slice(-8, -4);
 
   if (earlier.length === 0 || recent.length === 0) {
     statusEl.textContent = 'Bygg historik: behöver ~8 veckor med löppass för att jämföra trenden.';
