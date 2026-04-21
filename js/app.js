@@ -4186,6 +4186,24 @@ function _vdotFromWorkout(w) {
   return vdot;
 }
 
+// Minimum % of HRmax for a run to count as a "quality" effort that gives a
+// meaningful VDOT estimate. Below this threshold the runner is so far below
+// race pace that Daniels' formula produces a misleadingly low number.
+const VO2MAX_QUAL_HR_PCT = 0.85;
+// Window length for the smoothed trend curve. Garmin uses a similar
+// long-running average; 28 days is long enough to dampen single-pass noise
+// without lagging the trend by months.
+const VO2MAX_SMOOTH_DAYS = 28;
+const _MS_PER_DAY = 86400000;
+
+function _isVdotQualifyingPass(w, hrMax) {
+  if (!w || w.activity_type !== 'Löpning') return false;
+  if (!w.workout_date || !w.duration_minutes || !w.distance_km) return false;
+  if (w.duration_minutes < 12 || w.distance_km <= 0) return false;
+  if (!w.avg_hr || !hrMax) return false;
+  return w.avg_hr >= VO2MAX_QUAL_HR_PCT * hrMax;
+}
+
 function renderVo2maxChart(workouts) {
   const canvas = document.getElementById('chart-vo2max');
   const statusEl = document.getElementById('vo2max-status');
@@ -4193,83 +4211,192 @@ function renderVo2maxChart(workouts) {
   if (!canvas || !statusEl || !subEl || typeof Chart === 'undefined') return;
   if (window._chartVo2max) window._chartVo2max.destroy();
 
-  // One data point per qualifying run (not bucketed to week-max). This
-  // surfaces within-week dispersion — if there are three qualifying passes
-  // the same week, the user sees three dots at their actual dates — and
-  // combined with a time-scale x-axis lets the line draw straight through
-  // empty weeks (V11 → V13 no longer leaves a break at V12).
+  const profileMaxHr = currentProfile && Number(currentProfile.user_max_hr);
+  const hrMax = profileMaxHr || EF_DEFAULT_MAX_HR;
+  const usingFallbackHrMax = !profileMaxHr;
+
+  // Step 1: collect qualifying runs only — pass with avg_hr ≥ 85% of HRmax.
+  // Sub-quality jogs would drag VDOT down because Daniels' formula assumes
+  // race-effort pace, so they're filtered out here rather than bucketed.
   const points = [];
-  const weekBest = new Map(); // ISO-week key → best VDOT that week, for the trend text
   for (const w of workouts) {
-    if (!w.workout_date) continue;
+    if (!_isVdotQualifyingPass(w, hrMax)) continue;
     const vdot = _vdotFromWorkout(w);
     if (vdot === null) continue;
     const dateObj = new Date(w.workout_date + 'T00:00:00');
-    const y = +vdot.toFixed(1);
     points.push({
       x: dateObj.valueOf(),
-      y,
+      y: +vdot.toFixed(1),
       meta: {
         date: w.workout_date,
         km: Number(w.distance_km),
         min: Number(w.duration_minutes),
+        avgHr: Number(w.avg_hr),
+        hrPct: Math.round((w.avg_hr / hrMax) * 100),
         intensity: w.intensity || null,
         label: w.label || w.activity_type,
       },
     });
-    const wkKey = isoDate(mondayOfWeek(dateObj));
-    const prev = weekBest.get(wkKey);
-    if (prev === undefined || y > prev) weekBest.set(wkKey, y);
   }
 
-  if (points.length < 2) {
+  // Empty / sparse states — be specific so the user knows whether they
+  // need to log more passes, add HR data, or set their HRmax.
+  if (points.length === 0) {
     subEl.textContent = '';
-    statusEl.textContent = points.length === 0
-      ? 'Inga kvalificerade löppass än. Behöver löppass på minst 12 min med distans loggad.'
-      : 'Behöver minst 2 kvalificerade löppass för att rita trenden.';
+    let msg;
+    if (usingFallbackHrMax) {
+      msg = `Sätt din max-puls i profilen så vi kan filtrera kvalpass korrekt. Använder default ${EF_DEFAULT_MAX_HR} bpm tills vidare. Behöver pass med snittpuls ≥ ${Math.round(VO2MAX_QUAL_HR_PCT * 100)}% av HRmax.`;
+    } else {
+      msg = `Inga löppass med snittpuls ≥ ${Math.round(VO2MAX_QUAL_HR_PCT * 100)}% av HRmax (${Math.round(hrMax * VO2MAX_QUAL_HR_PCT)} bpm). VDOT-skattning kräver tempo/tröskel/race — easy joggar hamnar för lågt på Daniels-skalan.`;
+    }
+    statusEl.textContent = msg;
     return;
   }
 
   points.sort((a, b) => a.x - b.x);
 
-  const yValues = points.map((p) => p.y);
+  // Step 2: per-pass 28-day rolling mean. We use a two-pointer sliding
+  // window because points is already date-sorted; this keeps the smoothing
+  // O(n) and means each smoothed value at date D averages every qualifying
+  // VDOT in [D − 28d, D].
+  let lo = 0;
+  let runningSum = 0;
+  for (let i = 0; i < points.length; i++) {
+    const cutoff = points[i].x - VO2MAX_SMOOTH_DAYS * _MS_PER_DAY;
+    runningSum += points[i].y;
+    while (lo < i && points[lo].x < cutoff) {
+      runningSum -= points[lo].y;
+      lo++;
+    }
+    const winSize = i - lo + 1;
+    points[i].smoothed = +(runningSum / winSize).toFixed(2);
+    points[i].windowCount = winSize;
+  }
+
+  if (points.length === 1) {
+    subEl.textContent = `Senaste: VDOT ${points[0].y.toFixed(1)} · 1 kvalpass`;
+    statusEl.textContent = 'Behöver ≥ 2 kvalpass för att rita trend. Logga ett tempo/tröskelpass till.';
+    // Render a single dot without a trend line so the user still sees their
+    // one data point on the canvas.
+    _drawVo2maxChart(canvas, points, /* withTrend */ false);
+    return;
+  }
+
+  _drawVo2maxChart(canvas, points, /* withTrend */ true);
+
+  // Step 3: subtitle + Form upp/ner status copy. Both use the smoothed
+  // value (not raw per-pass) so a single hot tempo pass doesn't flip the
+  // narrative from "stabil" to "form upp" overnight.
+  const last = points[points.length - 1];
+  const latestSmoothed = last.smoothed;
+  const firstDate = new Date(points[0].x);
+  const lastDate = new Date(last.x);
+  const spanWeeks = Math.max(1, Math.round((last.x - points[0].x) / (7 * _MS_PER_DAY)) + 1);
+  subEl.textContent = `Senaste: VDOT ${latestSmoothed.toFixed(1)} (snittad ${VO2MAX_SMOOTH_DAYS}d) · ${points.length} kvalpass över ${spanWeeks} v`;
+
+  // Compare smoothed value now vs ~4 weeks earlier — pick the latest point
+  // whose date is ≤ (now − 28d). If we don't have 4 weeks of history yet,
+  // we fall back to the earliest available smoothed value.
+  const fourWeeksAgoMs = last.x - 28 * _MS_PER_DAY;
+  let priorIdx = -1;
+  for (let i = points.length - 2; i >= 0; i--) {
+    if (points[i].x <= fourWeeksAgoMs) { priorIdx = i; break; }
+  }
+  if (priorIdx < 0) {
+    statusEl.textContent = `Bygg historik: behöver ~4 veckor med kvalpass för att jämföra trenden. Hittills snittad VDOT ${latestSmoothed.toFixed(1)} på ${points.length} pass.`;
+    return;
+  }
+  const priorSmoothed = points[priorIdx].smoothed;
+  const delta = latestSmoothed - priorSmoothed;
+  let band, msg;
+  if (delta >= 0.8) {
+    band = 'fresh';
+    msg = `Form upp: snittad VDOT +${delta.toFixed(1)} mot för 4 veckor sen. Snabbare på samma puls.`;
+  } else if (delta <= -0.8) {
+    band = 'risk';
+    msg = `Form ner: snittad VDOT ${delta.toFixed(1)} mot för 4 veckor sen. Kolla återhämtning, värme eller om kvalpassen tappat skärpa.`;
+  } else {
+    band = 'neutral';
+    msg = `Stabil snittad VDOT (${delta >= 0 ? '+' : ''}${delta.toFixed(1)} mot för 4 veckor sen).`;
+  }
+  statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(msg)}`;
+}
+
+function _drawVo2maxChart(canvas, points, withTrend) {
   const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
+  const yValues = points.map((p) => p.y);
+  if (withTrend) {
+    for (const p of points) yValues.push(p.smoothed);
+  }
   const minVal = Math.max(20, Math.floor(Math.min(...yValues) - 2));
   const maxVal = Math.ceil(Math.max(...yValues) + 2);
 
+  // Two layers:
+  //   1. Faint scattered dots = each individual qualifying pass.
+  //   2. Thick smoothed line = 28-day rolling mean. This is the number
+  //      the user should anchor "Är jag i bättre form än för en månad sen?"
+  //      on; the dots are there for transparency.
+  const datasets = [
+    {
+      label: 'Kvalpass (raw VDOT)',
+      data: points.map((p) => ({ x: p.x, y: p.y, meta: p.meta })),
+      parsing: false,
+      borderColor: 'rgba(214, 99, 158, 0.4)',
+      backgroundColor: 'rgba(214, 99, 158, 0.4)',
+      pointRadius: 2.5,
+      pointHoverRadius: 5,
+      showLine: false,
+      fill: false,
+      order: 2,
+    },
+  ];
+  if (withTrend) {
+    datasets.push({
+      label: `Snittad VDOT (${VO2MAX_SMOOTH_DAYS}d)`,
+      data: points.map((p) => ({ x: p.x, y: p.smoothed, meta: p.meta, windowCount: p.windowCount })),
+      parsing: false,
+      borderColor: 'rgba(214, 99, 158, 0.95)',
+      backgroundColor: 'rgba(214, 99, 158, 0.12)',
+      borderWidth: 3,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      fill: true,
+      tension: 0.3,
+      spanGaps: true,
+      order: 1,
+    });
+  }
+
   window._chartVo2max = new Chart(canvas.getContext('2d'), {
     type: 'line',
-    data: {
-      datasets: [{
-        label: 'VDOT (ml/kg/min)',
-        data: points,
-        parsing: false,
-        borderColor: 'rgba(214, 99, 158, 0.95)',
-        backgroundColor: 'rgba(214, 99, 158, 0.12)',
-        borderWidth: 2.5,
-        pointRadius: 3,
-        pointHoverRadius: 5,
-        fill: true,
-        tension: 0.3,
-        spanGaps: true,
-      }],
-    },
+    data: { datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       parsing: false,
       interaction: { mode: 'nearest', intersect: false, axis: 'x' },
       plugins: {
-        legend: { display: false },
+        legend: {
+          position: 'bottom',
+          labels: { color: textColor, usePointStyle: true, boxWidth: 10, padding: 14 },
+        },
         tooltip: {
           callbacks: {
             title: (items) => {
-              const d = items[0]?.raw?.meta?.date;
-              if (!d) return '';
-              return `V${weekNumber(new Date(d + 'T00:00:00'))} · ${d}`;
+              const m = items[0]?.raw?.meta;
+              if (!m) return '';
+              return `V${weekNumber(new Date(m.date + 'T00:00:00'))} · ${m.date}`;
             },
-            label: (c) => `VDOT: ${c.raw.y.toFixed(1)}`,
+            label: (c) => {
+              const isTrend = c.dataset.label && c.dataset.label.startsWith('Snittad');
+              if (isTrend) {
+                const cnt = c.raw.windowCount;
+                return `Snittad VDOT: ${c.raw.y.toFixed(1)} (${cnt} pass i fönstret)`;
+              }
+              return `Pass-VDOT: ${c.raw.y.toFixed(1)}`;
+            },
             afterLabel: (c) => {
+              if (c.dataset.label && c.dataset.label.startsWith('Snittad')) return '';
               const m = c.raw?.meta;
               if (!m) return '';
               const pace = (m.min / m.km);
@@ -4277,6 +4404,7 @@ function renderVo2maxChart(workouts) {
               const paceSec = Math.round((pace - paceMin) * 60).toString().padStart(2, '0');
               return [
                 `${m.km.toFixed(1)} km · ${m.min} min · ${paceMin}:${paceSec}/km`,
+                `Snittpuls ${m.avgHr} bpm (${m.hrPct}% av HRmax)`,
                 m.intensity ? `Zon: ${m.intensity}` : '',
               ].filter(Boolean);
             },
@@ -4300,45 +4428,12 @@ function renderVo2maxChart(workouts) {
             maxRotation: 0,
             autoSkip: true,
             maxTicksLimit: 12,
-            // Render ticks as "V<isoweek>" so the axis still matches the
-            // week-labelled charts on the rest of the Progress tab.
             callback: (value) => 'V' + weekNumber(new Date(value)),
           },
         },
       },
     },
   });
-
-  // Trend copy still leans on week-max values — averaging per-run VDOTs
-  // would over-weight weeks with many easy miles. Using the best pass per
-  // week keeps "Form upp/ner" aligned with actual racing form.
-  const weekKeys = [...weekBest.keys()].sort();
-  const weeklyBest = weekKeys.map((k) => weekBest.get(k));
-  const latest = weeklyBest[weeklyBest.length - 1];
-  subEl.textContent = `Senaste: VDOT ${latest.toFixed(1)} · ${points.length} pass över ${weekBest.size} v`;
-
-  const recent = weeklyBest.slice(-4);
-  const earlier = weeklyBest.slice(-8, -4);
-
-  if (earlier.length === 0 || recent.length === 0) {
-    statusEl.textContent = 'Bygg historik: behöver ~8 veckor med löppass för att jämföra trenden.';
-    return;
-  }
-  const avgRecent = recent.reduce((a, b) => a + b, 0) / recent.length;
-  const avgEarlier = earlier.reduce((a, b) => a + b, 0) / earlier.length;
-  const delta = avgRecent - avgEarlier;
-  let band, msg;
-  if (delta >= 1.0) {
-    band = 'fresh';
-    msg = `Form upp: VDOT +${delta.toFixed(1)} mot förra 4-veckors-perioden. Snabbare på samma puls.`;
-  } else if (delta <= -1.0) {
-    band = 'risk';
-    msg = `Form ner: VDOT ${delta.toFixed(1)} mot förra 4-veckors. Kolla återhämtning, värme eller om kvalitetspassen tappat skärpa.`;
-  } else {
-    band = 'neutral';
-    msg = `Stabil VDOT (${delta >= 0 ? '+' : ''}${delta.toFixed(1)} mot förra 4-veckors).`;
-  }
-  statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(msg)}`;
 }
 
 function calcStreak(workouts, profileId) {
