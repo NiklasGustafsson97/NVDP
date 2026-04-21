@@ -98,6 +98,7 @@ Du har tillgång till verktyg:
 - update_memory(fact_patch) — uppdatera coach_memory.facts (t.ex. niggles, motivators, race_targets).
 - predict_race_time(distance_km, target_date?) — Riegel-prognos på användarens senaste löppass. Cita alltid anchor-passet du fick tillbaka när du presenterar tiden, och nämn caveat om värme/bana.
 - start_return_to_training(body_part, severity, days_off?, notes?) — när användaren beskriver en skada eller flera dagars ofrivillig vila. Verktyget skriver till minnet och returnerar en 3-veckorsrampa. Följ direkt upp med propose_plan_changes som speglar rampan (sätt responses.injury till severity och använd lämplig free_text/unavailable_days).
+- move_plan_workout(plan_workout_id, to_day_of_week, to_sort_order?) — flytta ett enskilt planerat pass till en annan dag (eller annat slot inom samma dag). Använd när användaren ber om en specifik flytt ("flytta tisdagens gym till torsdag"). Hämta plan_workout_id från context.next_7_days eller via get_workout(date). En dag kan ha 0-2 pass; sort_order=0 är primärpasset, 1 är sekundärpasset (t.ex. gym på en löpdag).
 
 Använd verktyg när det är rätt verktyg för jobbet. Annars svara direkt.
 
@@ -258,8 +259,10 @@ interface ContextPack {
     target_event_distance_km: number | null;
   } | null;
   next_7_days: Array<{
+    plan_workout_id: string;
     workout_date: string;
     day_of_week: number;
+    sort_order: number;
     activity_type: string;
     label: string | null;
     intensity_zone: string | null;
@@ -329,10 +332,11 @@ async function buildContextPack(
   let next7: ContextPack["next_7_days"] = [];
   if (activePlan) {
     const { data: pw } = await db.from("plan_workouts")
-      .select("workout_date, day_of_week, activity_type, label, intensity_zone, target_duration_minutes, is_rest, description, plan_week_id")
+      .select("id, workout_date, day_of_week, sort_order, activity_type, label, intensity_zone, target_duration_minutes, is_rest, description, plan_week_id")
       .gte("workout_date", todayStr)
       .lte("workout_date", in7)
-      .order("workout_date", { ascending: true });
+      .order("workout_date", { ascending: true })
+      .order("sort_order", { ascending: true });
     // Filter to weeks in the active plan via a follow-up join in memory.
     if (pw && pw.length > 0) {
       const weekIds = Array.from(new Set(pw.map((r: { plan_week_id: string }) => r.plan_week_id)));
@@ -347,8 +351,10 @@ async function buildContextPack(
       next7 = pw
         .filter((r: { plan_week_id: string }) => ownedIds.has(r.plan_week_id))
         .map((r) => ({
+          plan_workout_id: r.id,
           workout_date: r.workout_date,
           day_of_week: r.day_of_week,
+          sort_order: r.sort_order ?? 0,
           activity_type: r.activity_type,
           label: r.label,
           intensity_zone: r.intensity_zone,
@@ -538,6 +544,7 @@ const ALLOWED_TOOLS = new Set([
   "update_memory",
   "predict_race_time",
   "start_return_to_training",
+  "move_plan_workout",
 ]);
 
 async function toolGetWorkout(
@@ -567,9 +574,13 @@ async function toolGetWorkout(
   }
   if (date) {
     const { data: pw } = await db.from("plan_workouts")
-      .select("workout_date, day_of_week, activity_type, label, description, intensity_zone, target_duration_minutes, target_distance_km, is_rest, plan_week_id")
-      .eq("workout_date", date);
-    planned = pw || [];
+      .select("id, workout_date, day_of_week, sort_order, activity_type, label, description, intensity_zone, target_duration_minutes, target_distance_km, is_rest, plan_week_id")
+      .eq("workout_date", date)
+      .order("sort_order", { ascending: true });
+    planned = (pw || []).map((r: Record<string, unknown>) => ({
+      plan_workout_id: r.id,
+      ...r,
+    }));
   }
   return { ok: true, data: { logged, planned } };
 }
@@ -717,6 +728,114 @@ async function toolApplyPlanChanges(
   _diffCache.delete(diffId);
 
   return { ok: true, data: { applied: accepted.length, change_ids: accepted.map((c) => c.id) } };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+//  toolMovePlanWorkout — move a single plan_workout to another day or slot.
+//
+//  Mirrors the move-plan-workout edge function so the coach can act on
+//  ad-hoc move requests ("flytta tisdagens gym till torsdag") without
+//  funneling everything through the weekly-checkin flow.
+// ────────────────────────────────────────────────────────────────────────────
+function isoDateStr(d: Date): string { return d.toISOString().slice(0, 10); }
+function addDaysStr(iso: string, days: number): string {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return isoDateStr(d);
+}
+
+async function toolMovePlanWorkout(
+  db: SupabaseClient,
+  profileId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const planWorkoutId = typeof args.plan_workout_id === "string" ? args.plan_workout_id : null;
+  const toDow = typeof args.to_day_of_week === "number" ? args.to_day_of_week : NaN;
+  const toSortRaw = args.to_sort_order;
+  const toSort = (toSortRaw === undefined || toSortRaw === null) ? null : Number(toSortRaw);
+  if (!planWorkoutId || !Number.isInteger(toDow) || toDow < 0 || toDow > 6) {
+    return { ok: false, error: "Need plan_workout_id and to_day_of_week (0-6)" };
+  }
+
+  // Load row + verify ownership.
+  const { data: row } = await db.from("plan_workouts")
+    .select("id, plan_week_id, day_of_week, sort_order, workout_date")
+    .eq("id", planWorkoutId)
+    .single();
+  if (!row) return { ok: false, error: "plan_workout not found" };
+
+  const { data: planWeek } = await db.from("plan_weeks")
+    .select("id, week_number, training_plans!inner(profile_id, start_date)")
+    .eq("id", (row as { plan_week_id: string }).plan_week_id)
+    .single();
+  if (!planWeek) return { ok: false, error: "plan_week not found" };
+  // deno-lint-ignore no-explicit-any
+  const tp = (planWeek as any).training_plans;
+  if (!tp || tp.profile_id !== profileId) return { ok: false, error: "Forbidden" };
+
+  const planStartDate: string = tp.start_date;
+  const weekNumber: number = (planWeek as { week_number: number }).week_number;
+  const fromDow: number = (row as { day_of_week: number }).day_of_week;
+
+  // Renumber siblings on source day + dest day.
+  const { data: siblings } = await db.from("plan_workouts")
+    .select("id, day_of_week, sort_order")
+    .eq("plan_week_id", (row as { plan_week_id: string }).plan_week_id);
+  const allRows = (siblings || []).map((r: { id: string; day_of_week: number; sort_order: number }) => ({
+    id: r.id, day_of_week: r.day_of_week, sort_order: r.sort_order ?? 0,
+  }));
+
+  const sourceDay = allRows
+    .filter((r) => r.day_of_week === fromDow && r.id !== planWorkoutId)
+    .sort((a, b) => a.sort_order - b.sort_order);
+  const destDay = allRows
+    .filter((r) => r.day_of_week === toDow && r.id !== planWorkoutId)
+    .sort((a, b) => a.sort_order - b.sort_order);
+  const insertIndex = toSort === null
+    ? destDay.length
+    : Math.max(0, Math.min(destDay.length, toSort));
+
+  // Park moving row first to avoid unique-index collisions.
+  const { error: parkErr } = await db.from("plan_workouts")
+    .update({ sort_order: -1 }).eq("id", planWorkoutId);
+  if (parkErr) return { ok: false, error: `park failed: ${parkErr.message}` };
+
+  // Renumber source day.
+  for (let i = 0; i < sourceDay.length; i++) {
+    if (sourceDay[i].sort_order !== i) {
+      await db.from("plan_workouts").update({ sort_order: -2 - i }).eq("id", sourceDay[i].id);
+    }
+  }
+  for (let i = 0; i < sourceDay.length; i++) {
+    await db.from("plan_workouts").update({ sort_order: i }).eq("id", sourceDay[i].id);
+  }
+
+  // Renumber dest day siblings (skipping moving row).
+  const destOrdered = [...destDay];
+  destOrdered.splice(insertIndex, 0, { id: planWorkoutId, day_of_week: toDow, sort_order: insertIndex });
+  for (let i = 0; i < destOrdered.length; i++) {
+    if (destOrdered[i].id === planWorkoutId) continue;
+    await db.from("plan_workouts").update({ sort_order: -100 - i }).eq("id", destOrdered[i].id);
+  }
+  for (let i = 0; i < destOrdered.length; i++) {
+    if (destOrdered[i].id === planWorkoutId) continue;
+    await db.from("plan_workouts").update({ sort_order: i }).eq("id", destOrdered[i].id);
+  }
+
+  // Final placement of moving row.
+  const finalIndex = destOrdered.findIndex((r) => r.id === planWorkoutId);
+  const newDate = addDaysStr(planStartDate, (weekNumber - 1) * 7 + toDow);
+  const { error: finalErr } = await db.from("plan_workouts").update({
+    sort_order: finalIndex,
+    day_of_week: toDow,
+    workout_date: newDate,
+  }).eq("id", planWorkoutId);
+  if (finalErr) return { ok: false, error: `final move failed: ${finalErr.message}` };
+
+  return {
+    ok: true,
+    data: { plan_workout_id: planWorkoutId, from_day_of_week: fromDow, to_day_of_week: toDow, to_sort_order: finalIndex },
+  };
 }
 
 async function toolLogWorkout(
@@ -979,6 +1098,8 @@ async function runTool(
         return await toolPredictRaceTime(db, profileId, call.arguments || {});
       case "start_return_to_training":
         return await toolStartReturnToTraining(db, profileId, call.arguments || {});
+      case "move_plan_workout":
+        return await toolMovePlanWorkout(db, profileId, call.arguments || {});
       default:
         return { ok: false, error: "Unhandled tool" };
     }

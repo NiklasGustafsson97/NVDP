@@ -648,8 +648,11 @@ Z1, Z2, Z3, Z4, Z5, mixed
 }
 
 ## RULES FOR OUTPUT
-- Every week must have exactly 7 workouts (day_of_week 0=Monday through 6=Sunday).
-- Rest days: activity_type="Vila", is_rest=true, target_duration_minutes=0.
+- Every week must include all 7 weekdays (day_of_week 0=Monday through 6=Sunday). Each day should have AT LEAST one workout entry.
+- A day MAY contain a SECOND workout entry (max 2 per day) when it makes physiological sense — for example a short morning easy run plus afternoon strength, or a swim plus a gym session. Use this sparingly: only when the user explicitly requests it (preferences, "doubles", "two-a-days", "gym 2x/week alongside running") or when concurrent strength rule (#11) calls for it.
+- Total weekly non-rest workouts MUST stay between 3 and 12 across all 7 days combined.
+- For days with two workouts, list them as TWO separate entries with the same day_of_week. Order them so the first entry is the primary endurance session and the second is the supplementary one (gym, mobility, easy spin, etc.).
+- Rest days: activity_type="Vila", is_rest=true, target_duration_minutes=0. A rest day MUST contain exactly one entry (no double rests).
 - All text in Swedish.
 - target_duration_minutes = TOTAL session time including warm-up, work intervals, recovery jogs, and cool-down. For example an interval session with 15 min warm-up, 4×5 min intervals, 3 min recovery ×3, and 10 min cool-down = 54 min, not 15.
 - target_hours = sum of durations / 60. target_sessions = count of non-rest days.
@@ -962,20 +965,31 @@ function validateEditStructural(
   }
 
   for (const w of proposed.weeks) {
-    if (!Array.isArray(w.workouts) || w.workouts.length !== 7) {
-      issues.push({ weekNumber: w.week_number, reason: `week ${w.week_number} must have exactly 7 workouts (has ${w.workouts?.length ?? 0})` });
+    if (!Array.isArray(w.workouts) || w.workouts.length < 7 || w.workouts.length > 14) {
+      issues.push({ weekNumber: w.week_number, reason: `week ${w.week_number} must have between 7 and 14 workouts (has ${w.workouts?.length ?? 0})` });
       continue;
     }
     const days = new Set<number>();
+    const perDayCount: Record<number, number> = {};
     for (const wo of w.workouts) {
       if (typeof wo.day_of_week !== "number" || wo.day_of_week < 0 || wo.day_of_week > 6) {
         issues.push({ weekNumber: w.week_number, reason: `invalid day_of_week=${wo.day_of_week} in week ${w.week_number}` });
       } else {
         days.add(wo.day_of_week);
+        perDayCount[wo.day_of_week] = (perDayCount[wo.day_of_week] ?? 0) + 1;
       }
     }
     if (days.size !== 7) {
       issues.push({ weekNumber: w.week_number, reason: `week ${w.week_number} is missing one or more of day_of_week 0..6 (got ${[...days].sort().join(",")})` });
+    }
+    for (const [dayStr, count] of Object.entries(perDayCount)) {
+      if (count > 2) {
+        issues.push({ weekNumber: w.week_number, reason: `week ${w.week_number} has ${count} workouts on day_of_week=${dayStr}; max 2 allowed` });
+      }
+    }
+    const nonRest = w.workouts.filter((x) => !x.is_rest).length;
+    if (nonRest < 3 || nonRest > 12) {
+      issues.push({ weekNumber: w.week_number, reason: `week ${w.week_number} has ${nonRest} non-rest workouts; must be between 3 and 12` });
     }
   }
 
@@ -987,14 +1001,19 @@ function validateEditStructural(
     for (const dayNum of mentioned) {
       let anyChange = false;
       for (let wi = 0; wi < proposed.weeks.length && wi < original.weeks.length; wi++) {
-        const oldWo = original.weeks[wi].workouts.find((x) => x.day_of_week === dayNum);
-        const newWo = proposed.weeks[wi].workouts.find((x) => x.day_of_week === dayNum);
-        if (!oldWo || !newWo) continue;
-        if (oldWo.label !== newWo.label || oldWo.description !== newWo.description ||
-            oldWo.activity_type !== newWo.activity_type || oldWo.is_rest !== newWo.is_rest) {
-          anyChange = true;
-          break;
+        const oldList = original.weeks[wi].workouts.filter((x) => x.day_of_week === dayNum);
+        const newList = proposed.weeks[wi].workouts.filter((x) => x.day_of_week === dayNum);
+        if (oldList.length !== newList.length) { anyChange = true; break; }
+        for (let i = 0; i < oldList.length; i++) {
+          const oldWo = oldList[i];
+          const newWo = newList[i];
+          if (oldWo.label !== newWo.label || oldWo.description !== newWo.description ||
+              oldWo.activity_type !== newWo.activity_type || oldWo.is_rest !== newWo.is_rest) {
+            anyChange = true;
+            break;
+          }
         }
+        if (anyChange) break;
       }
       if (!anyChange) {
         issues.push({
@@ -1408,9 +1427,12 @@ Return ONLY a JSON object with these fields: activity_type, label, description, 
 
         const weekStartDate = new Date(applyStartDate);
         weekStartDate.setDate(weekStartDate.getDate() + (week.week_number - 1) * 7);
-        const workoutRows = week.workouts.map((w: LLMPlan["weeks"][0]["workouts"][0], idx: number) => {
+        const sortByDayApply: Record<number, number> = {};
+        const workoutRows = week.workouts.map((w: LLMPlan["weeks"][0]["workouts"][0]) => {
           const wDate = new Date(weekStartDate);
           wDate.setDate(wDate.getDate() + w.day_of_week);
+          const slot = sortByDayApply[w.day_of_week] ?? 0;
+          sortByDayApply[w.day_of_week] = slot + 1;
           return {
             plan_week_id: weekData.id,
             workout_date: wDate.toISOString().split("T")[0],
@@ -1422,7 +1444,7 @@ Return ONLY a JSON object with these fields: activity_type, label, description, 
             target_distance_km: w.target_distance_km || null,
             intensity_zone: w.intensity_zone || null,
             is_rest: w.is_rest,
-            sort_order: idx,
+            sort_order: slot,
           };
         });
         await db.from("plan_workouts").insert(workoutRows);
@@ -1524,9 +1546,12 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
         const weekStartDate = new Date(editStartDate);
         weekStartDate.setDate(weekStartDate.getDate() + (week.week_number - 1) * 7);
 
-        const workoutRows = week.workouts.map((w: LLMPlan["weeks"][0]["workouts"][0], idx: number) => {
+        const sortByDayEdit: Record<number, number> = {};
+        const workoutRows = week.workouts.map((w: LLMPlan["weeks"][0]["workouts"][0]) => {
           const wDate = new Date(weekStartDate);
           wDate.setDate(wDate.getDate() + w.day_of_week);
+          const slot = sortByDayEdit[w.day_of_week] ?? 0;
+          sortByDayEdit[w.day_of_week] = slot + 1;
           return {
             plan_week_id: weekData.id,
             workout_date: wDate.toISOString().split("T")[0],
@@ -1538,7 +1563,7 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
             target_distance_km: w.target_distance_km || null,
             intensity_zone: w.intensity_zone || null,
             is_rest: w.is_rest,
-            sort_order: idx,
+            sort_order: slot,
           };
         });
 
@@ -1661,9 +1686,12 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
       const weekStartDate = new Date(startDate);
       weekStartDate.setDate(weekStartDate.getDate() + (week.week_number - 1) * 7);
 
-      const workoutRows = week.workouts.map((w, idx) => {
+      const sortByDay: Record<number, number> = {};
+      const workoutRows = week.workouts.map((w) => {
         const wDate = new Date(weekStartDate);
         wDate.setDate(wDate.getDate() + w.day_of_week);
+        const slot = sortByDay[w.day_of_week] ?? 0;
+        sortByDay[w.day_of_week] = slot + 1;
         return {
           plan_week_id: weekData.id,
           workout_date: wDate.toISOString().split("T")[0],
@@ -1675,7 +1703,7 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
           target_distance_km: w.target_distance_km || null,
           intensity_zone: w.intensity_zone || null,
           is_rest: w.is_rest,
-          sort_order: idx,
+          sort_order: slot,
         };
       });
 

@@ -657,10 +657,34 @@ export async function buildObjectiveSummary(
   const easyAvgHr = easyHRs.length > 0 ? Math.round(easyHRs.reduce((a, b) => a + b, 0) / easyHRs.length) : null;
   const priorEasyAvgHr = priorEasyHRs.length > 0 ? Math.round(priorEasyHRs.reduce((a, b) => a + b, 0) / priorEasyHRs.length) : null;
 
-  const loggedDates = new Set(reviewLogged.map((w) => w.workout_date));
-  const missed = reviewPlanWorkouts
-    .filter((w) => !w.is_rest && !loggedDates.has(w.workout_date))
-    .map((w) => ({ date: w.workout_date, label: w.label }));
+  // Per-session missed detection — handles days with multiple planned
+  // workouts (e.g. AM run + PM gym). For each non-rest plan_workout we
+  // greedily pair it with a logged workout on the same date with matching
+  // activity_type. Unpaired plan_workouts are missed.
+  const remainingByDate = new Map<string, LoggedWorkout[]>();
+  for (const w of reviewLogged) {
+    if (!remainingByDate.has(w.workout_date)) remainingByDate.set(w.workout_date, []);
+    remainingByDate.get(w.workout_date)!.push(w);
+  }
+  const missed: { date: string; label: string | null }[] = [];
+  // Iterate sorted by sort_order so primary sessions match first.
+  const sortedPlan = reviewPlanWorkouts
+    .filter((w) => !w.is_rest)
+    .slice()
+    .sort((a, b) =>
+      a.workout_date === b.workout_date
+        ? (a.sort_order ?? 0) - (b.sort_order ?? 0)
+        : a.workout_date.localeCompare(b.workout_date)
+    );
+  for (const pw of sortedPlan) {
+    const pool = remainingByDate.get(pw.workout_date) || [];
+    const idx = pool.findIndex((w) => (w.activity_type || "") === (pw.activity_type || ""));
+    if (idx >= 0) {
+      pool.splice(idx, 1);
+    } else {
+      missed.push({ date: pw.workout_date, label: pw.label });
+    }
+  }
 
   return {
     week_start: weekStartISO,
@@ -701,12 +725,25 @@ export async function applyChanges(
   nextWeekPlan: PlanWorkout[],
   accepted: ProposedChange[],
 ): Promise<void> {
-  const byDay = new Map(nextWeekPlan.map((w) => [w.day_of_week, w]));
+  // Multi-pass-aware day index: each day_of_week maps to an array sorted by
+  // sort_order. The decision-engine ProposedChange shape only references
+  // day_of_week (not a specific plan_workout_id), so we always operate on the
+  // PRIMARY (sort_order=0) entry. This preserves backward compat for
+  // single-pass days and keeps the AI from accidentally mutating an
+  // afternoon strength session when it intended to move the main run.
+  const byDay = new Map<number, PlanWorkout[]>();
+  for (const w of nextWeekPlan) {
+    if (!byDay.has(w.day_of_week)) byDay.set(w.day_of_week, []);
+    byDay.get(w.day_of_week)!.push(w);
+  }
+  for (const list of byDay.values()) list.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+  const primary = (dow: number): PlanWorkout | undefined => byDay.get(dow)?.[0];
 
   for (const c of accepted) {
     if (c.action === "move_session") {
-      const from = byDay.get(c.from_day as number);
-      const to = byDay.get(c.to_day as number);
+      const from = primary(c.from_day as number);
+      const to = primary(c.to_day as number);
       if (!from || !to) continue;
       const fromBody = pickWorkoutBody(from);
       const toBody = pickWorkoutBody(to);
@@ -716,7 +753,7 @@ export async function applyChanges(
       Object.assign(to, fromBody);
       continue;
     }
-    const target = byDay.get(c.day_of_week);
+    const target = primary(c.day_of_week);
     if (!target || !c.proposed_workout) continue;
     await db.from("plan_workouts").update(c.proposed_workout).eq("id", target.id);
     Object.assign(target, c.proposed_workout);
