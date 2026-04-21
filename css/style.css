@@ -1052,6 +1052,40 @@ select option { background: #1a1a2e; color: var(--text); }
 
 /* ── Trends ── */
 .chart-container { position: relative; height: 300px; margin-bottom: 24px; }
+
+/* Per-chart 12-week window navigation. Injected by mountChartNav() in app.js
+   directly above each .chart-container. Default state shows just the back
+   arrow; the forward arrow appears only after the user has stepped back. */
+.chart-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 0 0 8px 0; gap: 8px;
+  font-size: 0.78rem; color: var(--text-dim);
+}
+.chart-nav-label {
+  flex: 1 1 auto; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.chart-nav-btn {
+  flex: 0 0 auto;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-sm, 6px);
+  padding: 4px 10px;
+  font-size: 0.95rem; line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+  min-width: 32px;
+}
+.chart-nav-btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.08);
+  border-color: var(--text-dim);
+  color: var(--text);
+}
+.chart-nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.chart-nav-spacer { flex: 0 0 auto; min-width: 32px; }
+
 .toggle-row { display: flex; gap: 8px; margin-bottom: 16px; }
 .toggle-btn {
   padding: 6px 14px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;

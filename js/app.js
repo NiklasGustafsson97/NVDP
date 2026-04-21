@@ -3475,13 +3475,111 @@ function renderSeasonActivityBars(workouts, mode) {
   }).join('');
 }
 
+// ─────────────────────────────────────────────────────────────
+//  Chart time-window navigation
+//
+//  Every time-series chart on Progress / Group defaults to the most
+//  recent 12 weeks. Each chart owns its own back/forward state so the
+//  user can browse one chart's history (e.g. "show me last winter's
+//  PMC") without dragging the others along.
+//
+//  Public surface used by chart render fns:
+//    - getChartWindow(key)              → { startDate, endDate, offset }
+//    - filterWorkoutsToWindow(arr,...)  → workouts inside [start, end]
+//    - mountChartNav(key, canvasId, fn) → injects ← label → above chart
+// ─────────────────────────────────────────────────────────────
+
+const CHART_WINDOW_WEEKS = 12;
+const CHART_WINDOW_DAYS = CHART_WINDOW_WEEKS * 7;
+
+// Per-chart state. Key is a slug matching the canvas id suffix
+// (e.g. 'effort' for #chart-effort, 'group-weekly' for #chart-group-weekly).
+// 0 = most recent 12 weeks, 1 = preceding 12 weeks, etc.
+const _chartWindowOffset = {};
+
+function getChartWindow(chartKey) {
+  const offset = _chartWindowOffset[chartKey] || 0;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const endDate = addDays(today, -offset * CHART_WINDOW_DAYS);
+  // Inclusive 12-week window: [end - 12*7 + 1, end]
+  const startDate = addDays(endDate, -(CHART_WINDOW_DAYS - 1));
+  return { startDate, endDate, offset };
+}
+
+function _formatChartWindowLabel(start, end) {
+  const startWk = weekNumber(start);
+  const endWk = weekNumber(end);
+  const startYr = start.getFullYear();
+  const endYr = end.getFullYear();
+  if (startYr === endYr) return `V${startWk}–V${endWk} ${endYr}`;
+  return `V${startWk} ${startYr}–V${endWk} ${endYr}`;
+}
+
+function filterWorkoutsToWindow(workouts, startDate, endDate) {
+  const startIso = isoDate(startDate);
+  const endIso = isoDate(endDate);
+  return workouts.filter((w) =>
+    w.workout_date && w.workout_date >= startIso && w.workout_date <= endIso
+  );
+}
+
+// Inject the back/forward navigation row right above a chart's canvas.
+// Idempotent — if a nav already exists for this chart it gets re-rendered
+// in place (so labels and disabled-state stay in sync after a toggle).
+//
+//   chartKey:    state slug (must match the suffix of #chart-<slug>).
+//   canvasId:    DOM id of the <canvas> element.
+//   rerenderFn:  invoked after offset changes so the chart can re-draw.
+function mountChartNav(chartKey, canvasId, rerenderFn) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const wrap = canvas.closest('.chart-container');
+  if (!wrap || !wrap.parentElement) return;
+
+  const navId = `${canvasId}-nav`;
+  let nav = document.getElementById(navId);
+  if (!nav) {
+    nav = document.createElement('div');
+    nav.className = 'chart-nav';
+    nav.id = navId;
+    wrap.parentElement.insertBefore(nav, wrap);
+  }
+
+  const { startDate, endDate, offset } = getChartWindow(chartKey);
+  const label = _formatChartWindowLabel(startDate, endDate);
+  const offsetSuffix = offset === 0 ? '' : ` · ${offset * CHART_WINDOW_WEEKS}v bakåt`;
+  // Forward arrow only appears once the user has stepped back at least once,
+  // matching the "default state shows just one back arrow" requirement.
+  const forwardBtn = offset > 0
+    ? '<button class="chart-nav-btn" data-dir="forward" aria-label="Gå framåt 12 veckor" title="Gå framåt 12 veckor">→</button>'
+    : '<span class="chart-nav-spacer" aria-hidden="true"></span>';
+  nav.innerHTML =
+    '<button class="chart-nav-btn" data-dir="back" aria-label="Visa föregående 12 veckor" title="Visa föregående 12 veckor">←</button>' +
+    `<span class="chart-nav-label">${escapeHTML(label)}${escapeHTML(offsetSuffix)}</span>` +
+    forwardBtn;
+
+  nav.querySelectorAll('.chart-nav-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const dir = btn.dataset.dir;
+      const cur = _chartWindowOffset[chartKey] || 0;
+      _chartWindowOffset[chartKey] = dir === 'back' ? cur + 1 : Math.max(0, cur - 1);
+      rerenderFn();
+    });
+  });
+}
+
 function renderEffortChart(workouts) {
   const effortCanvas = document.getElementById('chart-effort');
   if (!effortCanvas) return;
   if (window._chartEffort) window._chartEffort.destroy();
 
+  const { startDate, endDate } = getChartWindow('effort');
+  const windowed = filterWorkoutsToWindow(workouts, startDate, endDate);
+  mountChartNav('effort', 'chart-effort', () => renderEffortChart(workouts));
+
   const weekMap = {};
-  workouts.forEach(w => {
+  windowed.forEach(w => {
     const d = new Date(w.workout_date);
     const mon = mondayOfWeek(d);
     const key = isoDate(mon);
@@ -3569,9 +3667,13 @@ function renderEffortChart(workouts) {
 //  Impulse = per-day summed calcWorkoutEffort (raw), then EWMA per TrainingPeaks.
 // ─────────────────────────────────────────────────────────────
 
-function _dailyLoadSeries(workouts, days = 120) {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const start = addDays(today, -(days - 1));
+// Build a contiguous daily-effort series ending at `anchorDate` (or today
+// if omitted). Length = `days` rows. Used by PMC so the same EWMA pipeline
+// can be re-anchored when the user navigates back through 12-week windows.
+function _dailyLoadSeries(workouts, days = 120, anchorDate = null) {
+  const anchor = anchorDate ? new Date(anchorDate) : new Date();
+  anchor.setHours(0, 0, 0, 0);
+  const start = addDays(anchor, -(days - 1));
   const series = [];
   const byDate = new Map();
   for (const w of workouts) {
@@ -3603,8 +3705,18 @@ function renderPmcChart(workouts) {
   if (!canvas || typeof Chart === 'undefined') return;
   if (window._chartPmc) window._chartPmc.destroy();
 
-  const series = _dailyLoadSeries(workouts, 120);
-  if (series.every((s) => s.load === 0)) {
+  // Compute over a longer pre-window (12w + 6w ramp-up) so CTL has time
+  // to converge before the displayed window starts; show only the last
+  // 12 weeks. When the user navigates back, the anchor moves with the
+  // window so historical CTL/ATL stay accurate.
+  const { endDate } = getChartWindow('pmc');
+  const RAMPUP_DAYS = 6 * 7;
+  const COMPUTE_DAYS = CHART_WINDOW_DAYS + RAMPUP_DAYS;
+  const fullSeries = _dailyLoadSeries(workouts, COMPUTE_DAYS, endDate);
+  mountChartNav('pmc', 'chart-pmc', () => renderPmcChart(workouts));
+
+  const displaySeries = fullSeries.slice(-CHART_WINDOW_DAYS);
+  if (displaySeries.every((s) => s.load === 0)) {
     const statusEl = document.getElementById('pmc-status');
     if (statusEl) statusEl.textContent = 'För lite data — logga några pass så fylls grafen.';
     const sub = document.getElementById('pmc-subtitle');
@@ -3613,11 +3725,13 @@ function renderPmcChart(workouts) {
   }
 
   // Scale raw effort to Effort display to align with the effort chart.
-  const loads = series.map((s) => effortRawToDisplay(s.load));
-  const ctl = _ewma(loads, 42);
-  const atl = _ewma(loads, 7);
+  const fullLoads = fullSeries.map((s) => effortRawToDisplay(s.load));
+  const fullCtl = _ewma(fullLoads, 42);
+  const fullAtl = _ewma(fullLoads, 7);
+  const ctl = fullCtl.slice(-CHART_WINDOW_DAYS);
+  const atl = fullAtl.slice(-CHART_WINDOW_DAYS);
   const tsb = ctl.map((c, i) => c - atl[i]);
-  const labels = series.map((s) => {
+  const labels = displaySeries.map((s) => {
     const d = new Date(s.date + 'T00:00:00');
     return `${d.getDate()}/${d.getMonth() + 1}`;
   });
@@ -3844,7 +3958,11 @@ function renderEasyHrChart(workouts) {
   if (!canvas || !statusEl || !subEl || typeof Chart === 'undefined') return;
   if (window._chartEasyHr) window._chartEasyHr.destroy();
 
-  const runs = workouts.filter((w) =>
+  const { startDate, endDate } = getChartWindow('easy-hr');
+  const windowed = filterWorkoutsToWindow(workouts, startDate, endDate);
+  mountChartNav('easy-hr', 'chart-easy-hr', () => renderEasyHrChart(workouts));
+
+  const runs = windowed.filter((w) =>
     w.activity_type === 'Löpning' &&
     w.avg_hr && w.avg_hr >= 80 &&
     (w.intensity === 'Z1' || w.intensity === 'Z2') &&
@@ -4115,8 +4233,13 @@ function renderGroupChart(allWorkouts, members) {
   const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
   const isGrpNorm = grpEffortMode === 'normalized';
   const gUnit = isGrpNorm ? ' Effort' : 'h';
+
+  const { startDate, endDate } = getChartWindow('group-weekly');
+  const windowed = filterWorkoutsToWindow(allWorkouts, startDate, endDate);
+  mountChartNav('group-weekly', 'chart-group-weekly', () => renderGroupChart(allWorkouts, members));
+
   const weekData = {};
-  allWorkouts.forEach(w => {
+  windowed.forEach(w => {
     const mon = mondayOfWeek(new Date(w.workout_date));
     const key = isoDate(mon);
     if (!weekData[key]) weekData[key] = {};
@@ -4171,9 +4294,13 @@ function renderGroupEffortChart(allWorkouts, members) {
   if (!canvas) return;
   if (window._chartGroupEffort) window._chartGroupEffort.destroy();
 
+  const { startDate, endDate } = getChartWindow('group-effort');
+  const windowed = filterWorkoutsToWindow(allWorkouts, startDate, endDate);
+  mountChartNav('group-effort', 'chart-group-effort', () => renderGroupEffortChart(allWorkouts, members));
+
   const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
   const weekMap = {};
-  allWorkouts.forEach(w => {
+  windowed.forEach(w => {
     const mon = mondayOfWeek(new Date(w.workout_date));
     const key = isoDate(mon);
     if (!weekMap[key]) weekMap[key] = {};
