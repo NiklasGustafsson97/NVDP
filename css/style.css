@@ -2268,8 +2268,12 @@ input.code-input {
 .season-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; font-size: 0.7rem; font-weight: 600; color: #fff; min-width: 30px; }
 
 /* ── Effort ── */
-.effort-legend { display: flex; gap: 16px; justify-content: center; margin-top: 8px; flex-wrap: wrap; }
-.effort-legend-item { display: flex; align-items: center; gap: 4px; font-size: 0.7rem; color: var(--text-dim); }
+/* Sprint 3: legend now lists 4 band-color swatches + a footnote, so we
+   stack them as left-aligned rows instead of a centered single line. */
+.effort-legend { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.effort-legend-item { display: flex; align-items: flex-start; gap: 6px; font-size: 0.72rem; color: var(--text-dim); line-height: 1.35; }
+.effort-legend-item .effort-legend-dot { margin-top: 4px; flex: 0 0 auto; }
+.effort-legend-meta { color: var(--text-muted, var(--text-dim)); font-style: italic; padding-top: 4px; border-top: 1px dashed var(--border); margin-top: 2px; }
 
 .pmc-legend {
   display: flex; flex-direction: column; gap: 4px;

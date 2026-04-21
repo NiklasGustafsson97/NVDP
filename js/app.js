@@ -3636,6 +3636,50 @@ function renderSeasonActivityBars(workouts, mode) {
   }).join('');
 }
 
+// Sprint 3: Effort target band.
+// We compute a rolling 3-week mean of prior weeks' Effort, build a
+// ±EFFORT_BAND_PCT band around it, and color-code the bars based on
+// whether that week landed under / inside / over the band. Same idea as
+// Strava's Relative Effort coach: "is this week consistent with what
+// you've been doing, or is it a silent jump that'll bite you later?"
+const EFFORT_BAND_LOOKBACK = 3;     // weeks of history used to build the band
+const EFFORT_BAND_PCT = 0.15;       // ±15 % around the rolling mean
+const EFFORT_BAND_FILL = 'rgba(56,178,124,0.10)';
+const EFFORT_BAR_COLORS = {
+  on:      { fill: 'rgba(56,178,124,0.55)', border: 'rgba(56,178,124,0.95)' },
+  under:   { fill: 'rgba(243,156,18,0.55)', border: 'rgba(243,156,18,0.95)' },
+  over:    { fill: 'rgba(231,76,60,0.55)',  border: 'rgba(231,76,60,0.95)' },
+  neutral: { fill: 'rgba(214,99,158,0.50)', border: 'rgba(214,99,158,0.85)' },
+};
+
+function _effortBandClassify(effortData) {
+  // Returns parallel arrays:
+  //   targetUpper / targetLower — null where we don't yet have enough history
+  //   classes — 'under' | 'on' | 'over' | 'neutral' (the latter for ungraded weeks)
+  const targetUpper = new Array(effortData.length).fill(null);
+  const targetLower = new Array(effortData.length).fill(null);
+  const classes = new Array(effortData.length).fill('neutral');
+  for (let i = 0; i < effortData.length; i++) {
+    if (i < EFFORT_BAND_LOOKBACK) continue;
+    let sum = 0;
+    let cnt = 0;
+    for (let j = i - EFFORT_BAND_LOOKBACK; j < i; j++) {
+      sum += effortData[j];
+      cnt++;
+    }
+    if (cnt === 0) continue;
+    const mean = sum / cnt;
+    if (mean <= 0.01) continue; // no meaningful baseline yet
+    targetLower[i] = +(mean * (1 - EFFORT_BAND_PCT)).toFixed(2);
+    targetUpper[i] = +(mean * (1 + EFFORT_BAND_PCT)).toFixed(2);
+    const v = effortData[i];
+    if (v < targetLower[i]) classes[i] = 'under';
+    else if (v > targetUpper[i]) classes[i] = 'over';
+    else classes[i] = 'on';
+  }
+  return { targetUpper, targetLower, classes };
+}
+
 function renderEffortChart(workouts) {
   const effortCanvas = document.getElementById('chart-effort');
   if (!effortCanvas) return;
@@ -3654,11 +3698,21 @@ function renderEffortChart(workouts) {
   const weeks = Object.keys(weekMap).sort();
   const effortData = weeks.map(w => +effortRawToDisplay(weekMap[w].effort).toFixed(2));
   const hoursData = weeks.map(w => +weekMap[w].hours.toFixed(1));
-  const labels = weeks.map(w => {
+  const isDeload = weeks.map(w => isDeloadWeek(parseISOWeekKeyLocal(w)));
+  const labels = weeks.map((w, i) => {
     const mon = parseISOWeekKeyLocal(w);
     const wn = weekNumber(mon);
-    return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
+    return isDeload[i] ? `V${wn} (D)` : `V${wn}`;
   });
+
+  const { targetUpper, targetLower, classes } = _effortBandClassify(effortData);
+
+  // Bars: color per classification. Deload weeks that classify as 'under'
+  // are kept as 'under' (amber) — that's actually informative ("yes you
+  // dropped, and that was planned"), but we exclude deloads from the
+  // X-of-Y subtitle counter so the score isn't penalised for planned dips.
+  const barFills = classes.map((c) => EFFORT_BAR_COLORS[c].fill);
+  const barBorders = classes.map((c) => EFFORT_BAR_COLORS[c].border);
 
   const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
 
@@ -3667,14 +3721,46 @@ function renderEffortChart(workouts) {
     data: {
       labels,
       datasets: [
+        // Bars come first so legend ordering stays familiar; draw order is
+        // controlled with `order:` so the band still renders behind them.
         {
           label: 'Belastning (Effort)',
           data: effortData,
-          backgroundColor: 'rgba(214,99,158,0.5)',
-          borderColor: 'rgba(214,99,158,0.8)',
+          backgroundColor: barFills,
+          borderColor: barBorders,
           borderWidth: 1,
           borderRadius: 3,
-          order: 1,
+          order: 2,
+        },
+        // Upper edge of the rolling target band. We fill DOWN from this
+        // line to the lower-edge dataset (`fill: '+1'` = the next dataset
+        // in the data array). spanGaps:false so missing band ends in the
+        // first 3 weeks visibly leave the band un-drawn instead of
+        // interpolating across them.
+        {
+          label: `Mål-band (rullande ${EFFORT_BAND_LOOKBACK}v ±${Math.round(EFFORT_BAND_PCT * 100)} %)`,
+          data: targetUpper,
+          type: 'line',
+          borderColor: 'rgba(56,178,124,0.45)',
+          backgroundColor: EFFORT_BAND_FILL,
+          borderWidth: 1,
+          borderDash: [4, 3],
+          pointRadius: 0,
+          fill: '+1',
+          spanGaps: false,
+          order: 4,
+        },
+        {
+          label: '_band-lower',
+          data: targetLower,
+          type: 'line',
+          borderColor: 'rgba(56,178,124,0.45)',
+          borderWidth: 1,
+          borderDash: [4, 3],
+          pointRadius: 0,
+          fill: false,
+          spanGaps: false,
+          order: 4,
         },
         {
           label: 'Timmar (rå)',
@@ -3685,7 +3771,7 @@ function renderEffortChart(workouts) {
           borderWidth: 2,
           pointRadius: 3,
           fill: false,
-          order: 0,
+          order: 1,
           yAxisID: 'y1',
         }
       ]
@@ -3693,18 +3779,45 @@ function renderEffortChart(workouts) {
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, boxWidth: 12 } },
+        legend: {
+          position: 'bottom',
+          labels: {
+            color: textColor, usePointStyle: true, boxWidth: 12,
+            // Hide the lower-band dataset from the legend — it's just a
+            // technical companion to the upper band's fill target.
+            filter: (item) => item.text !== '_band-lower',
+          },
+        },
         tooltip: {
           callbacks: {
-            label: c => c.dataset.label === 'Belastning (Effort)'
-              ? `Belastning: Effort ${c.parsed.y.toFixed(1)}`
-              : `Timmar: ${c.parsed.y.toFixed(1)} h`,
+            label: (c) => {
+              if (c.dataset.label === 'Belastning (Effort)') {
+                return `Belastning: Effort ${c.parsed.y.toFixed(1)}`;
+              }
+              if (c.dataset.label === 'Timmar (rå)') {
+                return `Timmar: ${c.parsed.y.toFixed(1)} h`;
+              }
+              if (c.dataset.label === '_band-lower') return null;
+              // Upper-band line tooltip
+              const lo = targetLower[c.dataIndex];
+              const hi = c.parsed.y;
+              if (lo === null || hi === null) return null;
+              return `Mål-band: Effort ${lo.toFixed(1)}–${hi.toFixed(1)}`;
+            },
             afterBody: (items) => {
               if (!items.length) return [];
               const i = items[0].dataIndex;
-              const e = effortData[i];
-              const h = hoursData[i];
-              return [`Sammanhang: Effort ${e.toFixed(1)}  ·  ${h.toFixed(1)} h faktisk tid`];
+              const cls = classes[i];
+              if (cls === 'neutral') return ['Inget mål-band än (behöver 3 v historik).'];
+              if (isDeload[i]) {
+                if (cls === 'under') return ['Planerad deload — under bandet by design.'];
+              }
+              const labelMap = {
+                on: 'Inom mål-bandet',
+                under: 'Under bandet — för låg belastning',
+                over: 'Över bandet — risk för översatsning',
+              };
+              return [labelMap[cls]];
             },
           }
         }
@@ -3717,10 +3830,48 @@ function renderEffortChart(workouts) {
     }
   });
 
+  // Subtitle: count how many of the last N graded (non-deload) weeks landed
+  // inside the band. Deload weeks are skipped because they're planned dips,
+  // not signal. We look at the last 8 graded weeks for the rolling stat —
+  // long enough to be meaningful, short enough that a fix this week shows
+  // up in the number.
+  const subEl = document.getElementById('effort-subtitle');
+  if (subEl) {
+    const gradedRecent = [];
+    for (let i = effortData.length - 1; i >= 0 && gradedRecent.length < 8; i--) {
+      if (classes[i] === 'neutral') continue;
+      if (isDeload[i]) continue;
+      gradedRecent.push(classes[i]);
+    }
+    if (gradedRecent.length === 0) {
+      subEl.textContent = `Bygg ≥ ${EFFORT_BAND_LOOKBACK + 1} v historik så ritar vi mål-bandet.`;
+    } else {
+      const onCnt = gradedRecent.filter((c) => c === 'on').length;
+      const overCnt = gradedRecent.filter((c) => c === 'over').length;
+      const underCnt = gradedRecent.filter((c) => c === 'under').length;
+      const total = gradedRecent.length;
+      const lastCls = classes[classes.length - 1];
+      const lastTag = isDeload[isDeload.length - 1]
+        ? ' (planerad deload)'
+        : lastCls === 'over'
+          ? ' (för hög)'
+          : lastCls === 'under'
+            ? ' (för låg)'
+            : lastCls === 'on'
+              ? ' (i bandet)'
+              : '';
+      subEl.textContent = `${onCnt} av ${total} senaste i bandet · ${overCnt} över / ${underCnt} under · denna v${lastTag}`;
+    }
+  }
+
   const legendEl = document.getElementById('effort-legend');
   if (legendEl) {
     legendEl.innerHTML = `
-      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> Effort = normaliserad belastning: rå score delat med ${EFFORT_DISPLAY_DIVISOR} (≈ 1 h @ MET 10), samma skala som graferna ovan. Timmar-linjen är faktisk tid.</div>
+      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.on.border}"></span> Inom bandet — konsekvent med dina senaste ${EFFORT_BAND_LOOKBACK} v.</div>
+      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.over.border}"></span> Över bandet (>+${Math.round(EFFORT_BAND_PCT * 100)} %) — kolla återhämtning innan nästa hårda pass.</div>
+      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.under.border}"></span> Under bandet (&lt;−${Math.round(EFFORT_BAND_PCT * 100)} %) — låg vecka. OK om planerad deload.</div>
+      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.neutral.border}"></span> Inte graderad än — färre än ${EFFORT_BAND_LOOKBACK} v historik.</div>
+      <div class="effort-legend-item effort-legend-meta">Effort = normaliserad belastning (rå score ÷ ${EFFORT_DISPLAY_DIVISOR} ≈ 1 h @ MET 10). Bandet = ±${Math.round(EFFORT_BAND_PCT * 100)} % runt rullande ${EFFORT_BAND_LOOKBACK}-veckorssnitt av föregående veckor.</div>
     `;
   }
 }
