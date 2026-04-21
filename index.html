@@ -612,6 +612,7 @@
             <li><strong>&lt; −30</strong> — för hög belastning, dra ner.</li>
           </ul>
           <p class="pmc-info-meta">CTL = långsiktig fitness (42 dagar). ATL = akut trötthet (7 dagar). TSB = CTL − ATL.</p>
+          <p class="pmc-info-meta"><strong>OBS — TSB rör sig "bakvänt":</strong> när du tränar hårt går TSB <em>ner</em> (du staplar trötthet snabbare än du bygger fitness). När du vilar eller är sjuk går TSB <em>upp</em> (akut trötthet faller snabbt, fitness faller långsamt). Du peakar genom att tapera, inte genom att köra hårt sista veckan. Samma räknesätt som Garmin Training Status och TrainingPeaks.</p>
         </div>
 
         <div class="pmc-hero" id="pmc-hero">
@@ -625,16 +626,17 @@
 
         <div class="pmc-fitness-line" id="pmc-subtitle"></div>
 
+        <div class="chart-container chart-container--skeleton" id="chart-pmc-wrap">
+          <div class="chart-skeleton" id="chart-skeleton-pmc"></div>
+          <canvas id="chart-pmc"></canvas>
+        </div>
+
         <button type="button" class="pmc-details-toggle" id="pmc-details-toggle" onclick="togglePmcDetails()" aria-controls="pmc-details" aria-expanded="false">
-          <span>Visa graf och detaljer</span>
+          <span>Visa CTL, ATL och förklaring</span>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
         </button>
 
         <div class="pmc-details" id="pmc-details" hidden>
-          <div class="chart-container chart-container--skeleton" id="chart-pmc-wrap">
-            <div class="chart-skeleton" id="chart-skeleton-pmc"></div>
-            <canvas id="chart-pmc"></canvas>
-          </div>
           <div class="pmc-legend" id="pmc-legend"></div>
         </div>
 
