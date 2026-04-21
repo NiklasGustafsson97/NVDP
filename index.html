@@ -737,12 +737,16 @@
       </div><!-- /progress-subtab-allman -->
 
       <div class="progress-subtab" id="progress-subtab-mal" role="tabpanel" aria-labelledby="progress-subtab-mal-btn" hidden>
-        <div class="card progress-goals-empty">
-          <div class="goals-empty-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="36" height="36"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
-          </div>
-          <h3 class="goals-empty-title">Mål-tracking kommer snart</h3>
-          <p class="goals-empty-body">Här ska du kunna sätta egna mål (km/månad, antal pass/år, tidsmål på distans) och se hur ditt nuvarande schema spårar mot ditt racemål med EF, VO2max och volym som indikatorer. Sprint 4 i Raggelito-reviewen.</p>
+        <div class="goals-toolbar">
+          <button type="button" class="btn btn-primary btn-sm" id="goal-add-btn" onclick="openAddGoalSheet()">+ Lägg till mål</button>
+        </div>
+        <div id="goals-race-section" hidden>
+          <div class="goals-section-label">Racemål</div>
+          <div id="goals-race-cards"></div>
+        </div>
+        <div id="goals-custom-section">
+          <div class="goals-section-label" id="goals-custom-label" hidden>Dina mål</div>
+          <div id="goals-custom-cards"></div>
         </div>
       </div>
 
@@ -1649,6 +1653,98 @@
       <button class="btn-close" onclick="closeMemberProfile()">&times;</button>
     </div>
     <div id="mp-body"></div>
+  </div>
+</div>
+
+<!-- ═══ ADD GOAL MODAL (Sprint 4) ═══ -->
+<div id="goal-add-modal" class="modal-overlay modal-overlay-scroll hidden" onclick="if(event.target===this)closeAddGoalSheet()" role="dialog" aria-modal="true" aria-labelledby="goal-add-title">
+  <div class="modal-box" style="max-width:440px;">
+    <div class="modal-header">
+      <h3 id="goal-add-title">Lägg till mål</h3>
+      <button class="btn-close" onclick="closeAddGoalSheet()" aria-label="Stäng">&times;</button>
+    </div>
+    <form id="goal-add-form" onsubmit="event.preventDefault();submitAddGoal();">
+      <div class="form-group">
+        <label for="goal-type-select">Typ av mål</label>
+        <select id="goal-type-select" onchange="onGoalTypeChange()">
+          <option value="distance_per_period">Distans per period (t.ex. 200 km / månad)</option>
+          <option value="count_per_period">Antal pass per period (t.ex. 4 pass / vecka)</option>
+          <option value="race_time">Tidsmål på distans (t.ex. 10 km på 45 min)</option>
+        </select>
+      </div>
+
+      <div id="goal-fields-period">
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="goal-target-value">Mål</label>
+            <input type="number" id="goal-target-value" step="0.1" min="0" placeholder="200">
+          </div>
+          <div class="form-group flex-1">
+            <label for="goal-target-unit">Enhet</label>
+            <select id="goal-target-unit">
+              <option value="km">km</option>
+              <option value="workouts">pass</option>
+              <option value="minutes">minuter</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="goal-period-select">Per</label>
+          <select id="goal-period-select">
+            <option value="week">vecka</option>
+            <option value="month" selected>månad</option>
+            <option value="year">år</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="goal-fields-race" hidden>
+        <div class="form-group">
+          <label for="goal-race-distance">Distans</label>
+          <select id="goal-race-distance" onchange="onRaceDistancePresetChange()">
+            <option value="5">5 km</option>
+            <option value="10" selected>10 km</option>
+            <option value="21.0975">Halvmaraton</option>
+            <option value="42.195">Maraton</option>
+            <option value="custom">Annan…</option>
+          </select>
+        </div>
+        <div class="form-group" id="goal-race-custom-wrap" hidden>
+          <label for="goal-race-custom-km">Egen distans (km)</label>
+          <input type="number" id="goal-race-custom-km" step="0.01" min="0.1" placeholder="15">
+        </div>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="goal-race-hours">Tim</label>
+            <input type="number" id="goal-race-hours" min="0" step="1" placeholder="0">
+          </div>
+          <div class="form-group flex-1">
+            <label for="goal-race-minutes">Min</label>
+            <input type="number" id="goal-race-minutes" min="0" max="59" step="1" placeholder="45">
+          </div>
+          <div class="form-group flex-1">
+            <label for="goal-race-seconds">Sek</label>
+            <input type="number" id="goal-race-seconds" min="0" max="59" step="1" placeholder="0">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="goal-race-date">Måldatum</label>
+          <input type="date" id="goal-race-date">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="goal-title-input">Rubrik <span class="form-label-hint">(valfritt, genereras annars)</span></label>
+        <input type="text" id="goal-title-input" placeholder="Lämna tomt för auto-titel">
+      </div>
+
+      <div id="goal-add-error" class="goal-add-error" hidden></div>
+
+      <div class="form-actions" style="display:flex;gap:8px;justify-content:flex-end;">
+        <button type="button" class="btn btn-outline btn-sm" onclick="closeAddGoalSheet()">Avbryt</button>
+        <button type="submit" class="btn btn-primary btn-sm" id="goal-add-submit">Spara</button>
+      </div>
+    </form>
   </div>
 </div>
 

@@ -3210,6 +3210,11 @@ async function _loadTrends() {
   // top of Allmän progress.
   renderProgressWeekSummary(myWorkouts);
 
+  // Sprint 4: Goals (Dina mål sub-tab). Runs in parallel with the rest of
+  // the chart rendering so the sub-tab is populated the first time the user
+  // clicks it without needing a re-fetch.
+  loadGoals(myWorkouts).catch((e) => console.warn('Goals load failed:', e));
+
   // Effort per week chart
   renderEffortChart(myWorkouts);
 
@@ -3536,6 +3541,538 @@ function renderProgressWeekSummary(workouts) {
       ${delta(longestNow, longestPrev, 'km')}
     </div>
   </div>`;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Sprint 4: Goals (Dina mål sub-tab).
+//  Four goal types, all stored in public.user_goals:
+//    - distance_per_period   "200 km / månad"
+//    - count_per_period      "4 pass / vecka"
+//    - race_time             "Marathon på 3:30"
+//    - plan_derived_race     auto-created when an AI plan's goal_type='race'
+//  All reads/writes go through RLS-protected queries (migration
+//  20260422_user_goals.sql); no service-role needed.
+// ─────────────────────────────────────────────────────────────
+
+let _userGoals = [];
+
+async function fetchUserGoals(profileId) {
+  if (!profileId) return [];
+  try {
+    const { data, error } = await sb.from('user_goals')
+      .select('*')
+      .eq('profile_id', profileId)
+      .eq('active', true)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  } catch (e) {
+    console.error('Fetch user goals error:', e);
+    return [];
+  }
+}
+
+// Keep a 1:1 plan_derived_race goal in sync with the current active plan.
+// Runs best-effort: failures are logged but don't block goals render.
+async function _ensurePlanDerivedRaceGoal(plan, profileId) {
+  if (!plan || !profileId) return;
+  if (plan.goal_type !== 'race') return;
+  if (!plan.goal_date) return;
+  try {
+    const existing = _userGoals.find(
+      (g) => g.goal_type === 'plan_derived_race' && g.plan_id === plan.id,
+    );
+    const title = plan.goal_text ? plan.goal_text : 'Racemål från plan';
+    if (!existing) {
+      const payload = {
+        profile_id: profileId,
+        plan_id: plan.id,
+        goal_type: 'plan_derived_race',
+        title,
+        target_value: 0,
+        target_unit: 'race',
+        target_date: plan.goal_date,
+        baseline_date: plan.start_date || null,
+      };
+      const { data, error } = await sb.from('user_goals').insert(payload).select().single();
+      if (!error && data) _userGoals.unshift(data);
+    } else if (
+      existing.target_date !== plan.goal_date ||
+      existing.title !== title
+    ) {
+      const { data, error } = await sb.from('user_goals')
+        .update({ target_date: plan.goal_date, title })
+        .eq('id', existing.id)
+        .select()
+        .single();
+      if (!error && data) {
+        Object.assign(existing, data);
+      }
+    }
+  } catch (e) {
+    console.warn('Plan-derived race goal sync failed (non-fatal):', e);
+  }
+}
+
+async function loadGoals(workouts) {
+  if (!currentProfile) return;
+  _userGoals = await fetchUserGoals(currentProfile.id);
+  if (_activePlan) {
+    await _ensurePlanDerivedRaceGoal(_activePlan, currentProfile.id);
+  }
+  renderGoals(workouts || window._lastSeasonWorkouts || []);
+}
+
+function renderGoals(workouts) {
+  const raceSection = document.getElementById('goals-race-section');
+  const raceCards = document.getElementById('goals-race-cards');
+  const customSection = document.getElementById('goals-custom-section');
+  const customCards = document.getElementById('goals-custom-cards');
+  const customLabel = document.getElementById('goals-custom-label');
+  if (!raceSection || !raceCards || !customSection || !customCards) return;
+
+  const races = _userGoals.filter((g) => g.goal_type === 'race_time' || g.goal_type === 'plan_derived_race');
+  const custom = _userGoals.filter((g) => g.goal_type === 'distance_per_period' || g.goal_type === 'count_per_period');
+
+  if (races.length === 0) {
+    raceSection.hidden = true;
+    raceCards.innerHTML = '';
+  } else {
+    raceSection.hidden = false;
+    raceCards.innerHTML = races.map((g) => renderRaceGoalCard(g, workouts)).join('');
+  }
+
+  if (custom.length === 0 && races.length === 0) {
+    // First-run: show one friendly empty state, tell the user what they can do.
+    customCards.innerHTML = `
+      <div class="card goal-empty-state">
+        <div class="goal-empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="32" height="32"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+        </div>
+        <h3 class="goal-empty-title">Inga mål än</h3>
+        <p class="goal-empty-body">Lägg till ett eget mål (km per månad, antal pass per år eller tidsmål på en distans) så följer vi upp veckovis. Har du en aktiv AI-plan med racemål dyker det upp automatiskt här.</p>
+      </div>`;
+    customLabel.hidden = true;
+  } else if (custom.length === 0) {
+    customCards.innerHTML = '';
+    customLabel.hidden = true;
+  } else {
+    customLabel.hidden = false;
+    customCards.innerHTML = custom.map((g) => renderCustomGoalCard(g, workouts)).join('');
+  }
+}
+
+// ── Custom goal progress ────────────────────────────────────────────────
+function _periodWindow(goal) {
+  const now = new Date();
+  if (goal.period === 'week') {
+    const start = mondayOfWeek(now);
+    const end = addDays(start, 7);
+    return { start, end, label: 'Denna vecka' };
+  }
+  if (goal.period === 'month') {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    return { start, end, label: 'Denna månad' };
+  }
+  if (goal.period === 'year') {
+    const start = new Date(now.getFullYear(), 0, 1);
+    const end = new Date(now.getFullYear() + 1, 0, 1);
+    return { start, end, label: `${now.getFullYear()}` };
+  }
+  return null;
+}
+
+function _sumForGoal(goal, workouts) {
+  const win = _periodWindow(goal);
+  if (!win) return 0;
+  const inWin = workouts.filter((w) => {
+    if (!w.workout_date) return false;
+    const d = new Date(w.workout_date + 'T00:00:00');
+    return d >= win.start && d < win.end;
+  });
+  if (goal.goal_type === 'count_per_period') return inWin.length;
+  if (goal.goal_type === 'distance_per_period') {
+    if (goal.target_unit === 'km') return inWin.reduce((s, w) => s + (w.distance_km || 0), 0);
+    if (goal.target_unit === 'minutes') return inWin.reduce((s, w) => s + (w.duration_minutes || 0), 0);
+    if (goal.target_unit === 'workouts') return inWin.length;
+  }
+  return 0;
+}
+
+function _formatGoalValue(v, unit) {
+  if (unit === 'km') return `${v.toFixed(1)} km`;
+  if (unit === 'minutes') return `${Math.round(v)} min`;
+  if (unit === 'workouts') return `${Math.round(v)} pass`;
+  return `${v}`;
+}
+
+function renderCustomGoalCard(goal, workouts) {
+  const current = _sumForGoal(goal, workouts);
+  const target = Number(goal.target_value) || 0;
+  const pct = target > 0 ? Math.min(100, Math.round((current / target) * 100)) : 0;
+  const rawPct = target > 0 ? (current / target) * 100 : 0;
+
+  const win = _periodWindow(goal);
+  // How far through the period are we? Compare pct-completion-of-goal vs
+  // pct-of-period-elapsed so user sees "behind pace" / "on pace" at a glance.
+  let paceHint = '';
+  let paceClass = '';
+  if (win && target > 0) {
+    const now = new Date();
+    const totalMs = win.end.getTime() - win.start.getTime();
+    const elapsedMs = Math.max(0, Math.min(totalMs, now.getTime() - win.start.getTime()));
+    const pctElapsed = (elapsedMs / totalMs) * 100;
+    const diff = rawPct - pctElapsed;
+    if (diff >= -5 && diff <= 5) {
+      paceHint = 'På plan';
+      paceClass = 'on-track';
+    } else if (diff > 5) {
+      paceHint = `Före schema (+${Math.round(diff)} %)`;
+      paceClass = 'ahead';
+    } else {
+      paceHint = `Efter schema (${Math.round(diff)} %)`;
+      paceClass = 'lagging';
+    }
+  }
+
+  const remaining = Math.max(0, target - current);
+  const remainingTxt = remaining > 0
+    ? `Kvar: ${_formatGoalValue(remaining, goal.target_unit)}`
+    : 'Klart! 🎉';
+
+  return `<div class="card goal-card" data-goal-id="${goal.id}">
+    <div class="goal-card-header">
+      <div class="goal-card-title-wrap">
+        <div class="goal-card-title">${_escapeHtml(goal.title)}</div>
+        <div class="goal-card-sub">${win ? win.label : ''}${paceHint ? ` · <span class="goal-pace-pill ${paceClass}">${paceHint}</span>` : ''}</div>
+      </div>
+      <button type="button" class="goal-card-menu" aria-label="Ta bort mål" onclick="confirmDeleteGoal('${goal.id}')">×</button>
+    </div>
+    <div class="goal-progress-row">
+      <div class="goal-progress-track"><div class="goal-progress-fill" style="width:${pct}%"></div></div>
+      <div class="goal-progress-stat">${_formatGoalValue(current, goal.target_unit)} / ${_formatGoalValue(target, goal.target_unit)} <span class="goal-progress-pct">(${pct} %)</span></div>
+    </div>
+    <div class="goal-card-footer">${remainingTxt}</div>
+  </div>`;
+}
+
+// ── Race goal card + indicators ─────────────────────────────────────────
+
+function _daysBetween(a, b) {
+  const MS = 86400000;
+  return Math.round((b.getTime() - a.getTime()) / MS);
+}
+
+// Compare a "recent 28 d" window vs the preceding 28 d. Returns a status
+// chip based on the relative change. Thresholds are intentionally wide so
+// normal training noise doesn't flip the chip every week.
+function _goalTrendStatus(recentVal, earlierVal, opts = {}) {
+  const { upIsGood = true, neutralPct = 3 } = opts;
+  if (!Number.isFinite(recentVal) || !Number.isFinite(earlierVal) || earlierVal <= 0) {
+    return { cls: 'neutral', label: 'För få data', pct: null };
+  }
+  const pct = ((recentVal - earlierVal) / earlierVal) * 100;
+  const pctRounded = +pct.toFixed(1);
+  let cls;
+  if (Math.abs(pct) <= neutralPct) cls = 'on-track';
+  else if (pct > 0) cls = upIsGood ? 'ahead' : 'lagging';
+  else cls = upIsGood ? 'lagging' : 'ahead';
+  const labelMap = {
+    'on-track': 'Stabil',
+    'ahead': upIsGood ? 'Stigande' : 'Sjunkande',
+    'lagging': upIsGood ? 'Sjunkande' : 'Stigande',
+  };
+  return { cls, label: labelMap[cls], pct: pctRounded };
+}
+
+function _computeRaceIndicators(workouts) {
+  const now = new Date();
+  const start28 = addDays(now, -28);
+  const start56 = addDays(now, -56);
+
+  function inWin(w, s, e) {
+    if (!w.workout_date) return false;
+    const d = new Date(w.workout_date + 'T00:00:00');
+    return d >= s && d < e;
+  }
+  const recent = workouts.filter((w) => inWin(w, start28, now));
+  const earlier = workouts.filter((w) => inWin(w, start56, start28));
+
+  // VDOT: qualifying runs only (HR ≥ 85 % HRmax). Average over the window.
+  const maxHr = (currentProfile && Number(currentProfile.user_max_hr)) || EF_DEFAULT_MAX_HR;
+  function avgVdot(arr) {
+    const vs = arr
+      .filter((w) => _isVdotQualifyingPass(w, maxHr))
+      .map((w) => _vdotFromWorkout(w))
+      .filter((v) => v !== null);
+    if (!vs.length) return NaN;
+    return vs.reduce((a, b) => a + b, 0) / vs.length;
+  }
+  const vdotRecent = avgVdot(recent);
+  const vdotEarlier = avgVdot(earlier);
+
+  // Weekly volume (hours): normalise by window length so a full 28 d
+  // earlier window is comparable to a partial recent window if we ever
+  // extend the lookback.
+  const hoursRecent = recent.reduce((s, w) => s + (w.duration_minutes || 0), 0) / 60;
+  const hoursEarlier = earlier.reduce((s, w) => s + (w.duration_minutes || 0), 0) / 60;
+
+  // Consistency: pass/week, averaged over the 28 d window (= 4 weeks).
+  const countRecent = recent.length / 4;
+  const countEarlier = earlier.length / 4;
+
+  return {
+    vdot: {
+      status: _goalTrendStatus(vdotRecent, vdotEarlier, { upIsGood: true, neutralPct: 2 }),
+      recent: vdotRecent,
+      earlier: vdotEarlier,
+    },
+    volume: {
+      status: _goalTrendStatus(hoursRecent, hoursEarlier, { upIsGood: true, neutralPct: 10 }),
+      recent: hoursRecent,
+      earlier: hoursEarlier,
+    },
+    consistency: {
+      status: _goalTrendStatus(countRecent, countEarlier, { upIsGood: true, neutralPct: 10 }),
+      recent: countRecent,
+      earlier: countEarlier,
+    },
+  };
+}
+
+function _formatSecondsAsPace(totalSec) {
+  if (!Number.isFinite(totalSec) || totalSec <= 0) return '';
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = Math.round(totalSec % 60);
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function renderRaceGoalCard(goal, workouts) {
+  const now = new Date();
+  const startDate = goal.baseline_date
+    ? new Date(goal.baseline_date + 'T00:00:00')
+    : new Date(goal.created_at);
+  const targetDate = goal.target_date ? new Date(goal.target_date + 'T00:00:00') : null;
+
+  let timelineHtml = '';
+  if (targetDate) {
+    const totalDays = Math.max(1, _daysBetween(startDate, targetDate));
+    const elapsedDays = Math.max(0, Math.min(totalDays, _daysBetween(startDate, now)));
+    const pct = Math.round((elapsedDays / totalDays) * 100);
+    const daysLeft = Math.max(0, _daysBetween(now, targetDate));
+    const daysLeftTxt = daysLeft === 0
+      ? 'Idag!'
+      : daysLeft === 1
+        ? 'Imorgon'
+        : `${daysLeft} dagar kvar`;
+    timelineHtml = `
+      <div class="goal-timeline">
+        <div class="goal-timeline-track">
+          <div class="goal-timeline-fill" style="width:${pct}%"></div>
+          <div class="goal-timeline-dot goal-timeline-dot--now" style="left:${pct}%" title="Idag"></div>
+        </div>
+        <div class="goal-timeline-labels">
+          <span class="goal-timeline-label">${startDate.toISOString().slice(0, 10)}</span>
+          <span class="goal-timeline-label goal-timeline-label--now">${daysLeftTxt}</span>
+          <span class="goal-timeline-label">${targetDate.toISOString().slice(0, 10)}</span>
+        </div>
+      </div>`;
+  }
+
+  const ind = _computeRaceIndicators(workouts);
+  const indicators = [
+    { key: 'vdot', label: 'VO2max (VDOT)', ...ind.vdot },
+    { key: 'volume', label: 'Volym (h/v)', ...ind.volume },
+    { key: 'consistency', label: 'Konsekvens (pass/v)', ...ind.consistency },
+  ];
+  const indicatorsHtml = `<div class="goal-indicators">${indicators.map((x) => {
+    const pctTxt = x.status.pct !== null ? `${x.status.pct > 0 ? '+' : ''}${x.status.pct} %` : '—';
+    return `<div class="goal-indicator goal-indicator--${x.status.cls}">
+      <span class="goal-indicator-label">${x.label}</span>
+      <span class="goal-indicator-value">${x.status.label}</span>
+      <span class="goal-indicator-delta">${pctTxt} vs förra 4 v</span>
+    </div>`;
+  }).join('')}</div>`;
+
+  // Sub text: target pace for race_time, plan-derived note otherwise.
+  let subTxt = '';
+  if (goal.goal_type === 'race_time' && goal.target_distance_km && goal.target_value) {
+    const totalSec = Number(goal.target_value);
+    const paceSec = totalSec / Number(goal.target_distance_km);
+    subTxt = `${Number(goal.target_distance_km).toFixed(2)} km på ${_formatSecondsAsPace(totalSec)} · pace ${_formatSecondsAsPace(paceSec)}/km`;
+  } else if (goal.goal_type === 'plan_derived_race') {
+    subTxt = 'Automatiskt från aktiv plan';
+  }
+
+  const canDelete = goal.goal_type === 'race_time'; // plan-derived rides with the plan
+  const deleteBtn = canDelete
+    ? `<button type="button" class="goal-card-menu" aria-label="Ta bort mål" onclick="confirmDeleteGoal('${goal.id}')">×</button>`
+    : '';
+
+  return `<div class="card goal-card goal-card--race" data-goal-id="${goal.id}">
+    <div class="goal-card-header">
+      <div class="goal-card-title-wrap">
+        <div class="goal-card-title">${_escapeHtml(goal.title)}</div>
+        ${subTxt ? `<div class="goal-card-sub">${_escapeHtml(subTxt)}</div>` : ''}
+      </div>
+      ${deleteBtn}
+    </div>
+    ${timelineHtml}
+    ${indicatorsHtml}
+  </div>`;
+}
+
+function _escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// ── Add / delete goal ───────────────────────────────────────────────────
+
+function openAddGoalSheet() {
+  const modal = document.getElementById('goal-add-modal');
+  if (!modal) return;
+  const errEl = document.getElementById('goal-add-error');
+  if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
+  document.getElementById('goal-add-form')?.reset();
+  // Default-fill target date 8 weeks out for race goals.
+  const dateEl = document.getElementById('goal-race-date');
+  if (dateEl) {
+    const d = addDays(new Date(), 56);
+    dateEl.value = isoDate(d);
+  }
+  onGoalTypeChange();
+  onRaceDistancePresetChange();
+  modal.classList.remove('hidden');
+}
+
+function closeAddGoalSheet() {
+  document.getElementById('goal-add-modal')?.classList.add('hidden');
+}
+
+function onGoalTypeChange() {
+  const type = document.getElementById('goal-type-select')?.value;
+  const periodBlock = document.getElementById('goal-fields-period');
+  const raceBlock = document.getElementById('goal-fields-race');
+  if (!periodBlock || !raceBlock) return;
+  const isRace = type === 'race_time';
+  periodBlock.hidden = isRace;
+  raceBlock.hidden = !isRace;
+  // Sensible unit default per type.
+  const unitEl = document.getElementById('goal-target-unit');
+  if (unitEl && !isRace) {
+    unitEl.value = type === 'count_per_period' ? 'workouts' : 'km';
+  }
+}
+
+function onRaceDistancePresetChange() {
+  const sel = document.getElementById('goal-race-distance')?.value;
+  const wrap = document.getElementById('goal-race-custom-wrap');
+  if (!wrap) return;
+  wrap.hidden = sel !== 'custom';
+}
+
+function _readAddGoalForm() {
+  const type = document.getElementById('goal-type-select').value;
+  const titleRaw = document.getElementById('goal-title-input').value.trim();
+
+  if (type === 'distance_per_period' || type === 'count_per_period') {
+    const target = Number(document.getElementById('goal-target-value').value);
+    const unit = document.getElementById('goal-target-unit').value;
+    const period = document.getElementById('goal-period-select').value;
+    if (!target || target <= 0) throw new Error('Ange ett positivt mål-värde.');
+    const unitLabels = { km: 'km', workouts: 'pass', minutes: 'minuter' };
+    const periodLabels = { week: 'vecka', month: 'månad', year: 'år' };
+    const title = titleRaw || `${target} ${unitLabels[unit]} / ${periodLabels[period]}`;
+    return {
+      goal_type: type,
+      title,
+      target_value: target,
+      target_unit: unit,
+      period,
+      period_anchor: isoDate(new Date()),
+    };
+  }
+
+  // race_time
+  const distSel = document.getElementById('goal-race-distance').value;
+  const distKm = distSel === 'custom'
+    ? Number(document.getElementById('goal-race-custom-km').value)
+    : Number(distSel);
+  if (!distKm || distKm <= 0) throw new Error('Ange distans.');
+  const h = Number(document.getElementById('goal-race-hours').value) || 0;
+  const m = Number(document.getElementById('goal-race-minutes').value) || 0;
+  const s = Number(document.getElementById('goal-race-seconds').value) || 0;
+  const totalSec = h * 3600 + m * 60 + s;
+  if (totalSec <= 0) throw new Error('Ange måltid.');
+  const dateStr = document.getElementById('goal-race-date').value;
+  if (!dateStr) throw new Error('Ange måldatum.');
+  const distLabel = distKm === 21.0975 ? 'Halvmaraton' : distKm === 42.195 ? 'Maraton' : `${distKm} km`;
+  const title = titleRaw || `${distLabel} på ${_formatSecondsAsPace(totalSec)}`;
+  return {
+    goal_type: 'race_time',
+    title,
+    target_value: totalSec,
+    target_unit: 'seconds',
+    target_distance_km: distKm,
+    target_date: dateStr,
+    baseline_date: isoDate(new Date()),
+  };
+}
+
+async function submitAddGoal() {
+  const btn = document.getElementById('goal-add-submit');
+  const errEl = document.getElementById('goal-add-error');
+  if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
+  let payload;
+  try {
+    payload = _readAddGoalForm();
+  } catch (e) {
+    if (errEl) { errEl.textContent = e.message; errEl.hidden = false; }
+    return;
+  }
+  if (!currentProfile) {
+    if (errEl) { errEl.textContent = 'Profil ej laddad — försök igen om en stund.'; errEl.hidden = false; }
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = 'Sparar…'; }
+  try {
+    payload.profile_id = currentProfile.id;
+    const { data, error } = await sb.from('user_goals').insert(payload).select().single();
+    if (error) throw error;
+    _userGoals.unshift(data);
+    closeAddGoalSheet();
+    renderGoals(window._lastSeasonWorkouts || []);
+    showToast('Mål tillagt');
+  } catch (e) {
+    console.error('Add goal failed:', e);
+    if (errEl) { errEl.textContent = e.message || 'Kunde inte spara målet.'; errEl.hidden = false; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Spara'; }
+  }
+}
+
+async function confirmDeleteGoal(goalId) {
+  if (!goalId) return;
+  if (!confirm('Ta bort det här målet?')) return;
+  try {
+    const { error } = await sb.from('user_goals').delete().eq('id', goalId);
+    if (error) throw error;
+    _userGoals = _userGoals.filter((g) => g.id !== goalId);
+    renderGoals(window._lastSeasonWorkouts || []);
+    showToast('Mål borttaget');
+  } catch (e) {
+    console.error('Delete goal failed:', e);
+    showToast('Kunde inte ta bort målet');
+  }
 }
 
 function renderSeasonTotals(workouts) {
