@@ -55,84 +55,45 @@
   <link rel="icon" type="image/svg+xml"
     href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Crect%20width='100'%20height='100'%20rx='20'%20fill='%233498DB'/%3E%3Ctext%20x='50'%20y='70'%20font-family='Arial,sans-serif'%20font-size='62'%20font-weight='bold'%20text-anchor='middle'%20fill='white'%3EN%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/style.css?v=aac18e0">
-  <script
+  <!--
+    PERF (Improvement #4): all script tags below now use `defer` so they
+    download in parallel with HTML parsing and execute, in document order,
+    after parsing finishes (before DOMContentLoaded). Previously these were
+    render-blocking. Document order is preserved by `defer`, so the
+    Supabase / Chart.js / adapter / Sortable / app.js / gate.js dependency
+    chain is still respected.
+
+    `preconnect` to jsDelivr so the TCP+TLS handshake happens in parallel
+    with parsing, shaving ~100-200ms off the first script byte on cold loads.
+  -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <script defer
     src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"
     integrity="sha384-GFr3yTh5lJznCbZfpTtXnwboFsxqtTQoeTZCRHhE0579KrRmlCzen5AA8ohaB5ug"
     crossorigin="anonymous"
     referrerpolicy="no-referrer"></script>
-  <script
+  <!--
+    Chart.js + adapter and SortableJS could be lazy-loaded on demand
+    (Trends/Group views and the schedule editor respectively) for a further
+    ~85KB cut on dashboard cold loads. The `loadScript` helper in app.js
+    is set up for this; migration of call sites is tracked in the plan.
+  -->
+  <script defer
     src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"
     integrity="sha384-vsrfeLOOY6KuIYKDlmVH5UiBmgIdB1oEf7p01YgWHuqmOHfZr374+odEv96n9tNC"
     crossorigin="anonymous"
     referrerpolicy="no-referrer"></script>
-  <script
+  <script defer
     src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"
     integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws"
     crossorigin="anonymous"
     referrerpolicy="no-referrer"></script>
   <!-- SortableJS for drag-and-drop on the weekly schedule. Touch + mouse support. -->
-  <script
+  <script defer
     src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"
     crossorigin="anonymous"
     referrerpolicy="no-referrer"></script>
-  <style>
-    #gate {
-      position: fixed; inset: 0; z-index: 99999;
-      background: linear-gradient(135deg, #0b0e17 0%, #111628 50%, #0b0e17 100%);
-      display: flex; align-items: center; justify-content: center;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    }
-    #gate .gate-box {
-      background: rgba(20, 24, 42, 0.85);
-      border: 1px solid rgba(46, 134, 193, 0.15);
-      border-radius: 16px; padding: 3rem 2.5rem;
-      backdrop-filter: blur(24px);
-      box-shadow: 0 8px 40px rgba(0,0,0,0.5);
-      text-align: center; max-width: 420px; width: 90%;
-    }
-    #gate .badge {
-      display: inline-block; padding: 4px 14px; border-radius: 20px;
-      font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
-      background: rgba(46, 134, 193, 0.15); color: #2E86C1;
-      margin-bottom: 1.2rem;
-    }
-    #gate h1 {
-      color: #e8e8ec; font-size: 1.6rem; font-weight: 700; letter-spacing: -0.5px;
-      margin-bottom: 0.3rem;
-    }
-    #gate h1 span { color: #2E86C1; }
-    #gate .subtitle {
-      color: #6a6a82; font-size: 0.9rem; margin-bottom: 0.5rem; line-height: 1.5;
-    }
-    #gate .divider {
-      width: 40px; height: 2px; background: rgba(46, 134, 193, 0.3);
-      margin: 1.2rem auto; border-radius: 1px;
-    }
-    #gate .access-label {
-      color: #8a8a9a; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.5px; margin-bottom: 0.6rem;
-    }
-    #gate input {
-      width: 100%; padding: 0.85rem 1rem;
-      background: rgba(11, 14, 23, 0.7);
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 10px; color: #e8e8ec; font-size: 1rem;
-      outline: none; transition: border-color 0.25s;
-      text-align: center; letter-spacing: 2px;
-    }
-    #gate input:focus {
-      border-color: #2E86C1;
-      box-shadow: 0 0 16px rgba(46, 134, 193, 0.12);
-    }
-    #gate button {
-      margin-top: 1rem; width: 100%; padding: 0.85rem;
-      background: #2E86C1; border: none; border-radius: 10px;
-      color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
-      transition: transform 0.15s, background 0.2s;
-    }
-    #gate button:hover { background: #2474a8; transform: translateY(-1px); }
-    #gate .error { color: #E74C3C; font-size: 0.85rem; margin-top: 0.75rem; min-height: 1.2em; }
-  </style>
+  <!-- Gate styles moved to css/style.css to reduce inline-style usage. -->
 </head>
 <body>
 
@@ -144,9 +105,9 @@
     <p class="subtitle">Sidan är under uppbyggnad och tillgänglig<br>enbart för beta-testare.</p>
     <div class="divider"></div>
     <p class="access-label">Ange åtkomstkod</p>
-    <input type="password" id="gate-pw" placeholder="&#8226;&#8226;&#8226;&#8226;" autofocus
-           onkeydown="if(event.key==='Enter')checkGate()">
-    <button onclick="checkGate()">Öppna</button>
+    <!-- Enter-to-submit + click handler are wired in js/gate.js (no inline JS). -->
+    <input type="password" id="gate-pw" placeholder="&#8226;&#8226;&#8226;&#8226;" autofocus>
+    <button data-action="gate-submit">Öppna</button>
     <div class="error" id="gate-error"></div>
   </div>
 </div>
@@ -338,7 +299,7 @@
         <h1 class="dash-page-title">Ditt schema</h1>
         <h2 id="dash-greeting" class="dash-greeting-sub">Hej!</h2>
         <p id="dash-date"></p>
-        <button type="button" class="btn btn-outline btn-sm dash-log-shortcut" onclick="navigate('log')" aria-label="Logga ett pass">+ Logga pass</button>
+        <button type="button" class="btn btn-outline btn-sm dash-log-shortcut" data-action="navigate" data-arg="log" aria-label="Logga ett pass">+ Logga pass</button>
       </div>
 
       <!-- Calendar strip with navigation -->
@@ -374,20 +335,13 @@
       </button>
 
       <div id="dash-week-collapsible" class="dash-week-collapsible">
-      <div id="plan-info-bar" class="plan-info-bar hidden">
-        <div class="pib-left">
-          <div class="pib-goal" id="pib-goal"></div>
-          <div class="pib-phase" id="pib-phase"></div>
-        </div>
-        <div class="pib-right">
-          <div class="pib-progress">
-            <div class="pib-progress-track"><div class="pib-progress-fill" id="pib-progress-fill"></div></div>
-            <span class="pib-progress-label" id="pib-progress-label"></span>
-          </div>
-        </div>
-      </div>
-
       <div id="schema-generate-btn-container"></div>
+
+      <!-- ── Vecka / Månad-vy toggle ── -->
+      <div class="schema-view-toggle" id="schema-view-toggle" role="tablist" aria-label="Schemavy">
+        <button type="button" class="schema-view-pill active" data-view="week" role="tab" aria-selected="true" onclick="setSchemaView('week')">Vecka</button>
+        <button type="button" class="schema-view-pill" data-view="month" role="tab" aria-selected="false" onclick="setSchemaView('month')">Månad</button>
+      </div>
 
       <div class="schema-tabs" id="schema-person-tabs"></div>
 
@@ -400,14 +354,10 @@
         </div>
       </div>
 
-      <div id="schema-edit-bar" class="schema-edit-bar hidden">
-        <button class="schema-edit-toggle" id="schema-edit-toggle" onclick="toggleSchemaEditMode()">
-          <svg id="schema-edit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-          <span id="schema-edit-label">Redigera manuellt</span>
-        </button>
-        <button class="schema-edit-ai-btn" id="schema-edit-ai-btn" onclick="closePlanManager();openPlanEditModal();">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-          Redigera med AI
+      <div id="schema-edit-done-bar" class="schema-edit-done-bar hidden">
+        <button type="button" class="schema-edit-done-btn" onclick="exitSchemaEditMode()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>
+          Klar
         </button>
       </div>
 
@@ -513,7 +463,7 @@
     <!-- ── LOG WORKOUT ── -->
     <section id="view-log" class="view">
       <div class="page-header">
-        <h2>Logga pass</h2>
+        <h1>Logga pass</h1>
       </div>
 
       <div id="log-form-container">
@@ -582,7 +532,7 @@
         <h3>Pass sparat!</h3>
         <p id="log-success-text"></p>
         <div class="log-success-actions">
-          <button type="button" class="btn btn-primary" onclick="navigate('dashboard')">Till dashboard</button>
+          <button type="button" class="btn btn-primary" data-action="navigate" data-arg="dashboard">Till dashboard</button>
           <button type="button" class="btn btn-outline" onclick="resetLogForm()">Logga ett till</button>
         </div>
       </div>
@@ -591,8 +541,8 @@
     <!-- ── TRENDS (Personal / Din progress) ── -->
     <section id="view-trends" class="view">
       <div class="page-header">
-        <h2>Din progress</h2>
-        <button type="button" class="btn btn-outline btn-sm trends-log-shortcut" onclick="navigate('log')" aria-label="Logga ett pass">+ Logga pass</button>
+        <h1>Din progress</h1>
+        <button type="button" class="btn btn-outline btn-sm trends-log-shortcut" data-action="navigate" data-arg="log" aria-label="Logga ett pass">+ Logga pass</button>
       </div>
 
       <nav class="progress-subnav" role="tablist" aria-label="Progress-vyer">
@@ -779,7 +729,7 @@
     <!-- ── SOCIAL ── -->
     <section id="view-social" class="view">
       <div class="page-header">
-        <h2>Social</h2>
+        <h1>Social</h1>
       </div>
 
       <div class="card" id="social-friends-card">
@@ -812,11 +762,11 @@
     <!-- ── FRIEND PROFILE ── -->
     <section id="view-friend-profile" class="view">
       <div class="page-header fp-page-header">
-        <button class="btn btn-ghost btn-sm fp-back-btn" onclick="navigate('social')" aria-label="Tillbaka">
+        <button class="btn btn-ghost btn-sm fp-back-btn" data-action="navigate" data-arg="social" aria-label="Tillbaka">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16"><polyline points="15 18 9 12 15 6"/></svg>
           Tillbaka
         </button>
-        <h2 id="fp-title">Profil</h2>
+        <h1 id="fp-title">Profil</h1>
       </div>
 
       <div class="card fp-identity-card">
@@ -854,7 +804,7 @@
     <!-- ── GROUP ── -->
     <section id="view-group" class="view">
       <div class="page-header">
-        <h2>Grupp</h2>
+        <h1>Grupp</h1>
         <span id="group-subtitle" class="hidden"></span>
       </div>
 
@@ -933,27 +883,33 @@
 
   </main>
 
-  <!-- Bottom Nav -->
+  <!--
+    Bottom Nav.
+    Migrated to data-action delegation (see app.js / registerAction). The
+    delegated click handler in app.js dispatches data-action="navigate" with
+    the data-arg view name. tabindex+role make these <a> elements keyboard
+    activatable without href="#".
+  -->
   <nav class="bottom-nav">
-    <a class="nav-item" data-view="dashboard" onclick="navigate('dashboard')">
+    <a class="nav-item" data-view="dashboard" data-action="navigate" data-arg="dashboard" role="button" tabindex="0">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
       Ditt schema
     </a>
-    <a class="nav-item" data-view="progress" onclick="navigate('progress')">
+    <a class="nav-item" data-view="progress" data-action="navigate" data-arg="progress" role="button" tabindex="0">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       Din progress
     </a>
-    <a class="nav-item" data-view="coach" onclick="navigate('coach')" style="position:relative;">
+    <a class="nav-item nav-item--rel" data-view="coach" data-action="navigate" data-arg="coach" role="button" tabindex="0">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="14" y2="13"/></svg>
       Coach
       <span id="coach-unread-badge" class="nav-badge hidden"></span>
     </a>
-    <a class="nav-item" data-view="social" onclick="navigate('social')" style="position:relative;">
+    <a class="nav-item nav-item--rel" data-view="social" data-action="navigate" data-arg="social" role="button" tabindex="0">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       Social
       <span id="friend-request-badge" class="nav-badge hidden"></span>
     </a>
-    <a class="nav-item" data-view="group" onclick="navigate('group')">
+    <a class="nav-item" data-view="group" data-action="navigate" data-arg="group" role="button" tabindex="0">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       Grupp
     </a>
@@ -1770,43 +1726,56 @@
   </div>
 </div>
 
-<script src="js/config.js?v=aac18e0"></script>
-<script src="js/app.js?v=aac18e0"></script>
-<script>
-const GATE_HASH = "33a2b6d3f27de37ace432551c50e254d5981bc28cb757832e30e5e0c531e3955";
-async function sha256(m) {
-  const d = new TextEncoder().encode(m);
-  const h = await crypto.subtle.digest("SHA-256", d);
-  return Array.from(new Uint8Array(h)).map(b => b.toString(16).padStart(2, "0")).join("");
-}
-async function checkGate() {
-  const v = document.getElementById("gate-pw").value;
-  const h = await sha256(v);
-  if (h === GATE_HASH) {
-    document.getElementById("gate").style.display = "none";
-    sessionStorage.setItem("gate_passed", "1");
-    localStorage.setItem("nvdp_gate_passed", "1");
-    bootApp();
-    if (typeof window.NVDP_resumeAfterGate === "function") {
-      await window.NVDP_resumeAfterGate();
-    }
-  } else {
-    document.getElementById("gate-error").textContent = "Fel kod. Försök igen.";
-    document.getElementById("gate-pw").value = "";
-    document.getElementById("gate-pw").focus();
-  }
-}
-function bootApp() {
-  document.getElementById("auth-view").style.display = "flex";
-}
-// Skip gate if already passed OR if a Supabase session exists in localStorage
-const hasSupabaseSession = Object.keys(localStorage).some(k => k.startsWith('sb-') && k.endsWith('-auth-token'));
-if ((typeof gateOpen === "function" && gateOpen()) || hasSupabaseSession) {
-  document.getElementById("gate").style.display = "none";
-  localStorage.setItem("nvdp_gate_passed", "1");
-  sessionStorage.setItem("gate_passed", "1");
-  bootApp();
-}
-</script>
+<!-- ═══ DAY DETAIL MODAL (månadsvy → click på cell) ═══ -->
+<div id="day-detail-modal" class="modal-overlay modal-overlay-scroll hidden" onclick="if(event.target===this)closeDayDetailModal()" role="dialog" aria-modal="true" aria-labelledby="day-detail-title">
+  <div class="modal-box" style="max-width:520px;">
+    <div class="modal-header">
+      <h3 id="day-detail-title">Dag</h3>
+      <button class="btn-close" onclick="closeDayDetailModal()" aria-label="Stäng">&times;</button>
+    </div>
+    <div id="day-detail-body" class="day-detail-body"></div>
+  </div>
+</div>
+
+<!-- ═══ EDIT CHOICE MODAL (Redigera-knapp → manuellt eller AI) ═══ -->
+<div id="schema-edit-choice-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeSchemaEditChoice()" role="dialog" aria-modal="true" aria-labelledby="schema-edit-choice-title">
+  <div class="modal-box" style="max-width:440px;">
+    <div class="modal-header">
+      <h3 id="schema-edit-choice-title">Hur vill du redigera?</h3>
+      <button class="btn-close" onclick="closeSchemaEditChoice()" aria-label="Stäng">&times;</button>
+    </div>
+    <div class="edit-choice-grid">
+      <button type="button" class="edit-choice-card" onclick="chooseEditManual()">
+        <div class="edit-choice-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </div>
+        <div class="edit-choice-text">
+          <div class="edit-choice-title">Redigera manuellt</div>
+          <div class="edit-choice-sub">Dra och släpp pass mellan dagar</div>
+        </div>
+      </button>
+      <button type="button" class="edit-choice-card" onclick="chooseEditAi()">
+        <div class="edit-choice-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+        <div class="edit-choice-text">
+          <div class="edit-choice-title">Redigera med AI</div>
+          <div class="edit-choice-sub">Beskriv vad du vill ändra på naturligt språk</div>
+        </div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script defer src="js/config.js?v=aac18e0"></script>
+<script defer src="js/app.js?v=aac18e0"></script>
+<!--
+  Beta-gate logic. Loaded after app.js because it depends on `gateOpen`,
+  `NVDP_resumeAfterGate` and `registerAction` defined there. Previously this
+  was an inline <script> block; moving it out shrinks the surface that
+  requires `script-src 'unsafe-inline'`. `defer` preserves document order,
+  so gate.js still runs strictly after app.js.
+-->
+<script defer src="js/gate.js?v=aac18e0"></script>
 </body>
 </html>

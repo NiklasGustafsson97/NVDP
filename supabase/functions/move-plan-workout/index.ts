@@ -17,7 +17,8 @@
 // the gateway does not reject ES256 user tokens on legacy runtimes.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { handlePreflight, jsonResponse } from "../_shared/cors.ts";
+import { requireUserProfile } from "../_shared/auth.ts";
 
 interface PlanWorkout {
   id: string;
@@ -25,31 +26,6 @@ interface PlanWorkout {
   day_of_week: number;
   sort_order: number;
   workout_date: string;
-}
-
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-const APP_ORIGINS = (Deno.env.get("APP_ORIGINS") ||
-  "https://niklasgustafsson97.github.io").split(",").map((o) => o.trim()).filter(Boolean);
-
-function corsHeaders(req?: Request) {
-  const origin = req?.headers.get("origin") || "";
-  const allow = APP_ORIGINS.includes(origin) ? origin : APP_ORIGINS[0] || "null";
-  return {
-    "Access-Control-Allow-Origin": allow,
-    "Vary": "Origin",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-  };
-}
-
-function json(status: number, body: unknown, req?: Request) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders(req), "Content-Type": "application/json" },
-  });
 }
 
 function isoDate(d: Date): string {
@@ -63,27 +39,14 @@ function addDays(iso: string, days: number): string {
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
-  if (req.method !== "POST") return json(405, { error: "Method not allowed" }, req);
+  const preflight = handlePreflight(req);
+  if (preflight) return preflight;
+  if (req.method !== "POST") return jsonResponse(405, { error: "Method not allowed" }, req);
 
   try {
-    const authHeader = req.headers.get("authorization");
-    if (!authHeader) return json(401, { error: "No auth header" }, req);
-
-    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !user) return json(401, { error: "Invalid token" }, req);
-
-    const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-
-    const { data: profile } = await db.from("profiles")
-      .select("id")
-      .eq("user_id", user.id)
-      .single();
-    if (!profile) return json(404, { error: "Profile not found" }, req);
-    const profileId: string = profile.id;
+    const auth = await requireUserProfile(req);
+    if (auth.error) return auth.error;
+    const { profileId, db } = auth;
 
     const body = await req.json().catch(() => ({}));
     const planWorkoutId = body?.plan_workout_id;
@@ -94,10 +57,10 @@ serve(async (req) => {
       : Number(toSortOrderRaw);
 
     if (!planWorkoutId || !Number.isInteger(toDow)) {
-      return json(400, { error: "Missing plan_workout_id or to_day_of_week" }, req);
+      return jsonResponse(400, { error: "Missing plan_workout_id or to_day_of_week" }, req);
     }
     if (toDow < 0 || toDow > 6) {
-      return json(400, { error: "to_day_of_week must be 0-6" }, req);
+      return jsonResponse(400, { error: "to_day_of_week must be 0-6" }, req);
     }
 
     // 1. Load the row being moved + verify ownership via plan_week → training_plan.
@@ -105,17 +68,17 @@ serve(async (req) => {
       .select("id, plan_week_id, day_of_week, sort_order, workout_date")
       .eq("id", planWorkoutId)
       .single();
-    if (rowErr || !row) return json(404, { error: "plan_workout not found" }, req);
+    if (rowErr || !row) return jsonResponse(404, { error: "plan_workout not found" }, req);
 
     const { data: planWeek, error: pwErr } = await db.from("plan_weeks")
       .select("id, plan_id, week_number, training_plans!inner(profile_id, start_date)")
       .eq("id", (row as PlanWorkout).plan_week_id)
       .single();
-    if (pwErr || !planWeek) return json(404, { error: "plan_week not found" }, req);
+    if (pwErr || !planWeek) return jsonResponse(404, { error: "plan_week not found" }, req);
     // deno-lint-ignore no-explicit-any
     const tp = (planWeek as any).training_plans;
     if (!tp || tp.profile_id !== profileId) {
-      return json(403, { error: "Not your plan_workout" }, req);
+      return jsonResponse(403, { error: "Not your plan_workout" }, req);
     }
     const planStartDate: string = tp.start_date;
     // deno-lint-ignore no-explicit-any
@@ -128,7 +91,7 @@ serve(async (req) => {
     const { data: siblings, error: sibErr } = await db.from("plan_workouts")
       .select("id, day_of_week, sort_order")
       .eq("plan_week_id", (row as PlanWorkout).plan_week_id);
-    if (sibErr || !siblings) return json(500, { error: "Could not load siblings" }, req);
+    if (sibErr || !siblings) return jsonResponse(500, { error: "Could not load siblings" }, req);
 
     const allRows = (siblings as PlanWorkout[]).map((r) => ({
       id: r.id,
@@ -192,20 +155,20 @@ serve(async (req) => {
     const { error: parkErr } = await db.from("plan_workouts")
       .update({ sort_order: -1 })
       .eq("id", planWorkoutId);
-    if (parkErr) return json(500, { error: `park failed: ${parkErr.message}` }, req);
+    if (parkErr) return jsonResponse(500, { error: `park failed: ${parkErr.message}` }, req);
 
     for (const u of sourceUpdates) {
       // Park first to avoid collision on (plan_week_id, day_of_week, sort_order).
       const { error } = await db.from("plan_workouts")
         .update({ sort_order: -2 - u.sort_order })
         .eq("id", u.id);
-      if (error) return json(500, { error: `source park failed: ${error.message}` }, req);
+      if (error) return jsonResponse(500, { error: `source park failed: ${error.message}` }, req);
     }
     for (const u of sourceUpdates) {
       const { error } = await db.from("plan_workouts")
         .update({ sort_order: u.sort_order })
         .eq("id", u.id);
-      if (error) return json(500, { error: `source renumber failed: ${error.message}` }, req);
+      if (error) return jsonResponse(500, { error: `source renumber failed: ${error.message}` }, req);
     }
 
     const destOnlySiblingUpdates = destUpdates.filter((u) => u.id !== planWorkoutId);
@@ -213,13 +176,13 @@ serve(async (req) => {
       const { error } = await db.from("plan_workouts")
         .update({ sort_order: -100 - u.sort_order })
         .eq("id", u.id);
-      if (error) return json(500, { error: `dest park failed: ${error.message}` }, req);
+      if (error) return jsonResponse(500, { error: `dest park failed: ${error.message}` }, req);
     }
     for (const u of destOnlySiblingUpdates) {
       const { error } = await db.from("plan_workouts")
         .update({ sort_order: u.sort_order })
         .eq("id", u.id);
-      if (error) return json(500, { error: `dest renumber failed: ${error.message}` }, req);
+      if (error) return jsonResponse(500, { error: `dest renumber failed: ${error.message}` }, req);
     }
 
     // Finally place the moving row at its target slot (with new day + date).
@@ -231,9 +194,9 @@ serve(async (req) => {
         workout_date: movingTarget.workout_date,
       })
       .eq("id", planWorkoutId);
-    if (finalErr) return json(500, { error: `final move failed: ${finalErr.message}` }, req);
+    if (finalErr) return jsonResponse(500, { error: `final move failed: ${finalErr.message}` }, req);
 
-    return json(200, {
+    return jsonResponse(200, {
       ok: true,
       moved: {
         plan_workout_id: planWorkoutId,
@@ -242,6 +205,6 @@ serve(async (req) => {
       },
     }, req);
   } catch (e) {
-    return json(500, { error: (e as Error).message || "Internal error" }, req);
+    return jsonResponse(500, { error: (e as Error).message || "Internal error" }, req);
   }
 });

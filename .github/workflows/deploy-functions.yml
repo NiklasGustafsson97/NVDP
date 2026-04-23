@@ -119,3 +119,35 @@ jobs:
       #    function checks CRON_SECRET / service-role itself.
       - name: Deploy coach-nudge
         run: supabase functions deploy coach-nudge --no-verify-jwt
+
+      # ── Plan editing endpoints (user JWT, same ES256 caveat as the rest of
+      #    the user-facing endpoints).
+      - name: Deploy assess-feasibility
+        run: supabase functions deploy assess-feasibility --no-verify-jwt
+
+      - name: Deploy move-plan-workout
+        run: supabase functions deploy move-plan-workout --no-verify-jwt
+
+      - name: Deploy swap-plan-days
+        run: supabase functions deploy swap-plan-days --no-verify-jwt
+
+      # ── Drift check: every function with an index.ts MUST be deployed by
+      #    one of the steps above. If you add a new function, add a deploy
+      #    step for it (or this job fails on next push).
+      - name: Verify all functions have a deploy step
+        run: |
+          set -euo pipefail
+          missing=0
+          for dir in supabase/functions/*/; do
+            name=$(basename "$dir")
+            # Skip the _shared module and anything without an index.ts.
+            [ "$name" = "_shared" ] && continue
+            [ -f "$dir/index.ts" ] || continue
+            if ! grep -Eq "supabase functions deploy $name( |$)" "$GITHUB_WORKFLOW"; then
+              echo "::error::Function '$name' has no deploy step in deploy-functions.yml"
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then exit 1; fi
+        env:
+          GITHUB_WORKFLOW: ${{ github.workspace }}/.github/workflows/deploy-functions.yml

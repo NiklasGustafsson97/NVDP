@@ -21,6 +21,12 @@
   --shadow: 0 4px 24px rgba(0,0,0,0.3);
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --nav-h: 64px;
+  /*
+    A11Y (Improvement #5): single token for the visible-on-keyboard focus
+    ring. Used by the global :focus-visible rule below and by per-component
+    :focus-visible overrides so the look stays consistent across the app.
+  */
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 [data-theme="light"] {
@@ -53,6 +59,26 @@ body {
 }
 
 a { color: var(--accent); text-decoration: none; }
+
+/*
+  A11Y (Improvement #5): visible focus ring for keyboard users on every
+  interactive element. `:focus-visible` only applies on keyboard navigation
+  (not mouse clicks), so the ring doesn't appear when users click buttons.
+  Component-level rules can override `--focus-ring` or the box-shadow if
+  they need a different look, but the GLOBAL fallback ensures keyboard
+  users always see where focus is — previously several rules set
+  `outline: none` without a `:focus-visible` replacement.
+*/
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 6px;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 6px; }
@@ -338,6 +364,8 @@ select option { background: #1a1a2e; color: var(--text); }
   filter: none;
 }
 .nav-item:hover { color: var(--text-muted); }
+/* Replaces inline style="position:relative" on nav items that anchor a badge. */
+.nav-item--rel { position: relative; }
 
 .nav-badge {
   position: absolute;
@@ -372,7 +400,8 @@ select option { background: #1a1a2e; color: var(--text); }
 
 /* ── Page Header ── */
 .page-header { margin-bottom: 24px; position: relative; }
-.page-header h2 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.5px; }
+/* a11y: each main view promoted to h1, so style both h1 and h2 the same. */
+.page-header h1, .page-header h2 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.5px; }
 .page-header p { color: var(--text-muted); font-size: 0.9rem; margin-top: 4px; }
 .dash-log-shortcut, .trends-log-shortcut {
   position: absolute; top: 0; right: 0;
@@ -791,34 +820,6 @@ select option { background: #1a1a2e; color: var(--text); }
 .schema-nav-right { display: flex; gap: 8px; align-items: center; }
 .btn-today { background: var(--accent) !important; color: #fff !important; border-color: var(--accent) !important; font-weight: 600; font-size: 0.8rem !important; padding: 5px 12px !important; }
 .schema-week-label { font-weight: 600; font-size: 0.9rem; }
-
-/* ── Schema Edit Bar ── */
-.schema-edit-bar {
-  display: flex; gap: 8px; margin-bottom: 10px; align-items: center;
-}
-.schema-edit-toggle, .schema-edit-ai-btn {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 6px 12px; border-radius: 16px; font-size: 0.75rem; font-weight: 600;
-  cursor: pointer; transition: all 0.2s; font-family: var(--font);
-  border: 1px solid var(--border); background: transparent; color: var(--text-dim);
-}
-.schema-edit-toggle:hover, .schema-edit-ai-btn:hover { border-color: var(--accent); color: var(--text); }
-.schema-edit-toggle.active { background: rgba(214,99,158,0.12); border-color: var(--accent); color: var(--accent); }
-.schema-edit-ai-btn { border-style: dashed; }
-/* "Klar" state — taking up the row alone, styled as a primary done button. */
-.schema-edit-toggle.schema-edit-toggle--done {
-  flex: 1;
-  justify-content: center;
-  padding: 10px 16px;
-  font-size: 0.85rem;
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-.schema-edit-toggle.schema-edit-toggle--done:hover {
-  background: color-mix(in srgb, var(--accent) 85%, #000);
-  color: #fff;
-}
 
 /* ── Schema Edit Mode Card Indicators ── */
 .sr-card.sr-edit-mode { border-style: dashed; }
@@ -1969,30 +1970,6 @@ input.code-input {
 }
 .invite-decline-btn:hover { background: rgba(255,255,255,0.04); color: var(--text-muted); }
 
-/* ── Plan Info Bar ── */
-/* Neutral card — we deliberately don't tint the whole bar with the accent
-   so it reads as context rather than a CTA. Only the progress-fill keeps
-   the accent, as a single focal point that actually signals progress. */
-.plan-info-bar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; border-radius: var(--radius-sm);
-  background: var(--bg-card); border: 1px solid var(--border);
-  margin-bottom: 12px; gap: 12px;
-}
-.pib-left { flex: 1; min-width: 0; }
-.pib-goal { font-weight: 500; font-size: 0.85rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pib-phase {
-  display: inline-block; margin-top: 4px; padding: 2px 10px;
-  border-radius: 10px; font-size: 0.7rem; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.3px;
-  background: var(--bg-card-hover); color: var(--text-muted);
-}
-.pib-right { flex-shrink: 0; text-align: right; }
-.pib-progress { display: flex; align-items: center; gap: 8px; }
-.pib-progress-track { width: 60px; height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
-.pib-progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.4s ease; }
-.pib-progress-label { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); }
-
 /* ── Generate Plan Button ── */
 .schema-pill-row {
   display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;
@@ -2017,6 +1994,157 @@ input.code-input {
   background: rgba(214,99,158,0.12); padding: 1px 5px;
   border-radius: 6px; letter-spacing: 0.3px;
 }
+/* Edit-pill — sits beside Nuvarande/Skapa nytt schema. Uses a subtle accent
+   tint so it's discoverable without screaming. */
+.schema-plan-pill--edit { border-color: rgba(214,99,158,0.35); }
+.schema-plan-pill--edit:hover { border-color: var(--accent); background: rgba(214,99,158,0.10); }
+.schema-plan-pill--edit svg { opacity: 0.75; }
+
+/* ── Vecka / Månad-vy toggle ───────────────────────────────────────── */
+.schema-view-toggle {
+  display: inline-flex; gap: 4px; padding: 3px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 999px; margin-bottom: 12px;
+}
+.schema-view-pill {
+  border: none; background: transparent;
+  padding: 6px 14px; border-radius: 999px;
+  font-size: 0.78rem; font-weight: 600; color: var(--text-muted);
+  cursor: pointer; transition: all 0.18s; font-family: var(--font);
+}
+.schema-view-pill:hover { color: var(--text); }
+.schema-view-pill.active {
+  background: var(--accent); color: #fff;
+}
+
+/* ── Månadsschema grid ─────────────────────────────────────────────── */
+.schema-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.smc-weekday {
+  font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.4px; color: var(--text-dim); text-align: center;
+  padding: 4px 0 6px;
+}
+.smc-cell {
+  display: flex; flex-direction: column; gap: 3px;
+  min-height: 86px; padding: 6px 6px 5px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 8px; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  overflow: hidden;
+}
+.smc-cell:hover { border-color: var(--accent); }
+.smc-cell.smc-out { opacity: 0.32; cursor: default; }
+.smc-cell.smc-out:hover { border-color: var(--border); }
+.smc-cell.smc-today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.smc-cell.smc-rest { background: rgba(255,255,255,0.02); }
+.smc-cell.smc-done { border-left: 3px solid var(--green); }
+.smc-cell.smc-missed { border-left: 3px solid var(--red); }
+
+.smc-day-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 2px;
+}
+.smc-day-num { font-size: 0.78rem; font-weight: 700; color: var(--text); }
+.smc-day-num--today {
+  background: var(--accent); color: #fff;
+  width: 20px; height: 20px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0.7rem;
+}
+.smc-status-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+}
+.smc-status-dot--done { background: var(--green); }
+.smc-status-dot--missed { background: var(--red); }
+
+.smc-pass-line {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 0.7rem; line-height: 1.15; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.smc-pass-line svg { flex-shrink: 0; opacity: 0.7; }
+.smc-pass-zone {
+  display: inline-block; flex-shrink: 0;
+  font-size: 0.58rem; font-weight: 700; padding: 1px 4px;
+  border-radius: 4px; background: rgba(255,255,255,0.06); color: var(--text-dim);
+}
+.smc-rest-pill {
+  font-size: 0.68rem; font-weight: 600; color: var(--text-dim);
+  font-style: italic;
+}
+.smc-more { font-size: 0.62rem; color: var(--text-dim); font-weight: 600; }
+
+@media (max-width: 480px) {
+  .schema-month-grid { gap: 3px; }
+  .smc-cell { min-height: 64px; padding: 4px 4px 3px; }
+  .smc-day-num { font-size: 0.72rem; }
+  .smc-pass-line { font-size: 0.62rem; }
+  .smc-pass-zone { font-size: 0.52rem; padding: 0px 3px; }
+}
+
+/* ── Day detail modal (månadsvy → click) ───────────────────────────── */
+.day-detail-body {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 4px 0 0;
+}
+.day-detail-section-label {
+  font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.4px; color: var(--text-dim); margin-top: 4px;
+}
+.day-detail-empty {
+  font-size: 0.85rem; color: var(--text-dim); padding: 12px 0;
+  text-align: center;
+}
+.ddc-card {
+  padding: 10px 12px; border-radius: 8px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  transition: border-color 0.15s, background 0.15s;
+}
+.ddc-card[onclick]:hover { border-color: var(--accent); background: rgba(214,99,158,0.05); }
+.ddc-card.ddc-rest { opacity: 0.6; font-style: italic; }
+.ddc-line { font-size: 0.86rem; color: var(--text); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ddc-desc { margin-top: 4px; font-size: 0.78rem; color: var(--text-muted); line-height: 1.35; }
+
+/* ── Edit choice modal ─────────────────────────────────────────────── */
+.edit-choice-grid {
+  display: flex; flex-direction: column; gap: 10px;
+  margin-top: 6px;
+}
+.edit-choice-card {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 16px; border-radius: 12px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  text-align: left; cursor: pointer; transition: all 0.18s;
+  font-family: var(--font); color: var(--text);
+}
+.edit-choice-card:hover {
+  border-color: var(--accent); background: rgba(214,99,158,0.06);
+}
+.edit-choice-icon {
+  flex-shrink: 0; width: 38px; height: 38px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(214,99,158,0.10); color: var(--accent);
+}
+.edit-choice-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.edit-choice-title { font-size: 0.92rem; font-weight: 700; color: var(--text); }
+.edit-choice-sub { font-size: 0.76rem; color: var(--text-dim); }
+
+/* ── Floating "Klar"-knapp i edit-mode ─────────────────────────────── */
+.schema-edit-done-bar {
+  display: flex; justify-content: flex-end; margin-bottom: 10px;
+}
+.schema-edit-done-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 16px; border-radius: 999px;
+  background: var(--green, #38b27c); color: #fff;
+  border: none; font-weight: 700; font-size: 0.82rem;
+  cursor: pointer; transition: filter 0.15s; font-family: var(--font);
+}
+.schema-edit-done-btn:hover { filter: brightness(1.08); }
 
 /* ── Plan Manager top actions ── */
 .pm-top-actions { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
@@ -3262,7 +3390,7 @@ input.code-input {
 .sm-section-title-sub { font-size: 0.72rem !important; margin-bottom: 6px; }
 .sm-hint { font-size: 0.7rem; color: var(--text-dim); margin-top: 6px; padding: 0 4px; line-height: 1.35; }
 
-.page-header h2 { font-size: 1.45rem; }
+.page-header h1, .page-header h2 { font-size: 1.45rem; }
 .card-title { font-size: 0.72rem; }
 
 .empty-state--inline .empty-state-icon { font-size: 2rem; margin-bottom: 8px; }
@@ -4058,3 +4186,65 @@ body.chat-mode #view-coach { height: 100%; }
   .coach-drawer-backdrop { animation: none; }
   .coach-messages { scroll-behavior: auto; }
 }
+
+/* ── Beta gate ──────────────────────────────────────────────────────
+   Moved here from index.html <style> so the page no longer needs a
+   <style> block for static styling. (One small step toward dropping
+   `style-src 'unsafe-inline'` from CSP.)
+*/
+#gate {
+  position: fixed; inset: 0; z-index: 99999;
+  background: linear-gradient(135deg, #0b0e17 0%, #111628 50%, #0b0e17 100%);
+  display: flex; align-items: center; justify-content: center;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+#gate .gate-box {
+  background: rgba(20, 24, 42, 0.85);
+  border: 1px solid rgba(46, 134, 193, 0.15);
+  border-radius: 16px; padding: 3rem 2.5rem;
+  backdrop-filter: blur(24px);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+  text-align: center; max-width: 420px; width: 90%;
+}
+#gate .badge {
+  display: inline-block; padding: 4px 14px; border-radius: 20px;
+  font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+  background: rgba(46, 134, 193, 0.15); color: #2E86C1;
+  margin-bottom: 1.2rem;
+}
+#gate h1 {
+  color: #e8e8ec; font-size: 1.6rem; font-weight: 700; letter-spacing: -0.5px;
+  margin-bottom: 0.3rem;
+}
+#gate h1 span { color: #2E86C1; }
+#gate .subtitle {
+  color: #6a6a82; font-size: 0.9rem; margin-bottom: 0.5rem; line-height: 1.5;
+}
+#gate .divider {
+  width: 40px; height: 2px; background: rgba(46, 134, 193, 0.3);
+  margin: 1.2rem auto; border-radius: 1px;
+}
+#gate .access-label {
+  color: #8a8a9a; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.5px; margin-bottom: 0.6rem;
+}
+#gate input {
+  width: 100%; padding: 0.85rem 1rem;
+  background: rgba(11, 14, 23, 0.7);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px; color: #e8e8ec; font-size: 1rem;
+  outline: none; transition: border-color 0.25s;
+  text-align: center; letter-spacing: 2px;
+}
+#gate input:focus {
+  border-color: #2E86C1;
+  box-shadow: 0 0 16px rgba(46, 134, 193, 0.12);
+}
+#gate button {
+  margin-top: 1rem; width: 100%; padding: 0.85rem;
+  background: #2E86C1; border: none; border-radius: 10px;
+  color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
+  transition: transform 0.15s, background 0.2s;
+}
+#gate button:hover { background: #2474a8; transform: translateY(-1px); }
+#gate .error { color: #E74C3C; font-size: 0.85rem; margin-top: 0.75rem; min-height: 1.2em; }

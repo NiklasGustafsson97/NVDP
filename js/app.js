@@ -13,6 +13,63 @@ window.fetch = async function(...args) {
   return res;
 };
 
+// ════════════════════════════════════════════════════════════════
+//  ACTION DELEGATION (replaces inline onclick handlers)
+// ════════════════════════════════════════════════════════════════
+// Instead of `<button onclick="navigate('coach')">` (which forces CSP
+// `script-src 'unsafe-inline'`), markup uses:
+//
+//     <button data-action="navigate" data-arg="coach">…</button>
+//
+// One delegated `click` listener on `document` looks up the handler in
+// `_actions` and dispatches. New handlers are registered with
+// `registerAction(name, fn)`. Click-targets that need an arg pass it via
+// `data-arg`.
+//
+// Migration plan: every `onclick="foo(arg)"` in index.html should be
+// replaced with `data-action="foo" data-arg="arg"` and a matching call to
+// `registerAction("foo", () => foo(arg))`. Once zero inline handlers remain
+// the CSP can drop `'unsafe-inline'` from `script-src`.
+const _actions = Object.create(null);
+function registerAction(name, fn) {
+  if (typeof name !== 'string' || typeof fn !== 'function') return;
+  _actions[name] = fn;
+}
+function _runAction(el, ev) {
+  const name = el.getAttribute('data-action');
+  if (!name) return;
+  const fn = _actions[name];
+  if (!fn) {
+    console.warn('[NVDP] Unknown data-action:', name);
+    return;
+  }
+  const arg = el.getAttribute('data-arg');
+  try {
+    fn(arg, ev, el);
+  } catch (e) {
+    console.error('[NVDP] action handler failed:', name, e);
+  }
+}
+document.addEventListener('click', (ev) => {
+  const el = ev.target.closest('[data-action]');
+  if (!el) return;
+  // Prevent default for anchors with no real href so we don't append `#` to URL.
+  if (el.tagName === 'A' && (!el.getAttribute('href') || el.getAttribute('href') === '#')) {
+    ev.preventDefault();
+  }
+  _runAction(el, ev);
+}, false);
+// Keyboard activation for non-button elements (Enter / Space).
+document.addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  const el = ev.target.closest('[data-action]');
+  if (!el) return;
+  // Native buttons already fire click on Enter/Space — don't double-fire.
+  if (el.tagName === 'BUTTON') return;
+  ev.preventDefault();
+  _runAction(el, ev);
+}, false);
+
 // ── Supabase Client ──
 // Persist session in localStorage so users stay logged in across visits (refresh token).
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -31,6 +88,15 @@ let allProfiles = [];
 let currentView = 'dashboard';
 let schemaPersonIdx = 0;
 let schemaWeekOffset = 0;
+// Schema view toggle (Vecka / Månad). Persisted between sessions so the user
+// lands on the same view they used last. Default = 'week' first time.
+let _schemaView = (() => {
+  try {
+    const v = localStorage.getItem('schema_view_mode');
+    return (v === 'month' || v === 'week') ? v : 'week';
+  } catch (_e) { return 'week'; }
+})();
+let schemaMonthOffset = 0;
 let trendMode = 'total'; // fixed: no toggle
 let selectedWorkout = null;
 let editingWorkoutId = null;
@@ -159,6 +225,132 @@ function showToast(msg) {
   clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => el.classList.add('hidden'), 3500);
 }
+
+// ════════════════════════════════════════════════════════════════
+//  LAZY SCRIPT LOADER
+// ════════════════════════════════════════════════════════════════
+// Use to defer heavy CDN bundles (Chart.js, Sortable, Leaflet, etc.) until
+// the view that needs them actually opens. Returns a promise that resolves
+// once the script is loaded; subsequent calls for the same URL return the
+// cached promise (no duplicate fetches).
+//
+//   await loadScript('https://cdn.jsdelivr.net/...');
+//   new Chart(...);
+const _scriptCache = new Map();
+function loadScript(src, opts = {}) {
+  if (_scriptCache.has(src)) return _scriptCache.get(src);
+  const p = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    if (opts.integrity) s.integrity = opts.integrity;
+    if (opts.crossOrigin) s.crossOrigin = opts.crossOrigin;
+    s.onload = () => resolve();
+    s.onerror = () => {
+      _scriptCache.delete(src);
+      reject(new Error(`Failed to load script: ${src}`));
+    };
+    document.head.appendChild(s);
+  });
+  _scriptCache.set(src, p);
+  return p;
+}
+
+// ════════════════════════════════════════════════════════════════
+//  TINY STATE STORE (subscribe-on-key)
+// ════════════════════════════════════════════════════════════════
+// New code should read/write app-wide state through `store` so views can
+// subscribe to changes and re-render only what changed. Existing legacy
+// `currentUser` / `currentProfile` / etc. globals are still authoritative
+// for now — setters that mirror to the store are added in initApp /
+// loadProfile so subscribers get notified.
+//
+//   store.get('coachUnread')                 // current value
+//   store.set('coachUnread', 3)              // notify all subscribers
+//   const off = store.on('coachUnread', n => …)  // subscribe; call off() to unsubscribe
+//   store.update('coachUnread', n => n + 1)  // functional update
+const store = (() => {
+  const state = Object.create(null);
+  const subs = Object.create(null);
+  function get(key) { return state[key]; }
+  function set(key, value) {
+    if (state[key] === value) return;
+    state[key] = value;
+    const list = subs[key];
+    if (!list) return;
+    for (const fn of list) {
+      try { fn(value); } catch (e) { console.error('[NVDP] store sub failed:', key, e); }
+    }
+  }
+  function update(key, fn) { set(key, fn(state[key])); }
+  function on(key, fn) {
+    (subs[key] || (subs[key] = [])).push(fn);
+    return () => { subs[key] = (subs[key] || []).filter(f => f !== fn); };
+  }
+  return { get, set, update, on };
+})();
+
+// ════════════════════════════════════════════════════════════════
+//  DATA LAYER (consistent error handling)
+// ════════════════════════════════════════════════════════════════
+// Thin wrapper around the `sb` Supabase client. Every call returns
+// `{ data, error }` and surfaces unexpected errors to the user via toast
+// (instead of the historical pattern of `catch (_) { /* ignore */ }`).
+//
+// Add new endpoints here as code is migrated off raw `sb.from(...)` calls
+// to centralize the error path.
+const api = {
+  /** Run a Supabase query and consistently surface unexpected failures. */
+  async _run(label, promise) {
+    try {
+      const { data, error } = await promise;
+      if (error) {
+        console.warn(`[NVDP] api.${label} failed:`, error.message || error);
+        return { data: null, error };
+      }
+      return { data, error: null };
+    } catch (e) {
+      console.error(`[NVDP] api.${label} threw:`, e);
+      // Don't toast for every silent miss — only the call site decides.
+      return { data: null, error: e };
+    }
+  },
+
+  coach: {
+    /** Count assistant messages newer than `since` for this profile. */
+    unreadCount(profileId, since) {
+      return api._run('coach.unreadCount',
+        sb.from('coach_messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('profile_id', profileId)
+          .eq('role', 'assistant')
+          .gt('created_at', since)
+      );
+    },
+  },
+
+  profile: {
+    update(profileId, patch) {
+      return api._run('profile.update',
+        sb.from('profiles').update(patch).eq('id', profileId)
+      );
+    },
+  },
+
+  workouts: {
+    /** List workouts in a date range for one or more profile ids. */
+    list(profileIds, fromDate, toDate) {
+      const ids = Array.isArray(profileIds) ? profileIds : [profileIds];
+      let q = sb.from('workouts')
+        .select('*')
+        .in('profile_id', ids)
+        .order('workout_date', { ascending: false });
+      if (fromDate) q = q.gte('workout_date', fromDate);
+      if (toDate)   q = q.lte('workout_date', toDate);
+      return api._run('workouts.list', q);
+    },
+  },
+};
 
 /** AUTH-03: korta svenska fel från Supabase */
 function mapAuthError(msg) {
@@ -664,6 +856,9 @@ async function initApp(user, accessToken) {
     }
     allProfiles = profiles || [];
     currentProfile = allProfiles.find(p => p.user_id === user.id) || allProfiles[0];
+    // Mirror to the store so subscribers (badges, future view-models) react.
+    store.set('currentProfile', currentProfile);
+    store.set('allProfiles', allProfiles);
 
     if (!currentProfile && allProfiles.length === 0) {
       const fallbackName = user.user_metadata?.name || user.email?.split('@')[0] || 'User';
@@ -683,6 +878,8 @@ async function initApp(user, accessToken) {
           if (created.length > 0) {
             allProfiles = created;
             currentProfile = created[0];
+            store.set('currentProfile', currentProfile);
+            store.set('allProfiles', allProfiles);
           }
         }
       } catch (e) {
@@ -702,7 +899,19 @@ async function initApp(user, accessToken) {
     }
 
     document.getElementById('log-date').value = isoDate(new Date());
-    try { navigate(currentView); } catch (e) { console.error('navigate error:', e); }
+    // Mount the History-API router. If the URL already has a hash route
+    // (e.g. user opened a deep link), `initRouter` dispatches into the
+    // right view itself; otherwise we fall through to the default
+    // `currentView` below.
+    let routedFromHash = false;
+    try {
+      const hadHashRoute = !!location.hash;
+      initRouter();
+      routedFromHash = hadHashRoute;
+    } catch (e) { console.error('router init error:', e); }
+    if (!routedFromHash) {
+      try { navigate(currentView); } catch (e) { console.error('navigate error:', e); }
+    }
     try { updateNudgeBadge(); } catch (e) { console.error('nudge badge error:', e); }
     try { updateFriendRequestBadge(); } catch (e) { console.error('friend badge error:', e); }
     try { setInterval(updateFriendRequestBadge, 60000); } catch (e) {}
@@ -755,43 +964,176 @@ function navigate(view, param) {
   if (typeof document !== 'undefined' && document.body) {
     document.body.classList.toggle('chat-mode', view === 'coach');
   }
+
+  // Reflect the current view in the URL hash so back/forward and refresh
+  // preserve the user's place. `_navInternal` is set by the popstate handler
+  // when the browser triggers the navigation, so we don't push a duplicate
+  // history entry in that case.
+  if (!_navInternal) {
+    try {
+      const hash = '#/' + view + (param ? '/' + encodeURIComponent(param) : '');
+      if (location.hash !== hash) {
+        history.pushState({ view, param }, '', hash);
+      }
+    } catch (_) { /* hash routing is best-effort */ }
+  }
 }
+// Expose navigate via the action delegation system so markup can use
+// `data-action="navigate" data-arg="dashboard"` instead of `onclick="navigate('dashboard')"`.
+registerAction('navigate', (arg) => navigate(arg));
+
+// ════════════════════════════════════════════════════════════════
+//  HISTORY-API ROUTER
+// ════════════════════════════════════════════════════════════════
+// Supports URL hashes like `#/dashboard`, `#/coach`, `#/group/abc`,
+// `#/profile/xyz`, `#/workout/123`. Browser back/forward and shared deep
+// links route to the right view via `navigate()` (which also updates the
+// hash). Mounted at app boot via `initRouter()`.
+let _navInternal = false;
+const VALID_ROUTES = new Set([
+  'dashboard', 'progress', 'coach', 'social', 'group',
+  'log', 'friend-profile',
+]);
+function _parseHash() {
+  const raw = (location.hash || '').replace(/^#\/?/, '');
+  if (!raw) return { view: null, param: null };
+  const [view, ...rest] = raw.split('/');
+  const param = rest.length ? decodeURIComponent(rest.join('/')) : null;
+  return { view, param };
+}
+function _routeFromHash() {
+  const { view, param } = _parseHash();
+  if (!view || !VALID_ROUTES.has(view)) return;
+  _navInternal = true;
+  try { navigate(view, param); } finally { _navInternal = false; }
+}
+function initRouter() {
+  window.addEventListener('popstate', _routeFromHash);
+  // Boot-time deep link: if the URL already has a hash route, honor it.
+  if (location.hash) _routeFromHash();
+}
+
+// ════════════════════════════════════════════════════════════════
+//  DIALOG HELPER (focus trap + Escape + restore focus)
+// ════════════════════════════════════════════════════════════════
+// Use for any modal/drawer overlay. Sets ARIA, traps Tab focus inside,
+// closes on Escape, and restores focus to the element that opened the
+// dialog when it closes.
+//
+//   openDialog('coach-history-drawer', { onClose: closeCoachHistory });
+//   closeDialog('coach-history-drawer');
+//
+// Markup contract: the dialog root is shown by removing `hidden` (or by
+// the caller's existing logic). We don't toggle visibility ourselves —
+// the helper only manages a11y and focus.
+const _dialogStack = [];
+function _focusableIn(root) {
+  const sel = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  return Array.from(root.querySelectorAll(sel)).filter(el => el.offsetParent !== null || el === document.activeElement);
+}
+function _onDialogKeydown(ev) {
+  const top = _dialogStack[_dialogStack.length - 1];
+  if (!top) return;
+  if (ev.key === 'Escape') {
+    ev.preventDefault();
+    closeDialog(top.id);
+    return;
+  }
+  if (ev.key !== 'Tab') return;
+  const focusable = _focusableIn(top.root);
+  if (focusable.length === 0) { ev.preventDefault(); return; }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement;
+  if (ev.shiftKey && active === first) {
+    ev.preventDefault();
+    last.focus();
+  } else if (!ev.shiftKey && active === last) {
+    ev.preventDefault();
+    first.focus();
+  }
+}
+function openDialog(id, opts = {}) {
+  const root = document.getElementById(id);
+  if (!root) return;
+  // Close any existing entry for this id (idempotent re-open).
+  closeDialog(id);
+  if (!root.hasAttribute('role')) root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  _dialogStack.push({ id, root, previousFocus, onClose: opts.onClose });
+  if (_dialogStack.length === 1) document.addEventListener('keydown', _onDialogKeydown, true);
+  // Focus the first focusable element, or the dialog root itself.
+  const focusable = _focusableIn(root);
+  const target = focusable[0] || root;
+  if (target === root && !root.hasAttribute('tabindex')) root.setAttribute('tabindex', '-1');
+  setTimeout(() => target.focus(), 0);
+}
+function closeDialog(id) {
+  const idx = _dialogStack.findIndex(d => d.id === id);
+  if (idx === -1) return;
+  const [entry] = _dialogStack.splice(idx, 1);
+  entry.root.removeAttribute('aria-modal');
+  if (_dialogStack.length === 0) document.removeEventListener('keydown', _onDialogKeydown, true);
+  if (entry.previousFocus && document.contains(entry.previousFocus)) {
+    try { entry.previousFocus.focus(); } catch (_) {}
+  }
+  if (typeof entry.onClose === 'function') {
+    try { entry.onClose(); } catch (e) { console.error('[NVDP] dialog onClose failed:', e); }
+  }
+}
+window.openDialog = openDialog;
+window.closeDialog = closeDialog;
 
 // ═══════════════════════
 //  COACH UNREAD BADGE
 // ═══════════════════════
 async function refreshCoachUnreadBadge() {
-  const badge = document.getElementById('coach-unread-badge');
-  if (!badge || !currentProfile) return;
+  if (!currentProfile) return;
+  const lastView = currentProfile.last_coach_view_at || '1970-01-01T00:00:00.000Z';
+  // Centralized data layer + error handling (see `api` above).
+  const { data: _ignored, error } = { data: null, error: null };
+  // Supabase head-count returns the count via the `count` field, not `data`.
+  // Pull it out manually here.
   try {
-    const lastView = currentProfile.last_coach_view_at || '1970-01-01T00:00:00.000Z';
-    const { count, error } = await supabase
+    const res = await sb
       .from('coach_messages')
       .select('id', { count: 'exact', head: true })
       .eq('profile_id', currentProfile.id)
       .eq('role', 'assistant')
       .gt('created_at', lastView);
-    if (error) return;
-    if (count && count > 0) {
-      badge.textContent = count > 9 ? '9+' : String(count);
-      badge.classList.remove('hidden');
-    } else {
-      badge.textContent = '';
-      badge.classList.add('hidden');
+    if (res.error) {
+      console.warn('[NVDP] refreshCoachUnreadBadge failed', res.error);
+      return;
     }
-  } catch (_) { /* ignore */ }
+    // Drive the UI via the store. Subscribers (registered in initApp)
+    // diff-update the badge so we don't churn DOM unnecessarily.
+    store.set('coachUnread', res.count || 0);
+  } catch (e) {
+    console.warn('[NVDP] refreshCoachUnreadBadge threw', e);
+  }
 }
 
 async function markCoachViewed() {
   if (!currentProfile) return;
   const now = new Date().toISOString();
-  try {
-    await supabase.from('profiles').update({ last_coach_view_at: now }).eq('id', currentProfile.id);
-    currentProfile.last_coach_view_at = now;
-  } catch (_) { /* ignore */ }
-  const badge = document.getElementById('coach-unread-badge');
-  if (badge) { badge.textContent = ''; badge.classList.add('hidden'); }
+  const { error } = await api.profile.update(currentProfile.id, { last_coach_view_at: now });
+  if (!error) currentProfile.last_coach_view_at = now;
+  store.set('coachUnread', 0);
 }
+
+// Diff-by-key DOM update for the coach unread badge: only touch text/class
+// when the value actually changes. Subscribed once at app init so the badge
+// reacts to any store update from anywhere in the app.
+function _renderCoachUnreadBadge(count) {
+  const badge = document.getElementById('coach-unread-badge');
+  if (!badge) return;
+  const next = !count ? '' : (count > 9 ? '9+' : String(count));
+  if (badge.textContent !== next) badge.textContent = next;
+  const shouldHide = !count;
+  badge.classList.toggle('hidden', shouldHide);
+}
+store.on('coachUnread', _renderCoachUnreadBadge);
 
 window.refreshCoachUnreadBadge = refreshCoachUnreadBadge;
 
@@ -2188,6 +2530,18 @@ async function _loadSchema() {
   const tabsEl = document.getElementById('schema-person-tabs');
   tabsEl.innerHTML = '';
 
+  // Keep the Vecka/Månad pill UI in sync with persisted state on every load
+  // (covers cold-start, view-change, and external nav).
+  document.querySelectorAll('#schema-view-toggle .schema-view-pill').forEach((b) => {
+    const active = b.dataset.view === _schemaView;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+
+  if (_schemaView === 'month') {
+    return _loadSchemaMonth();
+  }
+
   const profile = currentProfile;
   const now = new Date();
   const currentMonday = mondayOfWeek(now);
@@ -2226,7 +2580,6 @@ async function _loadSchema() {
     document.getElementById('schema-week-label').textContent =
       `V${wk} — ${phaseLabel} v${weekNum} — ${formatDate(targetMonday)} till ${formatDate(targetSunday)}`;
 
-    updatePlanInfoBar(_activePlan, _activePlanWeeks);
     renderGenerateButton();
     updateSchemaEditBar();
     renderSchemaPlan(workouts, planWorkouts, targetMonday, invitations, isOwnSchema, profile, phase);
@@ -2237,9 +2590,6 @@ async function _loadSchema() {
     document.getElementById('schema-week-label').textContent =
       `V${wk}${deload ? ' (Deload)' : ''} — ${formatDate(targetMonday)} till ${formatDate(targetSunday)}`;
 
-    if (isOwnSchema) {
-      updatePlanInfoBar(null, []);
-    }
     renderGenerateButton();
     updateSchemaEditBar();
 
@@ -2254,10 +2604,258 @@ async function _loadSchema() {
   try { await updateCoachCheckinBanner(); } catch (_e) { /* non-blocking */ }
 }
 
+// ═════════════════════════════════════════════════════════════════════
+//  MONTH VIEW
+//  ─────────────────────────────────────────────────────────────────
+//  Renders the schema as a calendar grid (Mon-first). Each cell shows
+//  the day number plus a compact summary of plan/actual workouts; the
+//  user taps a cell to open the day detail modal which reuses the
+//  same data plumbing as the week view.
+// ═════════════════════════════════════════════════════════════════════
+
+// Month state — per-render context the day-cell click handler needs.
+let _monthRenderCtx = null;
+
+async function _loadSchemaMonth() {
+  const profile = currentProfile;
+  const monthStart = _monthStartFromOffset(schemaMonthOffset);
+  const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
+
+  // Visible grid spans the Monday of the week containing the 1st through
+  // the Sunday of the week containing the last day, so we always show a
+  // tidy 5- or 6-row calendar with leading/trailing days dimmed.
+  const gridStart = mondayOfWeek(monthStart);
+  const gridEndMonday = mondayOfWeek(monthEnd);
+  const gridEnd = addDays(gridEndMonday, 6);
+
+  const todayBtn = document.getElementById('schema-today-btn');
+  if (todayBtn) todayBtn.classList.toggle('hidden', schemaMonthOffset === 0);
+
+  // Update label — month name in Swedish.
+  const monthNames = ['januari','februari','mars','april','maj','juni','juli','augusti','september','oktober','november','december'];
+  const monthName = monthNames[monthStart.getMonth()];
+  const labelEl = document.getElementById('schema-week-label');
+  if (labelEl) labelEl.textContent = `${monthName.charAt(0).toUpperCase() + monthName.slice(1)} ${monthStart.getFullYear()}`;
+
+  const workouts = await fetchWorkouts(profile?.id, isoDate(gridStart), isoDate(gridEnd));
+  const isOwnSchema = profile?.id === currentProfile?.id;
+
+  // Plan workouts (AI plan) — only fetched for the owner. We don't bother
+  // overlapping multiple plans here; if a plan covers any part of the grid
+  // we pull its workouts for the visible range.
+  let planWorkouts = [];
+  if (isOwnSchema && PLAN_GENERATION_ENABLED) {
+    if (!_activePlan) {
+      _activePlan = await fetchActivePlan(profile?.id);
+      if (_activePlan) _activePlanWeeks = await fetchPlanWeeks(_activePlan.id);
+    }
+    if (_activePlan) {
+      planWorkouts = await fetchPlanWorkoutsByDate(_activePlan.id, isoDate(gridStart), isoDate(gridEnd));
+    }
+  }
+
+  // Legacy period_plans fallback for cells outside any AI plan window.
+  let legacyPlans = [];
+  if (isOwnSchema && (!_activePlan || isoDate(monthStart) < _activePlan.start_date || isoDate(monthEnd) > _activePlan.end_date)) {
+    const periods = await fetchPeriods();
+    const period = periods.find(p => isoDate(monthStart) <= p.end_date && isoDate(monthEnd) >= p.start_date);
+    if (period) legacyPlans = await fetchPlans(period.id);
+  }
+
+  renderGenerateButton();
+  updateSchemaEditBar();
+  renderSchemaMonth({
+    workouts, planWorkouts, legacyPlans,
+    gridStart, gridEnd, monthStart, monthEnd,
+    isOwnSchema, profile,
+  });
+  try { await updateCoachCheckinBanner(); } catch (_e) { /* non-blocking */ }
+}
+
+function renderSchemaMonth(ctx) {
+  _monthRenderCtx = ctx;
+  const { workouts, planWorkouts, legacyPlans, gridStart, gridEnd, monthStart } = ctx;
+  const container = document.getElementById('schema-content');
+  if (!container) return;
+
+  const todayStr = isoDate(new Date());
+  const weekdayLabels = ['Mån','Tis','Ons','Tor','Fre','Lör','Sön'];
+
+  let html = '<div class="schema-month-grid">';
+  for (const lbl of weekdayLabels) html += `<div class="smc-weekday">${lbl}</div>`;
+
+  const totalDays = Math.round((gridEnd - gridStart) / 86400000) + 1;
+  for (let i = 0; i < totalDays; i++) {
+    const d = addDays(gridStart, i);
+    const dayStr = isoDate(d);
+    const inMonth = d.getMonth() === monthStart.getMonth();
+    const isToday = dayStr === todayStr;
+    const dayWorkouts = workouts.filter(w => w.workout_date === dayStr);
+    const planForDay = planWorkouts.filter(pw => pw.workout_date === dayStr);
+
+    // Legacy plan fallback — only when AI plan has no entry for this day
+    // AND the day falls outside any AI plan window.
+    let legacyForDay = [];
+    if (planForDay.length === 0 && legacyPlans.length > 0) {
+      const inActivePlan = _activePlan
+        && dayStr >= _activePlan.start_date
+        && dayStr <= _activePlan.end_date;
+      if (!inActivePlan) {
+        const dow = (d.getDay() + 6) % 7;
+        const lp = legacyPlans.find(p => p.day_of_week === dow);
+        if (lp) legacyForDay = [lp];
+      }
+    }
+
+    const restPlan = planForDay.length > 0 && planForDay.every(p => p.is_rest);
+    const hasPlannedWork = planForDay.some(p => !p.is_rest) || legacyForDay.length > 0;
+    const isPast = dayStr < todayStr;
+    const isDone = dayWorkouts.length > 0;
+    const isMissed = isPast && hasPlannedWork && !isDone;
+
+    const cellCls = ['smc-cell'];
+    if (!inMonth) cellCls.push('smc-out');
+    if (isToday) cellCls.push('smc-today');
+    if (restPlan) cellCls.push('smc-rest');
+    if (isDone) cellCls.push('smc-done');
+    if (isMissed) cellCls.push('smc-missed');
+
+    let dayNumHtml = isToday
+      ? `<span class="smc-day-num smc-day-num--today">${d.getDate()}</span>`
+      : `<span class="smc-day-num">${d.getDate()}</span>`;
+
+    let statusDot = '';
+    if (isDone) statusDot = '<span class="smc-status-dot smc-status-dot--done" aria-label="Genomfört"></span>';
+    else if (isMissed) statusDot = '<span class="smc-status-dot smc-status-dot--missed" aria-label="Missat"></span>';
+
+    // Compact body — show up to 2 lines (plan or actual), then "+N".
+    const lines = [];
+    if (restPlan) {
+      lines.push('<div class="smc-rest-pill">Vila</div>');
+    } else {
+      // Prefer planned items; fall back to actual if no plan exists.
+      const items = planForDay.filter(p => !p.is_rest).map(pw => ({
+        type: pw.activity_type || 'Löpning',
+        zone: pw.intensity_zone || '',
+        mins: pw.duration_minutes || 0,
+        label: pw.label || '',
+      }));
+      if (items.length === 0 && legacyForDay.length > 0) {
+        for (const lp of legacyForDay) {
+          items.push({ type: lp.activity_type || 'Löpning', zone: '', mins: lp.duration_minutes || 0, label: lp.title || '' });
+        }
+      }
+      // If nothing was planned but we have actuals, show those instead.
+      if (items.length === 0 && dayWorkouts.length > 0) {
+        for (const w of dayWorkouts) {
+          items.push({ type: w.activity_type, zone: '', mins: w.duration_minutes || 0, label: '' });
+        }
+      }
+      const visible = items.slice(0, 2);
+      for (const it of visible) {
+        const zoneBadge = it.zone ? `<span class="smc-pass-zone">${it.zone}</span>` : '';
+        const mins = it.mins ? `${it.mins}'` : '';
+        lines.push(`<div class="smc-pass-line">${activityEmoji(it.type)} ${zoneBadge} ${mins}</div>`);
+      }
+      if (items.length > visible.length) {
+        lines.push(`<div class="smc-more">+${items.length - visible.length} till</div>`);
+      }
+    }
+
+    const clickAttr = inMonth ? ` onclick="openDayDetailModal('${dayStr}')"` : '';
+    html += `<div class="${cellCls.join(' ')}"${clickAttr}>` +
+      `<div class="smc-day-row">${dayNumHtml}${statusDot}</div>` +
+      lines.join('') +
+      `</div>`;
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// ── Day detail modal ─────────────────────────────────────────────────
+// Opens when the user taps a cell in the month grid. Shows the planned
+// workouts (AI plan or legacy) and any actual workouts for that day,
+// reusing existing per-workout click handlers (openWorkoutModal,
+// openPlanModal, openPlanWorkoutEdit) so the modal is fully functional
+// without re-implementing the week-view interactions.
+function openDayDetailModal(dayStr) {
+  const ctx = _monthRenderCtx;
+  if (!ctx) return;
+  const modal = document.getElementById('day-detail-modal');
+  const titleEl = document.getElementById('day-detail-title');
+  const bodyEl = document.getElementById('day-detail-body');
+  if (!modal || !bodyEl) return;
+
+  const d = new Date(dayStr + 'T00:00:00');
+  const dayNamesFull = ['Måndag','Tisdag','Onsdag','Torsdag','Fredag','Lördag','Söndag'];
+  const monthShort = ['jan','feb','mar','apr','maj','jun','jul','aug','sep','okt','nov','dec'];
+  const dow = (d.getDay() + 6) % 7;
+  if (titleEl) titleEl.textContent = `${dayNamesFull[dow]} ${d.getDate()} ${monthShort[d.getMonth()]}`;
+
+  const dayWorkouts = ctx.workouts.filter(w => w.workout_date === dayStr);
+  const planForDay = ctx.planWorkouts.filter(pw => pw.workout_date === dayStr);
+
+  // Legacy fallback (same logic as the cell renderer).
+  let legacyForDay = [];
+  if (planForDay.length === 0 && ctx.legacyPlans.length > 0) {
+    const inActivePlan = _activePlan && dayStr >= _activePlan.start_date && dayStr <= _activePlan.end_date;
+    if (!inActivePlan) {
+      const lp = ctx.legacyPlans.find(p => p.day_of_week === dow);
+      if (lp) legacyForDay = [lp];
+    }
+  }
+
+  let html = '';
+
+  // Planned section
+  if (planForDay.length > 0 || legacyForDay.length > 0) {
+    html += '<div class="day-detail-section-label">Planerat</div>';
+    for (const pw of planForDay) {
+      if (pw.is_rest) {
+        html += '<div class="ddc-card ddc-rest"><div class="ddc-line">💤 Vilodag</div></div>';
+      } else {
+        const zoneBadge = pw.intensity_zone ? ` <span class="zone-badge zone-${pw.intensity_zone.toLowerCase()}">${pw.intensity_zone}</span>` : '';
+        const mins = pw.duration_minutes ? ` · ${pw.duration_minutes} min` : '';
+        const label = pw.label ? escapeHTML(pw.label) : escapeHTML(pw.activity_type || 'Pass');
+        const desc = pw.description ? `<div class="ddc-desc">${escapeHTML(pw.description)}</div>` : '';
+        const safe = JSON.stringify({ label: pw.label, description: pw.description, is_rest: pw.is_rest, day_of_week: pw.day_of_week, plan_workout_id: pw.id }).replace(/"/g, '&quot;');
+        const clickAttr = ctx.isOwnSchema ? ` onclick="closeDayDetailModal();openPlanModal('${dayStr}', ${safe}, '${dayNamesFull[dow]}')" style="cursor:pointer;"` : '';
+        html += `<div class="ddc-card"${clickAttr}><div class="ddc-line">${activityEmoji(pw.activity_type)} <strong>${label}</strong>${zoneBadge}${mins}</div>${desc}</div>`;
+      }
+    }
+    for (const lp of legacyForDay) {
+      const mins = lp.duration_minutes ? ` · ${lp.duration_minutes} min` : '';
+      html += `<div class="ddc-card"><div class="ddc-line">${activityEmoji(lp.activity_type)} <strong>${escapeHTML(lp.title || lp.activity_type)}</strong>${mins}</div></div>`;
+    }
+  }
+
+  // Actual section
+  if (dayWorkouts.length > 0) {
+    html += '<div class="day-detail-section-label">Genomfört</div>';
+    for (const w of dayWorkouts) {
+      const dist = w.distance_km ? ` · ${parseFloat(w.distance_km).toFixed(1)} km` : '';
+      const mins = w.duration_minutes ? ` · ${w.duration_minutes}'` : '';
+      const safe = JSON.stringify(w).replace(/"/g, '&quot;');
+      html += `<div class="ddc-card" onclick="closeDayDetailModal();openWorkoutModal(${safe})" style="cursor:pointer;"><div class="ddc-line">${activityEmoji(w.activity_type)} <strong>${escapeHTML(w.activity_type)}</strong>${dist}${mins}</div></div>`;
+    }
+  }
+
+  if (!html) html = '<div class="day-detail-empty">Inget pass den här dagen.</div>';
+
+  bodyEl.innerHTML = html;
+  modal.classList.remove('hidden');
+}
+
+function closeDayDetailModal() {
+  const modal = document.getElementById('day-detail-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
 // ── Calendar Strip ──
 const CAL_DAY_LETTERS = ['M', 'T', 'O', 'T', 'F', 'L', 'S'];
 
 function schemaWeekPrev() {
+  if (_schemaView === 'month') { schemaMonthPrev(); return; }
   const now = new Date();
   const currentMonday = mondayOfWeek(now);
   const targetMonday = addDays(currentMonday, (schemaWeekOffset - 1) * 7);
@@ -2267,8 +2865,59 @@ function schemaWeekPrev() {
   _calStripWorkouts = null;
   loadSchema();
 }
-function schemaWeekNext() { schemaWeekOffset++; _calStripWorkouts = null; loadSchema(); }
-function schemaWeekToday() { schemaWeekOffset = 0; _calStripWorkouts = null; loadSchema(); }
+function schemaWeekNext() {
+  if (_schemaView === 'month') { schemaMonthNext(); return; }
+  schemaWeekOffset++; _calStripWorkouts = null; loadSchema();
+}
+function schemaWeekToday() {
+  if (_schemaView === 'month') { schemaMonthToday(); return; }
+  schemaWeekOffset = 0; _calStripWorkouts = null; loadSchema();
+}
+
+// Month-view nav. Offsets count whole calendar months relative to "today's
+// month" so 0 = current month, -1 = previous month, etc.
+function schemaMonthPrev() {
+  const minMonday = new Date(P1_START);
+  const target = _monthStartFromOffset(schemaMonthOffset - 1);
+  // Don't navigate before the first available period.
+  const monthEnd = new Date(target.getFullYear(), target.getMonth() + 1, 0);
+  if (monthEnd < minMonday) return;
+  schemaMonthOffset--;
+  _calStripWorkouts = null;
+  loadSchema();
+}
+function schemaMonthNext() { schemaMonthOffset++; _calStripWorkouts = null; loadSchema(); }
+function schemaMonthToday() { schemaMonthOffset = 0; _calStripWorkouts = null; loadSchema(); }
+
+function _monthStartFromOffset(offset) {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth() + offset, 1);
+}
+
+// Switches between the week and month view. Persists the choice so the user
+// lands on the same view next time. Re-renders by calling loadSchema().
+function setSchemaView(mode) {
+  if (mode !== 'week' && mode !== 'month') return;
+  if (_schemaView === mode) return;
+  _schemaView = mode;
+  try { localStorage.setItem('schema_view_mode', mode); } catch (_e) { /* private mode */ }
+  // Sync pill UI immediately (don't wait for the next render).
+  document.querySelectorAll('#schema-view-toggle .schema-view-pill').forEach((b) => {
+    const active = b.dataset.view === mode;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  // Hide the "Idag" button until the new view's offset is computed in
+  // _loadSchema; it will reappear automatically when offset !== 0.
+  const todayBtn = document.getElementById('schema-today-btn');
+  if (todayBtn) todayBtn.classList.add('hidden');
+  // Manual edit mode is week-only. Drop it silently when switching to month.
+  if (mode === 'month' && _schemaEditMode) {
+    _schemaEditMode = false;
+    _destroyScheduleSortable && _destroyScheduleSortable();
+  }
+  loadSchema();
+}
 
 function getWeekIndexInPeriod(monday) {
   const p1Start = new Date(P1_START);
@@ -3966,10 +4615,13 @@ function openAddGoalSheet() {
   onGoalTypeChange();
   onRaceDistancePresetChange();
   modal.classList.remove('hidden');
+  // Wire focus trap + Escape via the standard Dialog helper.
+  openDialog('goal-add-modal');
 }
 
 function closeAddGoalSheet() {
   document.getElementById('goal-add-modal')?.classList.add('hidden');
+  closeDialog('goal-add-modal');
 }
 
 function onGoalTypeChange() {
@@ -6732,77 +7384,59 @@ async function fetchPlanWorkoutsByDate(planId, startDate, endDate) {
   return data || [];
 }
 
-// ── Plan info bar ──
-
-function updatePlanInfoBar(plan, planWeeks) {
-  const bar = document.getElementById('plan-info-bar');
-  if (!plan) {
-    bar.classList.add('hidden');
-    return;
-  }
-  bar.classList.remove('hidden');
-
-  const goalEl = document.getElementById('pib-goal');
-  goalEl.textContent = plan.goal_text || GOAL_TYPES.find(g => g.id === plan.goal_type)?.label || plan.goal_type;
-
-  const today = isoDate(new Date());
-  const currentWeek = planWeeks.find(w => {
-    const weekStart = new Date(plan.start_date);
-    weekStart.setDate(weekStart.getDate() + (w.week_number - 1) * 7);
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekEnd.getDate() + 6);
-    return today >= isoDate(weekStart) && today <= isoDate(weekEnd);
-  });
-
-  const phaseEl = document.getElementById('pib-phase');
-  if (currentWeek) {
-    const phaseLabel = PHASE_LABELS[currentWeek.phase] || currentWeek.phase;
-    phaseEl.textContent = `${phaseLabel} — V${currentWeek.week_number}`;
-    phaseEl.className = `pib-phase phase-badge phase-${currentWeek.phase}`;
-  } else {
-    phaseEl.textContent = '';
-  }
-
-  const totalWeeks = planWeeks.length;
-  const startD = new Date(plan.start_date);
-  const todayD = new Date();
-  const elapsedWeeks = Math.max(0, Math.floor((todayD - startD) / (7 * 86400000)));
-  const pct = Math.min(100, Math.round((elapsedWeeks / totalWeeks) * 100));
-
-  document.getElementById('pib-progress-fill').style.width = pct + '%';
-  document.getElementById('pib-progress-label').textContent = `${elapsedWeeks}/${totalWeeks}v`;
-}
-
 // ── Edit mode toggle ──
+//
+// The Redigera-pill (renderGenerateButton) opens a choice modal where the
+// user picks between manual drag-drop and AI-assisted edit. Manual mode
+// auto-saves; the only exit affordance is a floating "Klar" button rendered
+// above the schema content (#schema-edit-done-bar).
 
 function toggleSchemaEditMode() {
   _schemaEditMode = !_schemaEditMode;
-  const label = document.getElementById('schema-edit-label');
-  const toggle = document.getElementById('schema-edit-toggle');
-  const aiBtn = document.getElementById('schema-edit-ai-btn');
-  const icon = document.getElementById('schema-edit-icon');
-  if (label) label.textContent = _schemaEditMode ? 'Klar' : 'Redigera manuellt';
-  if (toggle) {
-    toggle.classList.toggle('active', _schemaEditMode);
-    toggle.classList.toggle('schema-edit-toggle--done', _schemaEditMode);
-  }
-  // Hide the AI-edit button while in manual edit mode so the toolbar
-  // collapses to a single prominent "Klar" button (matches the auto-save
-  // model — there's no separate cancel state to surface).
-  if (aiBtn) aiBtn.classList.toggle('hidden', _schemaEditMode);
-  // Swap pencil icon for a checkmark while editing.
-  if (icon) {
-    icon.innerHTML = _schemaEditMode
-      ? '<polyline points="20 6 9 17 4 12"/>'
-      : '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>';
-  }
+  loadSchema();
+}
+
+function exitSchemaEditMode() {
+  if (!_schemaEditMode) return;
+  _schemaEditMode = false;
   loadSchema();
 }
 
 function updateSchemaEditBar() {
-  const bar = document.getElementById('schema-edit-bar');
-  if (!bar) return;
-  bar.classList.toggle('hidden', !_activePlan);
+  // The pill itself (rendered by renderGenerateButton) replaces the old
+  // edit-bar; the only thing left to manage here is the floating "Klar"
+  // button, which is shown only while in edit mode.
+  const doneBar = document.getElementById('schema-edit-done-bar');
+  if (doneBar) doneBar.classList.toggle('hidden', !_schemaEditMode);
+}
+
+// ── Edit choice modal (Redigera → manuellt eller AI) ──
+
+function openSchemaEditChoice() {
+  const modal = document.getElementById('schema-edit-choice-modal');
+  if (modal) modal.classList.remove('hidden');
+}
+
+function closeSchemaEditChoice() {
+  const modal = document.getElementById('schema-edit-choice-modal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function chooseEditManual() {
+  closeSchemaEditChoice();
+  // Manual edit only makes sense in the week view (drag-drop targets the
+  // weekly grid). Switch silently if the user is currently in month view.
+  if (_schemaView === 'month') {
+    _schemaView = 'week';
+    try { localStorage.setItem('schema_view_mode', 'week'); } catch (_e) { /* ok */ }
+  }
+  if (!_schemaEditMode) toggleSchemaEditMode(); else loadSchema();
+}
+
+function chooseEditAi() {
+  closeSchemaEditChoice();
+  if (typeof closePlanManager === 'function') closePlanManager();
+  openPlanEditModal();
 }
 
 // ── Generate button ──
@@ -6818,6 +7452,15 @@ function renderGenerateButton() {
     : 'Hantera schema';
   const aiBadge = _activePlan?.generation_model ? '<span class="schema-pill-ai">AI</span>' : '';
 
+  // Redigera-pill is only meaningful when there's a plan to edit. We still
+  // render it (disabled) so the layout doesn't shift between states.
+  const editPill = _activePlan
+    ? `<button class="schema-plan-pill schema-plan-pill--edit" onclick="openSchemaEditChoice()">
+         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+         <span class="schema-pill-label">Redigera</span>
+       </button>`
+    : '';
+
   container.innerHTML = `
     <div class="schema-pill-row">
       <button class="schema-plan-pill" onclick="openPlanManager()">
@@ -6828,6 +7471,7 @@ function renderGenerateButton() {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         <span class="schema-pill-label">Skapa nytt schema</span>
       </button>
+      ${editPill}
     </div>`;
 }
 
@@ -8759,16 +9403,21 @@ async function updateFriendRequestBadge() {
       .select('id', { count: 'exact', head: true })
       .eq('receiver_id', currentProfile.id)
       .eq('status', 'pending');
-    const badge = document.getElementById('friend-request-badge');
-    if (!badge) return;
-    if (count > 0) {
-      badge.textContent = count > 9 ? '9+' : count;
-      badge.classList.remove('hidden');
-    } else {
-      badge.classList.add('hidden');
-    }
+    // Drive UI through the store so any subscriber (e.g. a future
+    // notifications panel) gets the same count.
+    store.set('friendRequests', count || 0);
   } catch (e) { console.error('updateFriendRequestBadge error:', e); }
 }
+
+// Diff-by-key DOM update for the friend-request badge.
+function _renderFriendRequestBadge(count) {
+  const badge = document.getElementById('friend-request-badge');
+  if (!badge) return;
+  const next = !count ? '' : (count > 9 ? '9+' : String(count));
+  if (badge.textContent !== next) badge.textContent = next;
+  badge.classList.toggle('hidden', !count);
+}
+store.on('friendRequests', _renderFriendRequestBadge);
 
 async function topbarSearchUsers() {
   const rawQ = document.getElementById('topbar-search-input').value.trim();
@@ -10939,6 +11588,8 @@ async function openCoachHistory() {
   if (!drawer || !backdrop || !list) return;
   drawer.hidden = false;
   backdrop.hidden = false;
+  // Wire focus trap + Escape via the standard Dialog helper.
+  openDialog('coach-history-drawer');
   list.innerHTML = `<div class="coach-loading"><div class="coach-loading-dots"><span></span><span></span><span></span></div></div>`;
   // Sprint 2: weekly check-in history moved from Progress to here.
   // Render it in parallel with the threads fetch so the drawer never
@@ -10983,6 +11634,7 @@ function closeCoachHistory() {
   const backdrop = document.getElementById('coach-history-backdrop');
   if (drawer) drawer.hidden = true;
   if (backdrop) backdrop.hidden = true;
+  closeDialog('coach-history-drawer');
 }
 
 async function loadCoachThread(threadId) {

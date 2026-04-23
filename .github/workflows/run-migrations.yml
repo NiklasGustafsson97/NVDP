@@ -28,6 +28,25 @@ jobs:
       # actions/checkout@v4.2.2
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
+      # ── Drift detection: surface (but don't fail on) any *.sql files that
+      #    aren't yet listed in _applied.txt. The next step will apply them;
+      #    this is just a visibility aid in the GitHub Actions log.
+      - name: Report pending migrations
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          APPLIED_FILE="sql/migrations/_applied.txt"
+          touch "$APPLIED_FILE"
+          pending=0
+          for f in sql/migrations/*.sql; do
+            BASENAME=$(basename "$f")
+            if ! grep -Fxq "$BASENAME" "$APPLIED_FILE"; then
+              echo "Pending: $BASENAME"
+              pending=$((pending + 1))
+            fi
+          done
+          echo "Pending migration count: $pending"
+
       - name: Run unapplied migrations
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

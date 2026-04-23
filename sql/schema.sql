@@ -1,6 +1,23 @@
 -- =============================================================================
--- Training tracker — Supabase Postgres schema
+-- Training tracker — Supabase Postgres schema (BASELINE ONLY)
 -- Run in Supabase SQL Editor or as a migration (service role bypasses RLS for DDL/seed).
+-- =============================================================================
+--
+-- IMPORTANT — bootstrapping a NEW environment:
+--
+--   1) Run this file first.
+--   2) Then apply EVERY file under `sql/migrations/*.sql` in lexical order
+--      (the GitHub Actions `Run SQL Migrations` workflow does this automatically
+--      on push to main; for local/manual setup run them yourself).
+--
+-- The RLS posture in this baseline is INTENTIONALLY PERMISSIVE in places
+-- (e.g. profiles SELECT `using (true)`). The hardened production policy lives
+-- in `sql/migrations/20260418_rls_lockdown.sql` (plus subsequent migrations).
+-- A database that runs schema.sql WITHOUT applying the migrations is NOT
+-- production-safe — it will leak profiles, workouts, etc. across users.
+--
+-- See also: `sql/migrations/_applied.txt` for the list of migrations the
+-- workflow has applied to production.
 -- =============================================================================
 
 -- gen_random_uuid() is provided by pgcrypto (enabled by default on Supabase).
