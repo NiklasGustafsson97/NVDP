@@ -2013,6 +2013,10 @@ function activityEmoji(type) {
 // ═══════════════════════
 //  WORKOUT MODAL (Edit / Delete)
 // ═══════════════════════
+// Strava-style workout modal: hero map (or gradient fallback) → stat-grid →
+// elevation chart → splits-as-bars → laps table → notes → source link →
+// reactions/comments. Falls back gracefully when fields are missing so a
+// manual log without GPS still looks intentional rather than broken.
 async function openWorkoutModal(w) {
   _wmFocusBefore = document.activeElement;
   selectedWorkout = w;
@@ -2021,69 +2025,127 @@ async function openWorkoutModal(w) {
   const ownerName = ownerProfile ? ownerProfile.name : '';
 
   const titlePrefix = isOwn ? '' : ownerName + ' — ';
-  // textContent is already XSS-safe; no escape needed here.
-  document.getElementById('wm-title').textContent = titlePrefix + w.activity_type + ' — ' + formatDate(w.workout_date);
+  const autoTitle = _autoWorkoutTitle(w);
+  document.getElementById('wm-title').textContent = titlePrefix + autoTitle;
 
-  const intBadge = w.intensity ? `<span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
-  let body = '';
-  body += `<div class="modal-detail-row"><span class="mdr-label">Aktivitet</span><span class="mdr-value">${escapeHTML(w.activity_type)} ${intBadge}${sourceBadge(w)}</span></div>`;
-  body += `<div class="modal-detail-row"><span class="mdr-label">Datum</span><span class="mdr-value">${escapeHTML(w.workout_date)}</span></div>`;
-  body += `<div class="modal-detail-row"><span class="mdr-label">Tid</span><span class="mdr-value">${w.duration_minutes} min</span></div>`;
-  if (w.distance_km) body += `<div class="modal-detail-row"><span class="mdr-label">Distans</span><span class="mdr-value">${w.distance_km} km</span></div>`;
-  if (w.workout_time) body += `<div class="modal-detail-row"><span class="mdr-label">Klockslag</span><span class="mdr-value">${escapeHTML(w.workout_time)}</span></div>`;
-  if (w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]')) body += `<div class="modal-detail-row"><span class="mdr-label">Anteckning</span><span class="mdr-value">${escapeHTML(w.notes)}</span></div>`;
-  if (w.source === 'strava') {
-    const stravaLink = w.strava_activity_id
-      ? `<a href="https://www.strava.com/activities/${encodeURIComponent(w.strava_activity_id)}" target="_blank" rel="noopener" class="strava-view-link">View on Strava</a>`
-      : '';
-    body += `<div class="modal-detail-row"><span class="mdr-label">Källa</span><span class="mdr-value" style="color:#FC4C02;">Strava auto-import ${stravaLink}</span></div>`;
+  // Tear down any prior chart/map before rebuilding the body so we don't
+  // leak Chart.js or Leaflet instances when the user opens modal A → B → A.
+  if (_wmMapInstance) {
+    try { _wmMapInstance.remove(); } catch (e) { /* ignore */ }
+    _wmMapInstance = null;
   }
-  if (w.source === 'garmin') {
-    const garminLink = w.garmin_activity_id
-      ? `<a href="https://connect.garmin.com/modern/activity/${encodeURIComponent(w.garmin_activity_id)}" target="_blank" rel="noopener" class="garmin-view-link">View on Garmin</a>`
-      : '';
-    body += `<div class="modal-detail-row"><span class="mdr-label">Källa</span><span class="mdr-value" style="color:#007CC3;">Garmin auto-import ${garminLink}</span></div>`;
+  if (window._wmElevChart) {
+    try { window._wmElevChart.destroy(); } catch (e) { /* ignore */ }
+    window._wmElevChart = null;
   }
 
-  if (w.avg_hr || w.max_hr) {
-    const hrParts = [];
-    if (w.avg_hr) hrParts.push(`Snitt ${w.avg_hr}`);
-    if (w.max_hr) hrParts.push(`Max ${w.max_hr}`);
-    body += `<div class="modal-detail-row"><span class="mdr-label">Puls</span><span class="mdr-value">${hrParts.join(' / ')} bpm</span></div>`;
-  }
-  if (w.elevation_gain_m) body += `<div class="modal-detail-row"><span class="mdr-label">Höjdmeter</span><span class="mdr-value">${Math.round(w.elevation_gain_m)} m</span></div>`;
-  if (w.avg_speed_kmh) {
-    const paceMin = 60 / w.avg_speed_kmh;
-    const paceStr = `${Math.floor(paceMin)}:${String(Math.round((paceMin % 1) * 60)).padStart(2, '0')}/km`;
-    body += `<div class="modal-detail-row"><span class="mdr-label">Tempo</span><span class="mdr-value">${w.avg_speed_kmh.toFixed(1)} km/h (${paceStr})</span></div>`;
-  }
-  if (w.calories) body += `<div class="modal-detail-row"><span class="mdr-label">Kalorier</span><span class="mdr-value">${w.calories} kcal</span></div>`;
-  if (w.avg_cadence) body += `<div class="modal-detail-row"><span class="mdr-label">Kadens</span><span class="mdr-value">${Math.round(w.avg_cadence)} spm</span></div>`;
-
-  // Splits (per-km) table
   const splits = w.splits_data ? (typeof w.splits_data === 'string' ? JSON.parse(w.splits_data) : w.splits_data) : null;
+  const laps = w.laps_data ? (typeof w.laps_data === 'string' ? JSON.parse(w.laps_data) : w.laps_data) : null;
+
+  let body = '';
+
+  // ── 1. Hero ────────────────────────────────────────────────────────────
+  const intBadge = w.intensity ? `<span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
+  const srcBadge = (w.source === 'strava' || w.source === 'garmin') ? _feedSourceBadge(w) : '';
+  const overlayMeta = `${escapeHTML(formatDate(w.workout_date))}${w.workout_time ? ' · ' + escapeHTML(w.workout_time) : ''}`;
+  if (w.map_polyline) {
+    body += `<div class="wm-hero wm-hero--map">
+      <div id="wm-map" class="wm-hero-map"></div>
+      <div class="wm-hero-overlay">
+        <div class="wm-hero-title">${escapeHTML(autoTitle)} ${intBadge}</div>
+        <div class="wm-hero-meta">${overlayMeta}${srcBadge ? ' ' + srcBadge : ''}</div>
+      </div>
+    </div>`;
+  } else {
+    body += `<div class="wm-hero wm-hero--gradient">
+      <span class="wm-hero-emoji">${activityEmoji(w.activity_type)}</span>
+      <div class="wm-hero-overlay">
+        <div class="wm-hero-title">${escapeHTML(autoTitle)} ${intBadge}</div>
+        <div class="wm-hero-meta">${overlayMeta}${srcBadge ? ' ' + srcBadge : ''}</div>
+      </div>
+    </div>`;
+  }
+
+  // ── 2. Stat grid ───────────────────────────────────────────────────────
+  const stats = [];
+  if (w.distance_km) stats.push({ label: 'Distans', value: (+w.distance_km).toFixed(2), unit: 'km' });
+  if (w.duration_minutes != null) {
+    const mins = w.duration_minutes;
+    const hh = Math.floor(mins / 60);
+    const mm = mins % 60;
+    stats.push({ label: 'Tid', value: hh > 0 ? `${hh}:${String(mm).padStart(2, '0')}` : `${mm}`, unit: hh > 0 ? 'h' : 'min' });
+  }
+  if (w.avg_speed_kmh) {
+    if (w.activity_type === 'Cykel') {
+      stats.push({ label: 'Snitthastighet', value: (+w.avg_speed_kmh).toFixed(1), unit: 'km/h' });
+    } else {
+      const paceMin = 60 / w.avg_speed_kmh;
+      const m = Math.floor(paceMin);
+      const s = String(Math.round((paceMin % 1) * 60)).padStart(2, '0');
+      stats.push({ label: 'Snittempo', value: `${m}:${s}`, unit: '/km' });
+    }
+  }
+  if (w.avg_hr) stats.push({ label: 'Snittpuls', value: Math.round(w.avg_hr), unit: 'bpm' });
+  if (w.max_hr) stats.push({ label: 'Maxpuls', value: Math.round(w.max_hr), unit: 'bpm' });
+  if (w.elevation_gain_m) stats.push({ label: 'Höjdmeter', value: Math.round(w.elevation_gain_m), unit: 'm' });
+  if (w.effort != null) stats.push({ label: 'Effort', value: (+w.effort).toFixed(1), unit: '' });
+  if (w.calories) stats.push({ label: 'Kalorier', value: w.calories, unit: 'kcal' });
+  if (w.avg_cadence) stats.push({ label: 'Kadens', value: Math.round(w.avg_cadence), unit: 'spm' });
+
+  if (stats.length > 0) {
+    body += `<div class="wm-stat-grid">` + stats.map(s =>
+      `<div class="wm-stat"><div class="wm-stat-value">${escapeHTML(String(s.value))}${s.unit ? `<span class="wm-stat-unit">${escapeHTML(s.unit)}</span>` : ''}</div><div class="wm-stat-label">${escapeHTML(s.label)}</div></div>`
+    ).join('') + `</div>`;
+  }
+
+  // ── 3. Elevation chart (canvas, populated below after innerHTML) ──────
+  const hasElevSeries = splits && splits.some(s => s.elevation_difference != null);
+  if (hasElevSeries && splits.length >= 2) {
+    body += `<div class="wm-section">
+      <div class="wm-section-title">Höjdprofil</div>
+      <div class="wm-elev-chart"><canvas id="wm-elev-canvas"></canvas></div>
+    </div>`;
+  }
+
+  // ── 4. Splits as bars ──────────────────────────────────────────────────
   if (splits && splits.length > 0) {
-    let splitsHtml = `<div class="wm-section-title">Kilometersplits</div><div class="wm-table-scroll"><table class="wm-splits-table"><thead><tr><th>Km</th><th>Tid</th><th>Tempo</th><th>Puls</th><th>Höjd</th></tr></thead><tbody>`;
-    splits.forEach(s => {
-      const km = s.split || Math.round(s.distance / 1000);
-      const mins = Math.floor(s.moving_time / 60);
-      const secs = s.moving_time % 60;
+    // Compute bar widths from pace: faster = longer accent bar. We anchor
+    // 100% width to the fastest km in the session and scale others linearly
+    // by speed ratio so visually scanning becomes "longer = stronger".
+    const speeds = splits.map(s => s.average_speed > 0 ? s.average_speed : 0);
+    const maxSpeed = Math.max(...speeds, 0.001);
+    body += `<div class="wm-section">
+      <div class="wm-section-title">Kilometersplits</div>
+      <div class="wm-splits">`;
+    splits.forEach((s, i) => {
+      const km = s.split || (i + 1);
+      const mins = Math.floor((s.moving_time || 0) / 60);
+      const secs = (s.moving_time || 0) % 60;
       const pace = s.average_speed > 0 ? 1000 / s.average_speed / 60 : 0;
       const paceMin = Math.floor(pace);
       const paceSec = Math.round((pace - paceMin) * 60);
-      const paceStr = pace > 0 ? `${paceMin}:${String(paceSec).padStart(2, '0')}/km` : '—';
-      const hr = s.average_heartrate ? Math.round(s.average_heartrate) : '—';
-      const elev = s.elevation_difference != null ? (s.elevation_difference > 0 ? '+' : '') + Math.round(s.elevation_difference) + 'm' : '—';
-      splitsHtml += `<tr><td>${km}</td><td>${mins}:${String(secs).padStart(2, '0')}</td><td>${paceStr}</td><td>${hr}</td><td>${elev}</td></tr>`;
+      const paceStr = pace > 0 ? `${paceMin}:${String(paceSec).padStart(2, '0')}` : '—';
+      const widthPct = speeds[i] > 0 ? Math.max(8, (speeds[i] / maxSpeed) * 100) : 8;
+      const isFastest = speeds[i] === maxSpeed && maxSpeed > 0;
+      const hr = s.average_heartrate ? `<span class="wm-split-pill">${Math.round(s.average_heartrate)}♥</span>` : '';
+      const elev = s.elevation_difference != null ? `<span class="wm-split-pill wm-split-pill--elev">${s.elevation_difference > 0 ? '+' : ''}${Math.round(s.elevation_difference)}m</span>` : '';
+      body += `<div class="wm-split-row${isFastest ? ' wm-split-row--fast' : ''}">
+        <div class="wm-split-km">Km ${km}</div>
+        <div class="wm-split-bar"><div class="wm-split-bar-fill" style="width:${widthPct.toFixed(1)}%"></div></div>
+        <div class="wm-split-pace">${paceStr}<span class="wm-split-pace-unit">/km</span></div>
+        <div class="wm-split-pills">${hr}${elev}</div>
+      </div>`;
     });
-    splitsHtml += '</tbody></table></div>';
-    body += splitsHtml;
+    body += `</div>
+      <div class="wm-splits-legend">Längre stapel = snabbare km</div>
+    </div>`;
   }
 
-  // Laps table
-  const laps = w.laps_data ? (typeof w.laps_data === 'string' ? JSON.parse(w.laps_data) : w.laps_data) : null;
+  // ── 5. Laps ────────────────────────────────────────────────────────────
   if (laps && laps.length > 1) {
-    let lapsHtml = `<div class="wm-section-title">Varv</div><div class="wm-table-scroll"><table class="wm-splits-table"><thead><tr><th>#</th><th>Distans</th><th>Tid</th><th>Tempo</th><th>Puls</th></tr></thead><tbody>`;
+    let lapsHtml = `<div class="wm-section">
+      <div class="wm-section-title">Varv</div>
+      <div class="wm-table-scroll"><table class="wm-splits-table wm-table"><thead><tr><th>#</th><th>Distans</th><th>Tid</th><th>Tempo</th><th>Puls</th></tr></thead><tbody>`;
     laps.forEach((lap, idx) => {
       const dist = (lap.distance / 1000).toFixed(2);
       const mins = Math.floor(lap.moving_time / 60);
@@ -2095,24 +2157,30 @@ async function openWorkoutModal(w) {
       const hr = lap.average_heartrate ? Math.round(lap.average_heartrate) : '—';
       lapsHtml += `<tr><td>${idx + 1}</td><td>${dist} km</td><td>${mins}:${String(secs).padStart(2, '0')}</td><td>${paceStr}</td><td>${hr}</td></tr>`;
     });
-    lapsHtml += '</tbody></table></div>';
+    lapsHtml += '</tbody></table></div></div>';
     body += lapsHtml;
   }
 
-  if (w.map_polyline) {
-    body += `<div id="wm-map" style="height:200px;border-radius:8px;margin:12px 0;"></div>`;
+  // ── 6. Notes ───────────────────────────────────────────────────────────
+  if (w.notes && w.notes !== 'Importerad' && !w.notes.startsWith('[Strava]')) {
+    body += `<div class="wm-notes-block"><div class="wm-section-title">Anteckning</div><blockquote class="wm-notes-quote">${escapeHTML(w.notes)}</blockquote></div>`;
   }
 
+  // ── 7. Source link ─────────────────────────────────────────────────────
+  if (w.source === 'strava' && w.strava_activity_id) {
+    body += `<div class="wm-source-row"><a href="https://www.strava.com/activities/${encodeURIComponent(w.strava_activity_id)}" target="_blank" rel="noopener" class="strava-view-link">Visa på Strava ↗</a></div>`;
+  } else if (w.source === 'garmin' && w.garmin_activity_id) {
+    body += `<div class="wm-source-row"><a href="https://connect.garmin.com/modern/activity/${encodeURIComponent(w.garmin_activity_id)}" target="_blank" rel="noopener" class="garmin-view-link">Visa på Garmin ↗</a></div>`;
+  }
+
+  // ── 8. Reactions + comments (loaded async) ────────────────────────────
   body += `<div id="wm-reactions" class="wm-reactions"><span class="text-dim">Laddar...</span></div>`;
   body += `<div id="wm-comments" class="wm-comments"><span class="text-dim">Laddar...</span></div>`;
 
   document.getElementById('wm-body').innerHTML = body;
 
+  // Map init (Leaflet) — same lifecycle as before but inside the hero now.
   if (w.map_polyline) {
-    if (_wmMapInstance) {
-      try { _wmMapInstance.remove(); } catch (e) { /* ignore */ }
-      _wmMapInstance = null;
-    }
     ensureLeafletLoaded().then(() => {
       setTimeout(() => {
         const modalEl = document.getElementById('workout-modal');
@@ -2137,14 +2205,59 @@ async function openWorkoutModal(w) {
           L.tileLayer(getMapTileUrl(), { maxZoom: 18 }).addTo(map);
           L.polyline(coords, { color: '#000', weight: 7, opacity: 0.15, lineCap: 'round', lineJoin: 'round' }).addTo(map);
           L.polyline(coords, { color: '#3B9DFF', weight: 4, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(map);
-          map.fitBounds(bounds, { padding: [30, 30], animate: false });
+          map.fitBounds(bounds, { padding: [20, 20], animate: false });
           _wmMapInstance = map;
-          setTimeout(() => { try { map.invalidateSize(); map.fitBounds(bounds, { padding: [30, 30], animate: false }); } catch (e) { /* ignore */ } }, 320);
+          setTimeout(() => { try { map.invalidateSize(); map.fitBounds(bounds, { padding: [20, 20], animate: false }); } catch (e) { /* ignore */ } }, 320);
         } catch (e) {
           console.error('Workout modal map init failed:', e);
         }
       }, 100);
     }).catch(() => {});
+  }
+
+  // Elevation chart (Chart.js) — derive cumulative elevation from per-km
+  // elevation_difference, since Strava's split payload doesn't include the
+  // absolute altitude track. We start at 0 so the curve is "relative gain"
+  // which is what runners actually care about.
+  if (hasElevSeries && splits.length >= 2) {
+    setTimeout(() => {
+      const canvas = document.getElementById('wm-elev-canvas');
+      if (!canvas || typeof Chart === 'undefined') return;
+      const labels = splits.map((s, i) => 'Km ' + (s.split || (i + 1)));
+      let cum = 0;
+      const data = splits.map(s => {
+        cum += (s.elevation_difference || 0);
+        return Math.round(cum);
+      });
+      const textDim = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
+      try {
+        window._wmElevChart = new Chart(canvas.getContext('2d'), {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              data,
+              borderColor: '#9B7CFF',
+              backgroundColor: 'rgba(155,124,255,0.18)',
+              borderWidth: 2,
+              fill: true,
+              tension: 0.35,
+              pointRadius: 0,
+              pointHoverRadius: 4,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.parsed.y} m` } } },
+            scales: {
+              x: { ticks: { color: textDim, maxTicksLimit: 6 }, grid: { display: false } },
+              y: { ticks: { color: textDim, callback: (v) => v + ' m' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+            },
+          },
+        });
+      } catch (e) { console.error('Elev chart failed:', e); }
+    }, 80);
   }
 
   const actionsEl = document.getElementById('wm-edit-actions');
@@ -2295,6 +2408,10 @@ function closeWorkoutModal() {
   if (_wmMapInstance) {
     try { _wmMapInstance.remove(); } catch (e) { /* ignore */ }
     _wmMapInstance = null;
+  }
+  if (window._wmElevChart) {
+    try { window._wmElevChart.destroy(); } catch (e) { /* ignore */ }
+    window._wmElevChart = null;
   }
   if (_wmFocusBefore && typeof _wmFocusBefore.focus === 'function') {
     try { _wmFocusBefore.focus(); } catch (e) { /* ignore */ }
@@ -3796,6 +3913,35 @@ function setProgressSubtab(id) {
     if (isActive) el.removeAttribute('hidden');
     else el.setAttribute('hidden', '');
   });
+}
+
+// Group sub-tabs: Progress (default) and Aktiviteter (the social feed).
+// Persisted in localStorage so users land back where they left. The feed is
+// lazy-rendered the first time the user lands on the Aktiviteter tab in a
+// session — initial group load only paints the Progress cards so opening
+// Grupp stays fast even on big groups.
+let _groupSubtab = 'progress';
+let _groupFeedRenderedOnce = false;
+function setGroupSubtab(id) {
+  if (!['progress', 'aktiviteter'].includes(id)) return;
+  _groupSubtab = id;
+  try { localStorage.setItem('group:subtab', id); } catch (e) { /* ignore */ }
+  document.querySelectorAll('#group-has-group .progress-subnav-btn').forEach((btn) => {
+    const isActive = btn.id === `group-subtab-${id}-btn`;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+  document.querySelectorAll('#group-has-group .progress-subtab').forEach((el) => {
+    const isActive = el.id === `group-subtab-${id}`;
+    el.classList.toggle('active', isActive);
+    if (isActive) el.removeAttribute('hidden');
+    else el.setAttribute('hidden', '');
+  });
+  // Lazy-render the feed the first time someone opens Aktiviteter.
+  if (id === 'aktiviteter' && !_groupFeedRenderedOnce && _cachedGroupWorkouts.length && _cachedGroupMembers.length) {
+    _groupFeedRenderedOnce = true;
+    renderGroupFeed(_cachedGroupWorkouts, _cachedGroupMembers);
+  }
 }
 
 let _mixUnit = 'hours';
@@ -6267,7 +6413,20 @@ async function _loadGroup() {
   let grpPlans = [];
   if (period) grpPlans = await fetchPlans(period.id);
   renderGroupWeekDetail(allWorkouts, members, grpPlans);
-  renderGroupFeed(allWorkouts, members);
+
+  // Restore persisted sub-tab (defaults to 'progress'). Render the feed only
+  // if Aktiviteter is the active tab — otherwise wait for setGroupSubtab to
+  // trigger lazy render. Avoids eager work on the more expensive view.
+  let savedSubtab = 'progress';
+  try { savedSubtab = localStorage.getItem('group:subtab') || 'progress'; } catch (e) { /* ignore */ }
+  if (!['progress', 'aktiviteter'].includes(savedSubtab)) savedSubtab = 'progress';
+  setGroupSubtab(savedSubtab);
+  if (savedSubtab === 'aktiviteter') {
+    _groupFeedRenderedOnce = true;
+    renderGroupFeed(allWorkouts, members);
+  } else {
+    _groupFeedRenderedOnce = false;
+  }
 
   // Group weekly chart
   renderGroupChart(allWorkouts, members);
@@ -6746,6 +6905,135 @@ async function showMoreFeed() {
   if (moreBtn) moreBtn.classList.toggle('hidden', _feedShown >= _feedAllItems.length);
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Feed helpers (Strava-style cards): polyline-to-SVG, auto-title, KPI grid.
+// _polylineToSvg renders the GPS track inline (no tile requests, no Leaflet)
+// so the feed scrolls smoothly even with 30+ activities. We normalise the
+// coordinates into a 320x180 viewBox and draw a single path. Y is flipped
+// because lat increases northward but SVG y grows downward.
+// ───────────────────────────────────────────────────────────────────────────
+function _polylineToSvg(polyline, opts) {
+  if (!polyline) return '';
+  let coords;
+  try { coords = decodePolyline(polyline); } catch (e) { return ''; }
+  if (!coords || coords.length < 2) return '';
+  const w = (opts && opts.width) || 320;
+  const h = (opts && opts.height) || 180;
+  const stroke = (opts && opts.stroke) || 'var(--accent, #3B9DFF)';
+  const pad = 6;
+  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+  for (const [lat, lng] of coords) {
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
+  }
+  const dLat = Math.max(maxLat - minLat, 1e-9);
+  const dLng = Math.max(maxLng - minLng, 1e-9);
+  // Lock 1:1 aspect so the route shape is preserved (don't stretch a
+  // north-south route into a wide rectangle). We pick the tighter of the
+  // two scales and centre the result.
+  const scale = Math.min((w - pad * 2) / dLng, (h - pad * 2) / dLat);
+  const offsetX = (w - dLng * scale) / 2;
+  const offsetY = (h - dLat * scale) / 2;
+  const pts = coords.map(([lat, lng]) => {
+    const x = offsetX + (lng - minLng) * scale;
+    const y = offsetY + (maxLat - lat) * scale;
+    return x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' ');
+  return `<svg class="feed-hero-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">`
+    + `<polyline points="${pts}" fill="none" stroke="rgba(0,0,0,0.25)" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>`
+    + `<polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`
+    + `</svg>`;
+}
+
+// Strava-style auto title: "Morgonlöpning", "Kvällscykling" etc. We derive
+// the time-of-day bucket from workout_time when available, otherwise fall
+// back to a plain activity label so the title is never empty.
+function _timeOfDayLabel(timeStr) {
+  if (!timeStr || typeof timeStr !== 'string') return null;
+  const m = timeStr.match(/^(\d{1,2})/);
+  if (!m) return null;
+  const hr = parseInt(m[1], 10);
+  if (isNaN(hr)) return null;
+  if (hr < 11) return 'Morgon';
+  if (hr < 14) return 'Lunch';
+  if (hr < 18) return 'Eftermiddags';
+  if (hr < 22) return 'Kvälls';
+  return 'Natt';
+}
+function _activityNoun(type) {
+  // Lowercase Swedish noun for combination with time-of-day prefix.
+  const map = {
+    'Löpning': 'löpning',
+    'Cykel': 'cykling',
+    'Gym': 'gympass',
+    'Hyrox': 'hyroxpass',
+    'Stakmaskin': 'stakpass',
+    'Längdskidor': 'skidåkning',
+    'Vila': 'vila',
+    'Annat': 'pass',
+  };
+  return map[type] || (type ? type.toLowerCase() : 'pass');
+}
+function _autoWorkoutTitle(w) {
+  const tod = _timeOfDayLabel(w.workout_time);
+  const noun = _activityNoun(w.activity_type);
+  if (tod) {
+    // "Morgon" + "löpning" → "Morgonlöpning". Lower-case noun lets us
+    // concatenate without a space — matches Strava's Swedish UI.
+    return tod + noun;
+  }
+  // No clock → capitalise activity label (e.g. "Löpning").
+  return w.activity_type || 'Pass';
+}
+
+// KPI grid per activity type. Returns the HTML for 3-4 stat tiles. Only
+// includes a tile when the underlying value exists, so a manual log without
+// pace/HR doesn't render hollow placeholders.
+function _kpiGridHtml(w) {
+  const tiles = [];
+  const isEndurance = w.activity_type === 'Löpning' || w.activity_type === 'Cykel'
+    || w.activity_type === 'Längdskidor' || w.activity_type === 'Stakmaskin';
+
+  if (w.distance_km && isEndurance) {
+    tiles.push({ label: 'Distans', value: (+w.distance_km).toFixed(2) + ' km' });
+  }
+  if (w.duration_minutes != null) {
+    const mins = w.duration_minutes;
+    const hh = Math.floor(mins / 60);
+    const mm = mins % 60;
+    const tStr = hh > 0 ? `${hh}h ${String(mm).padStart(2, '0')}m` : `${mm} min`;
+    tiles.push({ label: 'Tid', value: tStr });
+  }
+  if (isEndurance && w.avg_speed_kmh) {
+    if (w.activity_type === 'Cykel') {
+      tiles.push({ label: 'Snitt', value: (+w.avg_speed_kmh).toFixed(1) + ' km/h' });
+    } else {
+      const paceMin = 60 / w.avg_speed_kmh;
+      const m = Math.floor(paceMin);
+      const s = String(Math.round((paceMin % 1) * 60)).padStart(2, '0');
+      tiles.push({ label: 'Tempo', value: `${m}:${s}/km` });
+    }
+  }
+  if (w.avg_hr) {
+    tiles.push({ label: 'Snittpuls', value: Math.round(w.avg_hr) + ' bpm' });
+  }
+  // Strength-style sessions: surface effort + RPE-like cues since pace/distance are noise.
+  if (!isEndurance && w.effort != null) {
+    tiles.push({ label: 'Effort', value: (+w.effort).toFixed(1) });
+  }
+  return tiles.slice(0, 4).map(t =>
+    `<div class="feed-kpi"><div class="feed-kpi-value">${escapeHTML(t.value)}</div><div class="feed-kpi-label">${escapeHTML(t.label)}</div></div>`
+  ).join('');
+}
+
+function _feedSourceBadge(w) {
+  if (w.source === 'strava') return `<span class="feed-source-badge feed-source-badge--strava" title="Importerad från Strava">Strava</span>`;
+  if (w.source === 'garmin') return `<span class="feed-source-badge feed-source-badge--garmin" title="Importerad från Garmin">Garmin</span>`;
+  return '';
+}
+
 function renderFeedItems(items, members, reactions, comments) {
   const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
   return items.map(w => {
@@ -6761,7 +7049,8 @@ function renderFeedItems(items, members, reactions, comments) {
     const lastComment = wComments.length ? wComments[wComments.length - 1] : null;
 
     const intBadge = w.intensity ? `<span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
-    const notesSnip = w.notes && w.notes !== 'Importerad' ? `<div class="feed-notes">${escapeHTML(w.notes)}</div>` : '';
+    const showNote = w.notes && w.notes !== 'Importerad' && !w.notes.startsWith('[Strava]');
+    const notesSnip = showNote ? `<div class="feed-notes">${escapeHTML(w.notes)}</div>` : '';
 
     let lastCommentHtml = '';
     if (lastComment) {
@@ -6771,27 +7060,41 @@ function renderFeedItems(items, members, reactions, comments) {
       lastCommentHtml = `<div class="feed-last-comment"><span class="feed-comment-author">${escapeHTML(commenterName)}</span> ${escapeHTML(truncated)}</div>`;
     }
 
-    return `<div class="feed-item" onclick="openFeedWorkout(${globalIdx})">
-      <div class="feed-header">
+    const heroInner = w.map_polyline
+      ? _polylineToSvg(w.map_polyline, { stroke: color })
+      : `<div class="feed-hero-fallback" style="background:linear-gradient(135deg, ${color}55, ${color}22);"><span class="feed-hero-emoji">${activityEmoji(w.activity_type)}</span></div>`;
+
+    const title = _autoWorkoutTitle(w);
+    const dateLine = `${escapeHTML(formatDate(w.workout_date))}${w.workout_time ? ' · ' + escapeHTML(w.workout_time) : ''}`;
+
+    return `<article class="feed-card" onclick="openFeedWorkout(${globalIdx})">
+      <header class="feed-card-header">
         <div class="feed-avatar" style="background:${color}">${escapeHTML((member.name || '?')[0].toUpperCase())}</div>
         <div class="feed-info">
           <div class="feed-name">${escapeHTML(member.name || '?')}</div>
-          <div class="feed-date">${escapeHTML(formatDate(w.workout_date))}</div>
+          <div class="feed-date">${dateLine}</div>
         </div>
-        <div class="feed-type">${activityEmoji(w.activity_type)} ${w.duration_minutes}'${intBadge}</div>
+        ${_feedSourceBadge(w)}
+      </header>
+      <div class="feed-card-title">
+        <span class="feed-card-title-emoji">${activityEmoji(w.activity_type)}</span>
+        <span class="feed-card-title-text">${escapeHTML(title)}</span>
+        ${intBadge}
       </div>
+      <div class="feed-hero">${heroInner}</div>
+      <div class="feed-kpi-grid">${_kpiGridHtml(w)}</div>
       ${notesSnip}
       <div class="feed-reactions" onclick="event.stopPropagation()">
-        <button class="react-btn-sm${myReaction?.reaction === 'like' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','like')">
+        <button class="react-btn-sm${myReaction?.reaction === 'like' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','like')" aria-label="Gilla">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg> ${likes.length || ''}
         </button>
-        <button class="react-btn-sm${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','dislike')">
+        <button class="react-btn-sm${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','dislike')" aria-label="Ogilla">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg> ${dislikes.length || ''}
         </button>
-        <span class="feed-comment-count">💬 ${commentCount || ''}</span>
+        <span class="feed-comment-count" aria-label="Kommentarer">💬 ${commentCount || ''}</span>
       </div>
       ${lastCommentHtml}
-    </div>`;
+    </article>`;
   }).join('');
 }
 

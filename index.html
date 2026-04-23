@@ -54,7 +54,7 @@
   -->
   <link rel="icon" type="image/svg+xml"
     href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Crect%20width='100'%20height='100'%20rx='20'%20fill='%233498DB'/%3E%3Ctext%20x='50'%20y='70'%20font-family='Arial,sans-serif'%20font-size='62'%20font-weight='bold'%20text-anchor='middle'%20fill='white'%3EN%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/style.css?v=6c0afdc">
+  <link rel="stylesheet" href="css/style.css?v=group-strava-1">
   <!--
     PERF (Improvement #4): all script tags below now use `defer` so they
     download in parallel with HTML parsing and execute, in document order,
@@ -850,47 +850,51 @@
 
       <!-- Has group state -->
       <div id="group-has-group" class="hidden">
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Veckans leaderboard</span>
-          </div>
-          <div id="group-leaderboard" class="group-leaderboard"></div>
-        </div>
+        <nav class="progress-subnav" role="tablist" aria-label="Grupp-vyer">
+          <button type="button" role="tab" id="group-subtab-progress-btn" aria-controls="group-subtab-progress" aria-selected="true" class="progress-subnav-btn active" onclick="setGroupSubtab('progress')">Progress</button>
+          <button type="button" role="tab" id="group-subtab-aktiviteter-btn" aria-controls="group-subtab-aktiviteter" aria-selected="false" class="progress-subnav-btn" onclick="setGroupSubtab('aktiviteter')">Aktiviteter</button>
+        </nav>
 
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Veckans träning</span>
+        <div class="progress-subtab active" id="group-subtab-progress" role="tabpanel" aria-labelledby="group-subtab-progress-btn">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Veckans leaderboard</span>
+            </div>
+            <div id="group-leaderboard" class="group-leaderboard"></div>
           </div>
-          <div id="group-week-detail"></div>
-        </div>
 
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title" id="grp-chart-title">Timmar per vecka</span>
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Veckans träning</span>
+            </div>
+            <div id="group-week-detail"></div>
           </div>
-          <div class="chart-container"><canvas id="chart-group-weekly"></canvas></div>
-        </div>
 
-        <div class="card" id="group-effort-card">
-          <div class="card-header">
-            <span class="card-title">Effort per vecka</span>
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title" id="grp-chart-title">Timmar per vecka</span>
+            </div>
+            <div class="chart-container"><canvas id="chart-group-weekly"></canvas></div>
           </div>
-          <div class="chart-container"><canvas id="chart-group-effort"></canvas></div>
-          <div class="effort-legend" id="group-effort-legend"></div>
-        </div>
 
-        <div class="card">
-          <div class="card-title mb-8">Säsongstotaler (timmar)</div>
-          <div id="group-totals-bars"></div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Flöde</span>
+          <div class="card" id="group-effort-card">
+            <div class="card-header">
+              <span class="card-title">Effort per vecka</span>
+            </div>
+            <div class="chart-container"><canvas id="chart-group-effort"></canvas></div>
+            <div class="effort-legend" id="group-effort-legend"></div>
           </div>
+
+          <div class="card">
+            <div class="card-title mb-8">Säsongstotaler (timmar)</div>
+            <div id="group-totals-bars"></div>
+          </div>
+        </div><!-- /group-subtab-progress -->
+
+        <div class="progress-subtab" id="group-subtab-aktiviteter" role="tabpanel" aria-labelledby="group-subtab-aktiviteter-btn" hidden>
           <div id="group-feed"></div>
           <button class="btn btn-ghost btn-sm feed-more-btn hidden" id="feed-more-btn" onclick="showMoreFeed()">Visa fler</button>
-        </div>
+        </div><!-- /group-subtab-aktiviteter -->
 
         <div class="card hidden" id="group-settings-card" style="margin-top:24px;">
           <div class="card-header"><span class="card-title">Gruppinställningar</span></div>
@@ -1785,8 +1789,8 @@
   </div>
 </div>
 
-<script defer src="js/config.js?v=6c0afdc"></script>
-<script defer src="js/app.js?v=6c0afdc"></script>
+<script defer src="js/config.js?v=group-strava-1"></script>
+<script defer src="js/app.js?v=group-strava-1"></script>
 <!--
   Beta-gate logic. Loaded after app.js because it depends on `gateOpen`,
   `NVDP_resumeAfterGate` and `registerAction` defined there. Previously this

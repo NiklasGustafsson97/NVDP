@@ -1617,6 +1617,175 @@ input.code-input {
   overscroll-behavior-x: contain;
 }
 
+/* ── Workout modal: Strava-style hero / stat-grid / splits-bars ── */
+/* The body of the modal becomes scrollable with the hero pinned visually
+   at the top. We negate the modal's inner padding for the hero so the map
+   bleeds edge-to-edge, then re-add horizontal padding for everything below. */
+#wm-body { padding: 0; }
+#wm-body > .wm-section,
+#wm-body > .wm-stat-grid,
+#wm-body > .wm-notes-block,
+#wm-body > .wm-source-row,
+#wm-body > .wm-reactions,
+#wm-body > .wm-comments {
+  padding-left: 16px; padding-right: 16px;
+}
+#wm-body > .wm-reactions { padding-top: 12px; }
+
+.wm-hero {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: rgba(255,255,255,0.03);
+  margin-bottom: 8px;
+}
+.wm-hero-map { position: absolute; inset: 0; }
+.wm-hero--gradient {
+  background: linear-gradient(135deg, var(--accent, #3B9DFF) 0%, #6e44ff 100%);
+  display: flex; align-items: center; justify-content: center;
+}
+.wm-hero-emoji { font-size: 5rem; opacity: 0.8; filter: drop-shadow(0 4px 12px rgba(0,0,0,0.3)); }
+.wm-hero-overlay {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 14px 16px 12px;
+  background: linear-gradient(to top, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.25) 60%, rgba(0,0,0,0) 100%);
+  color: #fff;
+  pointer-events: none;
+}
+.wm-hero-overlay .feed-source-badge { pointer-events: auto; }
+.wm-hero-title {
+  font-size: 1.15rem; font-weight: 700; line-height: 1.2;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.wm-hero-meta {
+  font-size: 0.78rem; opacity: 0.92; margin-top: 4px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+
+.wm-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  padding-top: 12px; padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.wm-stat {
+  padding: 10px 8px;
+  border-right: 1px solid rgba(255,255,255,0.05);
+}
+.wm-stat:nth-child(3n) { border-right: none; }
+.wm-stat-value {
+  font-size: 1.45rem; font-weight: 700; line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.wm-stat-unit {
+  font-size: 0.75rem; font-weight: 500;
+  color: var(--text-dim); margin-left: 3px;
+}
+.wm-stat-label {
+  font-size: 0.65rem; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  margin-top: 4px;
+}
+@media (max-width: 480px) {
+  .wm-stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .wm-stat:nth-child(3n) { border-right: 1px solid rgba(255,255,255,0.05); }
+  .wm-stat:nth-child(2n) { border-right: none; }
+  .wm-stat-value { font-size: 1.25rem; }
+}
+
+.wm-section { margin-top: 16px; }
+.wm-section .wm-section-title { margin-top: 0; }
+
+.wm-elev-chart {
+  height: 140px; position: relative;
+}
+
+.wm-splits {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.wm-split-row {
+  display: grid;
+  grid-template-columns: 52px 1fr 70px auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+  transition: background 0.15s;
+}
+.wm-split-row:hover { background: rgba(255,255,255,0.03); }
+.wm-split-row--fast { background: rgba(46,204,113,0.06); }
+.wm-split-km {
+  font-weight: 600; color: var(--text-dim);
+  font-size: 0.75rem;
+}
+.wm-split-bar {
+  height: 8px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.wm-split-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent, #3B9DFF), #6e44ff);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+.wm-split-row--fast .wm-split-bar-fill {
+  background: linear-gradient(90deg, #2ECC71, #27AE60);
+}
+.wm-split-pace {
+  font-weight: 700; text-align: right;
+  font-size: 0.9rem;
+}
+.wm-split-pace-unit {
+  font-size: 0.7rem; color: var(--text-dim); font-weight: 500; margin-left: 2px;
+}
+.wm-split-pills { display: flex; gap: 4px; }
+.wm-split-pill {
+  font-size: 0.65rem; font-weight: 600;
+  padding: 2px 6px; border-radius: 999px;
+  background: rgba(255,255,255,0.06); color: var(--text-dim);
+  white-space: nowrap;
+}
+.wm-split-pill--elev { background: rgba(155,124,255,0.12); color: #9B7CFF; }
+.wm-splits-legend {
+  font-size: 0.7rem; color: var(--text-dim);
+  margin-top: 8px; text-align: right; font-style: italic;
+}
+
+.wm-notes-block { margin-top: 16px; }
+.wm-notes-quote {
+  margin: 0;
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.03);
+  border-left: 3px solid var(--accent, #3B9DFF);
+  border-radius: 4px;
+  font-size: 0.9rem; line-height: 1.5;
+  color: var(--text);
+}
+
+.wm-source-row {
+  margin-top: 14px; font-size: 0.85rem;
+}
+.wm-source-row a { color: var(--text-muted); text-decoration: none; font-weight: 500; }
+.wm-source-row a:hover { color: var(--text); }
+
+@media (max-width: 480px) {
+  .wm-split-row {
+    grid-template-columns: 44px 1fr 64px;
+    gap: 8px; font-size: 0.8rem;
+  }
+  /* Drop the pills column on very narrow screens to keep splits readable. */
+  .wm-split-pills { display: none; }
+}
+
 /* ── Settings input ── */
 .sm-setting-input {
   background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px;
@@ -1688,7 +1857,132 @@ input.code-input {
   padding: 0; display: flex; align-items: center; justify-content: center;
 }
 
-/* ── Group Feed ── */
+/* ── Group Feed (Strava-style cards) ── */
+/* Container around the feed items lives directly inside the Aktiviteter
+   sub-tab without a wrapping .card, so each .feed-card is its own surface
+   with breathing room between cards. */
+#group-feed { display: flex; flex-direction: column; gap: 14px; }
+
+.feed-card {
+  background: var(--card-bg, rgba(255,255,255,0.03));
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s;
+  display: flex;
+  flex-direction: column;
+}
+.feed-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+  border-color: rgba(255,255,255,0.10);
+}
+
+.feed-card-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px 8px;
+}
+.feed-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 0.9rem; color: #fff; flex-shrink: 0;
+}
+.feed-info { flex: 1; min-width: 0; }
+.feed-name { font-weight: 600; font-size: 0.92rem; line-height: 1.2; }
+.feed-date { font-size: 0.72rem; color: var(--text-dim); margin-top: 2px; }
+
+.feed-source-badge {
+  font-size: 0.65rem; font-weight: 600; letter-spacing: 0.04em;
+  padding: 3px 8px; border-radius: 999px;
+  text-transform: uppercase;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.feed-source-badge--strava { background: rgba(252,76,2,0.15); color: #FC4C02; }
+.feed-source-badge--garmin { background: rgba(0,124,195,0.15); color: #007CC3; }
+
+.feed-card-title {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 14px 10px;
+  font-weight: 700; font-size: 1.02rem; line-height: 1.25;
+}
+.feed-card-title-emoji { font-size: 1.1rem; }
+.feed-card-title-text { flex: 1; min-width: 0; }
+.feed-card-title .intensity-badge { flex-shrink: 0; }
+
+/* Hero is a 16:9 frame whether we have a polyline or not, so cards
+   maintain a consistent rhythm in the feed. SVG fills the box; the
+   gradient fallback centres a big emoji. */
+.feed-hero {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: rgba(255,255,255,0.02);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+.feed-hero-svg { width: 100%; height: 100%; display: block; }
+.feed-hero-fallback {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+}
+.feed-hero-emoji { font-size: 3rem; opacity: 0.85; }
+
+.feed-kpi-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 4px; padding: 12px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.feed-kpi-grid:empty { display: none; }
+.feed-kpi { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.feed-kpi-value {
+  font-weight: 700; font-size: 0.95rem; line-height: 1.1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.feed-kpi-label {
+  font-size: 0.65rem; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+@media (max-width: 480px) {
+  .feed-kpi-grid { grid-template-columns: repeat(3, 1fr); }
+  /* Hide the 4th tile on narrow screens so values don't truncate. */
+  .feed-kpi:nth-child(4) { display: none; }
+}
+
+.feed-notes {
+  font-size: 0.85rem; color: var(--text-muted);
+  padding: 10px 14px 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.4;
+}
+
+.feed-reactions {
+  display: flex; gap: 4px;
+  padding: 10px 14px 12px;
+  align-items: center;
+  margin-top: 0;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.feed-card .feed-notes + .feed-reactions { border-top: none; padding-top: 8px; }
+.feed-comment-count {
+  font-size: 0.78rem; color: var(--text-dim);
+  margin-left: auto; user-select: none;
+}
+.feed-last-comment {
+  font-size: 0.78rem; color: var(--text-muted);
+  padding: 0 14px 12px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.feed-comment-author { font-weight: 600; color: var(--text); margin-right: 4px; }
+
+/* Legacy .feed-item kept for any other surface that might still use it
+   (e.g. social feed elsewhere). The Strava-style cards above target
+   .feed-card and override visually. */
 .feed-item {
   padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
   cursor: pointer; transition: background 0.15s;
@@ -1696,23 +1990,7 @@ input.code-input {
 .feed-item:last-child { border-bottom: none; }
 .feed-item:hover { background: rgba(255,255,255,0.02); }
 .feed-header { display: flex; align-items: center; gap: 10px; }
-.feed-avatar {
-  width: 32px; height: 32px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 0.8rem; color: #fff; flex-shrink: 0;
-}
-.feed-info { flex: 1; min-width: 0; }
-.feed-name { font-weight: 600; font-size: 0.85rem; }
-.feed-date { font-size: 0.7rem; color: var(--text-dim); }
 .feed-type { font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
-.feed-notes { font-size: 0.8rem; color: var(--text-muted); margin-top: 6px; padding-left: 42px; }
-.feed-reactions { display: flex; gap: 4px; margin-top: 6px; padding-left: 42px; align-items: center; }
-.feed-comment-count { font-size: 0.75rem; color: var(--text-dim); margin-left: 4px; user-select: none; }
-.feed-last-comment {
-  font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; padding-left: 42px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.feed-comment-author { font-weight: 600; color: var(--text); margin-right: 2px; }
 
 /* ── Form Row (side-by-side) ── */
 .form-row { display: flex; gap: 12px; }
