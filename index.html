@@ -54,7 +54,7 @@
   -->
   <link rel="icon" type="image/svg+xml"
     href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Crect%20width='100'%20height='100'%20rx='20'%20fill='%233498DB'/%3E%3Ctext%20x='50'%20y='70'%20font-family='Arial,sans-serif'%20font-size='62'%20font-weight='bold'%20text-anchor='middle'%20fill='white'%3EN%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/style.css?v=03c777e">
+  <link rel="stylesheet" href="css/style.css?v=ui-polish-1">
   <!--
     PERF (Improvement #4): all script tags below now use `defer` so they
     download in parallel with HTML parsing and execute, in document order,
@@ -558,7 +558,6 @@
       <div class="card" id="progress-week-summary-card">
         <div class="card-header">
           <span class="card-title">Den här veckan</span>
-          <span class="card-sub" id="progress-week-summary-sub"></span>
         </div>
         <div id="progress-week-summary-body"></div>
       </div>
@@ -575,7 +574,7 @@
       <div class="card" id="pmc-card">
         <div class="card-header">
           <span class="card-title">Formtopp</span>
-          <button type="button" class="pmc-info-btn" id="pmc-info-btn" onclick="togglePmcInfo()" aria-label="Förklara CTL, ATL och TSB" aria-expanded="false">
+          <button type="button" class="pmc-info-btn" id="pmc-info-btn" onclick="togglePmcInfo()" aria-label="Förklara CTL och TSB" aria-expanded="false">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
           </button>
         </div>
@@ -587,8 +586,8 @@
             <li><strong>−10 till −30</strong> — bygger fitness, normalt trött.</li>
             <li><strong>&lt; −30</strong> — för hög belastning, dra ner.</li>
           </ul>
-          <p class="pmc-info-meta">CTL = långsiktig fitness (42 dagar). ATL = akut trötthet (7 dagar). TSB = CTL − ATL.</p>
-          <p class="pmc-info-meta"><strong>OBS — TSB rör sig "bakvänt":</strong> när du tränar hårt går TSB <em>ner</em> (du staplar trötthet snabbare än du bygger fitness). När du vilar eller är sjuk går TSB <em>upp</em> (akut trötthet faller snabbt, fitness faller långsamt). Du peakar genom att tapera, inte genom att köra hårt sista veckan. Samma räknesätt som Garmin Training Status och TrainingPeaks.</p>
+          <p class="pmc-info-meta">CTL = långsiktig fitness (42 dagar, se "Fitness"-grafen nedan). TSB = form i förhållande till trötthet.</p>
+          <p class="pmc-info-meta"><strong>OBS — TSB rör sig "bakvänt":</strong> när du tränar hårt går TSB <em>ner</em> (du staplar trötthet snabbare än du bygger fitness). När du vilar går TSB <em>upp</em> (tröttheten faller snabbt, fitness faller långsamt). Du peakar genom att tapera, inte genom att köra hårt sista veckan. Samma räknesätt som Garmin Training Status och TrainingPeaks.</p>
         </div>
 
         <div class="pmc-hero" id="pmc-hero">
@@ -600,23 +599,26 @@
           <div class="pmc-hero-tsb" id="pmc-hero-tsb" aria-hidden="true"></div>
         </div>
 
-        <div class="pmc-fitness-line" id="pmc-subtitle"></div>
-
         <div class="chart-container chart-container--skeleton" id="chart-pmc-wrap">
           <div class="chart-skeleton" id="chart-skeleton-pmc"></div>
           <canvas id="chart-pmc"></canvas>
         </div>
 
-        <button type="button" class="pmc-details-toggle" id="pmc-details-toggle" onclick="togglePmcDetails()" aria-controls="pmc-details" aria-expanded="false">
-          <span>Visa CTL, ATL och förklaring</span>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
-        </button>
+        <div class="pmc-status hidden" id="pmc-status" aria-hidden="true"></div>
+      </div>
 
-        <div class="pmc-details" id="pmc-details" hidden>
-          <div class="pmc-legend" id="pmc-legend"></div>
+      <div class="card" id="pmc-ctl-card">
+        <div class="card-header">
+          <span class="card-title">Fitness</span>
+          <span class="card-sub">Långsiktig belastning (CTL)</span>
         </div>
 
-        <div class="pmc-status hidden" id="pmc-status" aria-hidden="true"></div>
+        <div class="pmc-fitness-line" id="pmc-subtitle"></div>
+
+        <div class="chart-container chart-container--skeleton" id="chart-pmc-ctl-wrap">
+          <div class="chart-skeleton" id="chart-skeleton-pmc-ctl"></div>
+          <canvas id="chart-pmc-ctl"></canvas>
+        </div>
       </div>
 
       <div class="card" id="polarization-card">
@@ -1783,8 +1785,8 @@
   </div>
 </div>
 
-<script defer src="js/config.js?v=03c777e"></script>
-<script defer src="js/app.js?v=03c777e"></script>
+<script defer src="js/config.js?v=ui-polish-1"></script>
+<script defer src="js/app.js?v=ui-polish-1"></script>
 <!--
   Beta-gate logic. Loaded after app.js because it depends on `gateOpen`,
   `NVDP_resumeAfterGate` and `registerAction` defined there. Previously this

@@ -2672,6 +2672,71 @@ async function _loadSchemaMonth() {
   try { await updateCoachCheckinBanner(); } catch (_e) { /* non-blocking */ }
 }
 
+// ── Month-cell classifier helpers ───────────────────────────────────
+// Builds a Map<isoWeekKey, maxMinutes> across all visible plan + actual
+// workouts so we can mark the longest pass of each week with an "L" tag
+// even when the user hasn't typed "lång" in the label.
+function _smcWeekMaxMins(workouts, planWorkouts) {
+  const max = new Map();
+  const bump = (dateStr, mins) => {
+    if (!mins || mins <= 0) return;
+    const key = _isoWeekKey(dateStr);
+    if (!key) return;
+    if (!max.has(key) || mins > max.get(key)) max.set(key, mins);
+  };
+  for (const pw of planWorkouts || []) {
+    if (pw.is_rest) continue;
+    bump(pw.workout_date, pw.duration_minutes || 0);
+  }
+  for (const w of workouts || []) bump(w.workout_date, w.duration_minutes || 0);
+  return max;
+}
+
+// ISO week key (e.g. "2026-W17") shared between plan + actual lookups.
+function _isoWeekKey(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr + 'T00:00:00Z');
+  if (isNaN(d.getTime())) return null;
+  // ISO: Thursday in current week defines the year/week.
+  const day = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - day + 3);
+  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const diff = (d - firstThursday) / 86400000;
+  const week = 1 + Math.round((diff - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
+  return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+// Returns the small letter-tag span (or empty string) for a month-cell
+// item. Priority: long > quality > z2.
+function _smcTagHtml(item, dateObj, weekMaxByIso) {
+  const text = `${item.label || ''} ${item.desc || ''}`.toLowerCase();
+  const zone = (item.zone || '').toLowerCase();
+  const mins = item.mins || 0;
+  const type = (item.type || '').toLowerCase();
+
+  // Long pass: explicit label, or longest of the week, or duration heuristic.
+  const isoKey = _isoWeekKey(isoDate(dateObj));
+  const weekMax = isoKey ? (weekMaxByIso.get(isoKey) || 0) : 0;
+  const isLong =
+    /lång|long|long run|långpass/.test(text) ||
+    (weekMax >= 60 && mins >= weekMax) ||
+    (type.includes('löp') && mins >= 90) ||
+    (type.includes('cyk') && mins >= 120);
+  if (isLong) return '<span class="smc-pass-tag smc-pass-tag--long" title="Långpass">L</span>';
+
+  // Quality: high-zone or interval/tempo language.
+  const isQuality =
+    ['z3', 'z4', 'z5', 'mixed'].includes(zone) ||
+    /intervall|tempo|kvalitet|fartlek|backe|tröskel|threshold/.test(text);
+  if (isQuality) return '<span class="smc-pass-tag smc-pass-tag--quality" title="Kvalitetspass">K</span>';
+
+  // Easy aerobic.
+  if (zone === 'z1' || zone === 'z2') {
+    return '<span class="smc-pass-tag smc-pass-tag--z2" title="Lugnt aerobt pass">Z2</span>';
+  }
+  return '';
+}
+
 function renderSchemaMonth(ctx) {
   _monthRenderCtx = ctx;
   const { workouts, planWorkouts, legacyPlans, gridStart, gridEnd, monthStart } = ctx;
@@ -2738,24 +2803,48 @@ function renderSchemaMonth(ctx) {
         type: pw.activity_type || 'Löpning',
         zone: pw.intensity_zone || '',
         mins: pw.duration_minutes || 0,
+        km: pw.target_distance_km || 0,
         label: pw.label || '',
+        desc: pw.description || '',
       }));
       if (items.length === 0 && legacyForDay.length > 0) {
         for (const lp of legacyForDay) {
-          items.push({ type: lp.activity_type || 'Löpning', zone: '', mins: lp.duration_minutes || 0, label: lp.title || '' });
+          items.push({
+            type: lp.activity_type || 'Löpning',
+            zone: '', mins: lp.duration_minutes || 0, km: 0,
+            label: lp.title || '', desc: lp.description || '',
+          });
         }
       }
       // If nothing was planned but we have actuals, show those instead.
       if (items.length === 0 && dayWorkouts.length > 0) {
         for (const w of dayWorkouts) {
-          items.push({ type: w.activity_type, zone: '', mins: w.duration_minutes || 0, label: '' });
+          items.push({
+            type: w.activity_type, zone: w.intensity || '',
+            mins: w.duration_minutes || 0,
+            km: w.distance_km || 0,
+            label: '', desc: w.notes || '',
+          });
         }
       }
+
+      // Classify each item as long / quality / z2 / null so the user can
+      // tell at a glance what the day's character is. Long-pass uses a
+      // per-week max so it works even without explicit labels.
+      const weekMaxByIso = _smcWeekMaxMins(workouts, planWorkouts);
       const visible = items.slice(0, 2);
       for (const it of visible) {
-        const zoneBadge = it.zone ? `<span class="smc-pass-zone">${it.zone}</span>` : '';
-        const mins = it.mins ? `${it.mins}'` : '';
-        lines.push(`<div class="smc-pass-line">${activityEmoji(it.type)} ${zoneBadge} ${mins}</div>`);
+        const tagHtml = _smcTagHtml(it, d, weekMaxByIso);
+        const distStr = it.km ? `${(+it.km).toFixed(it.km % 1 ? 1 : 0)}km` : '';
+        const minStr = it.mins ? `${it.mins}'` : '';
+        const meta = [distStr, minStr].filter(Boolean).join(' · ');
+        lines.push(
+          `<div class="smc-pass-line">` +
+            `<span class="smc-pass-emoji">${activityEmoji(it.type)}</span>` +
+            tagHtml +
+            (meta ? `<span class="smc-pass-meta">${meta}</span>` : '') +
+          `</div>`
+        );
       }
       if (items.length > visible.length) {
         lines.push(`<div class="smc-more">+${items.length - visible.length} till</div>`);
@@ -4136,7 +4225,6 @@ function setSeasonBarMode(mode) {
 function renderProgressWeekSummary(workouts) {
   const card = document.getElementById('progress-week-summary-card');
   const body = document.getElementById('progress-week-summary-body');
-  const subEl = document.getElementById('progress-week-summary-sub');
   if (!card || !body) return;
 
   const now = new Date();
@@ -4163,18 +4251,26 @@ function renderProgressWeekSummary(workouts) {
   const longestNow = thisWeek.reduce((m, w) => Math.max(m, w.distance_km || 0), 0);
   const longestPrev = prevWeek.reduce((m, w) => Math.max(m, w.distance_km || 0), 0);
 
+  // SVG arrows inherit color via currentColor → .pws-stat-delta.up/down/flat.
+  const arrowUp = '<svg class="pws-stat-delta-ico" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+  const arrowDown = '<svg class="pws-stat-delta-ico" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>';
+  const arrowFlat = '<svg class="pws-stat-delta-ico" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>';
+
   function delta(cur, prev, unit) {
-    if (prev === 0 && cur === 0) return '<span class="pws-stat-delta flat">—</span>';
-    if (prev === 0) return `<span class="pws-stat-delta up">+${cur.toFixed(unit === 'count' ? 0 : 1)}${unit === 'count' ? '' : ' ' + unit} mot förra v</span>`;
+    if (prev === 0 && cur === 0) {
+      return `<span class="pws-stat-delta flat">${arrowFlat}<span>—</span></span>`;
+    }
+    if (prev === 0) {
+      const valStr = unit === 'count' ? `+${cur.toFixed(0)}` : `+${cur.toFixed(1)} ${unit}`;
+      return `<span class="pws-stat-delta up">${arrowUp}<span>${valStr}</span></span>`;
+    }
     const diff = cur - prev;
     const cls = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
+    const icon = diff > 0 ? arrowUp : diff < 0 ? arrowDown : arrowFlat;
     const sign = diff > 0 ? '+' : '';
-    if (unit === 'count') return `<span class="pws-stat-delta ${cls}">${sign}${diff} mot förra v</span>`;
-    return `<span class="pws-stat-delta ${cls}">${sign}${diff.toFixed(1)} ${unit} mot förra v</span>`;
+    const valStr = unit === 'count' ? `${sign}${diff}` : `${sign}${diff.toFixed(1)} ${unit}`;
+    return `<span class="pws-stat-delta ${cls}">${icon}<span>${valStr}</span></span>`;
   }
-
-  const dayName = ['mån', 'tis', 'ons', 'tors', 'fre', 'lör', 'sön'][todayDow];
-  if (subEl) subEl.textContent = `mån–${dayName} jämfört med samma sträcka förra veckan`;
 
   if (passesNow === 0 && passesPrev === 0) {
     body.innerHTML = '<div class="pws-empty">Inga pass loggade ännu denna vecka. Logga ett pass så fyller vi i sammanfattningen.</div>';
@@ -7664,30 +7760,97 @@ function renderGenerateButton() {
 
   const label = _activePlan
     ? (_activePlan.name || _activePlan.goal_text || 'Träningsplan')
-    : 'Hantera schema';
+    : 'Skapa träningsschema';
   const aiBadge = _activePlan?.generation_model ? '<span class="schema-pill-ai">AI</span>' : '';
 
-  // Redigera-pill is only meaningful when there's a plan to edit. We still
-  // render it (disabled) so the layout doesn't shift between states.
-  const editPill = _activePlan
-    ? `<button class="schema-plan-pill schema-plan-pill--edit" onclick="openSchemaEditChoice()">
-         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-         <span class="schema-pill-label">Redigera</span>
+  // Default surface is just one primary pill + a kebab. Editing, creating
+  // a new plan and managing all plans live inside the popover menu so the
+  // top of the dashboard stays calm.
+  const primaryAction = _activePlan ? 'openPlanManager()' : 'openPlanWizard()';
+  const editItem = _activePlan
+    ? `<button type="button" class="schema-pill-menu-item" onclick="closeSchemaPillMenu();openSchemaEditChoice()">
+         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+         <span>Redigera schemat</span>
        </button>`
+    : '';
+  const manageItem = _activePlan
+    ? `<button type="button" class="schema-pill-menu-item" onclick="closeSchemaPillMenu();openPlanManager()">
+         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+         <span>Hantera alla scheman</span>
+       </button>`
+    : '';
+
+  // Without an active plan the primary pill already does "Skapa nytt
+  // schema", so the kebab would just duplicate it. Hide it in that state.
+  const showMenu = !!_activePlan;
+  const kebabHtml = showMenu
+    ? `<div class="schema-pill-menu-wrap">
+        <button type="button" class="schema-pill-icon-btn" id="schema-pill-menu-btn" aria-label="Fler val" aria-haspopup="true" aria-expanded="false" onclick="toggleSchemaPillMenu(event)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+            <circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>
+          </svg>
+        </button>
+        <div class="schema-pill-menu hidden" id="schema-pill-menu" role="menu">
+          <button type="button" class="schema-pill-menu-item" onclick="closeSchemaPillMenu();openPlanWizard()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>Skapa nytt schema</span>
+          </button>
+          ${editItem}
+          ${manageItem}
+        </div>
+      </div>`
     : '';
 
   container.innerHTML = `
     <div class="schema-pill-row">
-      <button class="schema-plan-pill" onclick="openPlanManager()">
+      <button type="button" class="schema-plan-pill" onclick="${primaryAction}">
         <span class="schema-pill-label">${label}${aiBadge}</span>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
-      <button class="schema-plan-pill schema-plan-pill--create" onclick="openPlanWizard()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        <span class="schema-pill-label">Skapa nytt schema</span>
-      </button>
-      ${editPill}
+      ${kebabHtml}
     </div>`;
+}
+
+// ── Schema-pill kebab menu ──
+let _schemaPillMenuOpen = false;
+
+function toggleSchemaPillMenu(ev) {
+  if (ev) ev.stopPropagation();
+  const menu = document.getElementById('schema-pill-menu');
+  const btn = document.getElementById('schema-pill-menu-btn');
+  if (!menu || !btn) return;
+  _schemaPillMenuOpen = !_schemaPillMenuOpen;
+  menu.classList.toggle('hidden', !_schemaPillMenuOpen);
+  btn.setAttribute('aria-expanded', _schemaPillMenuOpen ? 'true' : 'false');
+  if (_schemaPillMenuOpen) {
+    setTimeout(() => {
+      document.addEventListener('click', _schemaPillMenuOutsideHandler);
+      document.addEventListener('keydown', _schemaPillMenuKeyHandler);
+    }, 0);
+  } else {
+    document.removeEventListener('click', _schemaPillMenuOutsideHandler);
+    document.removeEventListener('keydown', _schemaPillMenuKeyHandler);
+  }
+}
+
+function closeSchemaPillMenu() {
+  if (!_schemaPillMenuOpen) return;
+  _schemaPillMenuOpen = false;
+  const menu = document.getElementById('schema-pill-menu');
+  const btn = document.getElementById('schema-pill-menu-btn');
+  if (menu) menu.classList.add('hidden');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('click', _schemaPillMenuOutsideHandler);
+  document.removeEventListener('keydown', _schemaPillMenuKeyHandler);
+}
+
+function _schemaPillMenuOutsideHandler(e) {
+  const wrap = document.querySelector('.schema-pill-menu-wrap');
+  if (wrap && !wrap.contains(e.target)) closeSchemaPillMenu();
+}
+
+function _schemaPillMenuKeyHandler(e) {
+  if (e.key === 'Escape') closeSchemaPillMenu();
 }
 
 // ═══════════════════════

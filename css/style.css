@@ -2058,9 +2058,13 @@ input.code-input {
 }
 .invite-decline-btn:hover { background: rgba(255,255,255,0.04); color: var(--text-muted); }
 
-/* ── Generate Plan Button ── */
+/* ── Schema plan pill + kebab menu ──
+   Default surface is one primary pill ("Hantera schema · <plan>") plus a
+   small kebab. All edit / create / manage actions live inside the popover
+   so the dashboard isn't littered with floating buttons. */
 .schema-pill-row {
-  display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;
+  display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+  margin-bottom: 14px;
 }
 .schema-plan-pill {
   display: inline-flex; align-items: center; gap: 6px;
@@ -2073,20 +2077,71 @@ input.code-input {
 .schema-plan-pill:hover {
   border-color: var(--accent); background: rgba(214,99,158,0.06);
 }
-.schema-plan-pill--create { border-style: dashed; opacity: 0.85; }
-.schema-plan-pill--create:hover { opacity: 1; }
 .schema-plan-pill svg { flex-shrink: 0; opacity: 0.5; }
-.schema-pill-label { display: inline-flex; align-items: center; gap: 4px; }
+.schema-pill-label { display: inline-flex; align-items: center; gap: 6px; }
 .schema-pill-ai {
   font-size: 0.6rem; font-weight: 700; color: var(--accent);
   background: rgba(214,99,158,0.12); padding: 1px 5px;
   border-radius: 6px; letter-spacing: 0.3px;
 }
-/* Edit-pill — sits beside Nuvarande/Skapa nytt schema. Uses a subtle accent
-   tint so it's discoverable without screaming. */
-.schema-plan-pill--edit { border-color: rgba(214,99,158,0.35); }
-.schema-plan-pill--edit:hover { border-color: var(--accent); background: rgba(214,99,158,0.10); }
-.schema-plan-pill--edit svg { opacity: 0.75; }
+
+.schema-pill-menu-wrap { position: relative; display: inline-flex; }
+.schema-pill-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px;
+  background: transparent; border: 1px solid transparent;
+  border-radius: 50%;
+  color: var(--text-muted); cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.schema-pill-icon-btn:hover {
+  background: var(--bg-card-hover); color: var(--text);
+}
+.schema-pill-icon-btn[aria-expanded="true"] {
+  background: var(--bg-card-hover); color: var(--text);
+}
+.schema-pill-icon-btn:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.schema-pill-menu {
+  position: absolute; top: calc(100% + 6px); right: 0;
+  min-width: 220px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.35), 0 2px 6px rgba(0,0,0,0.2);
+  padding: 6px;
+  z-index: 30;
+  display: flex; flex-direction: column; gap: 2px;
+  animation: schemaMenuPop 0.12s ease-out;
+}
+[data-theme="light"] .schema-pill-menu {
+  box-shadow: 0 10px 28px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.08);
+}
+@keyframes schemaMenuPop {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.schema-pill-menu.hidden { display: none; }
+.schema-pill-menu-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px;
+  background: transparent; border: none; border-radius: 8px;
+  color: var(--text); font-family: var(--font);
+  font-size: 0.85rem; font-weight: 500;
+  text-align: left; width: 100%; cursor: pointer;
+  transition: background 0.12s;
+}
+.schema-pill-menu-item:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-card-hover));
+}
+.schema-pill-menu-item svg {
+  flex-shrink: 0; color: var(--text-muted); opacity: 0.85;
+}
+.schema-pill-menu-item:hover svg { color: var(--accent); opacity: 1; }
 
 /* ── Vecka / Månad-vy toggle ───────────────────────────────────────── */
 .schema-view-toggle {
@@ -2153,13 +2208,43 @@ input.code-input {
   display: flex; align-items: center; gap: 4px;
   font-size: 0.7rem; line-height: 1.15; color: var(--text-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0;
 }
 .smc-pass-line svg { flex-shrink: 0; opacity: 0.7; }
+.smc-pass-emoji { flex-shrink: 0; }
+.smc-pass-meta {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
 .smc-pass-zone {
   display: inline-block; flex-shrink: 0;
   font-size: 0.58rem; font-weight: 700; padding: 1px 4px;
   border-radius: 4px; background: rgba(255,255,255,0.06); color: var(--text-dim);
 }
+/* Type tag — one-letter classifier (L = långpass, K = kvalitet, Z2 = lugnt).
+   Matched colors mirror the dot/border palette used elsewhere in the schema. */
+.smc-pass-tag {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  min-width: 14px; height: 14px; padding: 0 4px;
+  border-radius: 4px;
+  font-size: 0.55rem; font-weight: 800; letter-spacing: 0.2px;
+  line-height: 1;
+}
+.smc-pass-tag--long {
+  background: rgba(52, 152, 219, 0.18); color: #5dade2;
+}
+.smc-pass-tag--quality {
+  background: rgba(231, 76, 60, 0.18); color: #ec7063;
+}
+.smc-pass-tag--z2 {
+  background: rgba(46, 204, 113, 0.16); color: #58d68d;
+}
+[data-theme="light"] .smc-pass-tag--long { background: rgba(52, 152, 219, 0.14); color: #2874a6; }
+[data-theme="light"] .smc-pass-tag--quality { background: rgba(231, 76, 60, 0.12); color: #c0392b; }
+[data-theme="light"] .smc-pass-tag--z2 { background: rgba(46, 204, 113, 0.14); color: #1e8449; }
+
 .smc-rest-pill {
   font-size: 0.68rem; font-weight: 600; color: var(--text-dim);
   font-style: italic;
@@ -2170,8 +2255,9 @@ input.code-input {
   .schema-month-grid { gap: 3px; }
   .smc-cell { min-height: 64px; padding: 4px 4px 3px; }
   .smc-day-num { font-size: 0.72rem; }
-  .smc-pass-line { font-size: 0.62rem; }
+  .smc-pass-line { font-size: 0.6rem; gap: 3px; }
   .smc-pass-zone { font-size: 0.52rem; padding: 0px 3px; }
+  .smc-pass-tag { font-size: 0.5rem; min-width: 12px; height: 12px; padding: 0 3px; }
 }
 
 /* ── Day detail modal (månadsvy → click) ───────────────────────────── */
@@ -3649,14 +3735,14 @@ body.chat-mode .content {
 }
 body.chat-mode #view-coach { height: 100%; }
 
+/* Coach shell sits on the page bg so the chat surface feels calm and
+   the bubbles + composer become the only "cards" — closer to the
+   Claude/ChatGPT mobile aesthetic. */
 .coach-shell {
   display: flex; flex-direction: column;
   height: 100%; max-width: 760px; margin: 0 auto;
-  background: var(--bg-card);
-  border-radius: 0;
+  background: var(--bg);
   border: none;
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
   overflow: hidden;
   position: relative;
 }
@@ -3664,54 +3750,43 @@ body.chat-mode #view-coach { height: 100%; }
 /* Header ────────────────────────────────────────────────────────── */
 .coach-header {
   display: flex; align-items: center;
-  gap: 12px; padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 60%),
-    var(--bg-card);
+  gap: 12px; padding: 10px 14px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
   position: sticky; top: 0; z-index: 2;
 }
-.coach-header-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.coach-header-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
 .coach-title {
-  font-size: 1.05rem; font-weight: 700; letter-spacing: -0.3px;
-  margin: 0;
+  font-size: 0.98rem; font-weight: 600; letter-spacing: -0.2px;
+  margin: 0; line-height: 1.2;
 }
 .coach-status {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 0.76rem; color: var(--text-muted);
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 0.72rem; color: var(--text-muted);
 }
 .coach-status-dot {
-  width: 7px; height: 7px; border-radius: 50%;
+  width: 6px; height: 6px; border-radius: 50%;
   background: var(--text-muted);
   flex-shrink: 0;
 }
-.coach-status--online .coach-status-dot {
-  background: #2ecc71;
-  box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.55);
-  animation: coachPulse 2.4s ease-out infinite;
-}
-@keyframes coachPulse {
-  0%   { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.55); }
-  70%  { box-shadow: 0 0 0 8px rgba(46, 204, 113, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
-}
+.coach-status--online .coach-status-dot { background: #2ecc71; }
 
 .coach-header-actions {
-  display: inline-flex; align-items: center; gap: 4px;
+  display: inline-flex; align-items: center; gap: 2px;
 }
 .coach-icon-btn {
-  width: 36px; height: 36px; border-radius: 50%;
+  width: 34px; height: 34px; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
   background: transparent; color: var(--text-muted);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
-.coach-icon-btn:hover { background: var(--bg-card-hover); color: var(--text); }
+.coach-icon-btn:hover { background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text); }
 .coach-icon-btn:focus-visible {
   outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text);
 }
 
 /* Avatar (header + bubble) ──────────────────────────────────────── */
@@ -3719,13 +3794,16 @@ body.chat-mode #view-coach { height: 100%; }
   flex-shrink: 0;
   border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #ffffff));
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #ffffff));
   color: #fff;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.18);
 }
-.coach-avatar--header { width: 38px; height: 38px; }
-.coach-avatar--msg { width: 28px; height: 28px; }
-.coach-avatar--msg svg { width: 14px; height: 14px; }
+.coach-avatar--header {
+  width: 34px; height: 34px;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.coach-avatar--header svg { width: 18px; height: 18px; }
+.coach-avatar--msg { width: 26px; height: 26px; }
+.coach-avatar--msg svg { width: 13px; height: 13px; }
 
 /* Archived banner ───────────────────────────────────────────────── */
 .coach-archived-banner {
@@ -3742,8 +3820,8 @@ body.chat-mode #view-coach { height: 100%; }
 .coach-messages {
   flex: 1; min-height: 0;
   overflow-y: auto;
-  padding: 16px 16px 8px;
-  display: flex; flex-direction: column; gap: 6px;
+  padding: 18px 16px 12px;
+  display: flex; flex-direction: column; gap: 10px;
   scroll-behavior: smooth;
 }
 
@@ -3761,16 +3839,18 @@ body.chat-mode #view-coach { height: 100%; }
 .coach-loading-dots span:nth-child(2) { animation-delay: 0.15s; }
 .coach-loading-dots span:nth-child(3) { animation-delay: 0.3s; }
 
-/* Date dividers */
+/* Date dividers — centered pill, no flanking lines, no SHOUTING. */
 .coach-date-divider {
-  display: flex; align-items: center; gap: 10px;
-  margin: 8px 4px;
-  font-size: 0.72rem; color: var(--text-muted);
-  text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+  margin: 14px 0 6px;
 }
-.coach-date-divider::before,
-.coach-date-divider::after {
-  content: ''; flex: 1; height: 1px; background: var(--border);
+.coach-date-divider span {
+  display: inline-block;
+  padding: 3px 11px;
+  font-size: 0.72rem; font-weight: 500;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  border-radius: 999px;
 }
 
 /* Tool status row */
@@ -3801,14 +3881,15 @@ body.chat-mode #view-coach { height: 100%; }
 
 .coach-msg-row--assistant .coach-avatar--msg { visibility: hidden; }
 .coach-msg-row--first.coach-msg-row--assistant .coach-avatar--msg { visibility: visible; }
-.coach-msg-row--continuation { margin-top: -2px; }
+.coach-msg-row--continuation { margin-top: -4px; }
+.coach-msg-row--first { margin-top: 4px; }
 
 .coach-msg {
-  max-width: 80%;
+  max-width: 78%;
   padding: 10px 14px;
-  border-radius: 16px;
+  border-radius: 18px;
   line-height: 1.5;
-  font-size: 0.95rem;
+  font-size: 0.94rem;
   word-wrap: break-word;
   overflow-wrap: anywhere;
   position: relative;
@@ -3816,45 +3897,45 @@ body.chat-mode #view-coach { height: 100%; }
 .coach-msg--plain { white-space: pre-wrap; }
 
 .coach-msg--assistant {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text);
-  border-bottom-left-radius: 6px;
 }
 [data-theme="light"] .coach-msg--assistant {
-  background: rgba(0,0,0,0.05);
-}
-.coach-msg-row--first.coach-msg-row--assistant .coach-msg--assistant {
-  border-top-left-radius: 18px;
-}
-.coach-msg-row--continuation.coach-msg-row--assistant .coach-msg--assistant {
-  border-top-left-radius: 8px;
+  background: rgba(0,0,0,0.045);
 }
 .coach-msg--user {
-  background: var(--accent);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--accent) 96%, var(--text)),
+    color-mix(in srgb, var(--accent) 88%, var(--text)));
   color: #fff;
-  border-bottom-right-radius: 6px;
-}
-.coach-msg-row--continuation.coach-msg-row--user .coach-msg--user {
-  border-top-right-radius: 8px;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 .coach-msg--system {
   background: transparent;
   color: var(--text-muted);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-style: italic;
   text-align: center;
   max-width: 100%;
-  padding: 6px 12px;
+  padding: 4px 12px;
 }
+
+/* Timestamps are noise on every message. Hide by default and reveal on
+   hover/focus of the row so they remain available without clutter. */
 .coach-msg-time {
   display: block;
-  font-size: 0.66rem;
+  font-size: 0.64rem;
   color: var(--text-muted);
   margin-top: 4px;
   text-align: right;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.coach-msg-row:hover .coach-msg-time,
+.coach-msg-row:focus-within .coach-msg-time {
   opacity: 0.7;
 }
-.coach-msg--user .coach-msg-time { color: rgba(255,255,255,0.78); }
+.coach-msg--user .coach-msg-time { color: rgba(255,255,255,0.85); }
 
 /* Markdown content inside assistant bubbles */
 .coach-msg-md > *:first-child { margin-top: 0; }
@@ -3885,14 +3966,14 @@ body.chat-mode #view-coach { height: 100%; }
 /* Typing indicator */
 .coach-typing {
   align-self: flex-start;
-  margin-left: 36px;
+  margin-left: 34px;
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 10px 14px;
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-  border-radius: 18px; border-bottom-left-radius: 6px;
+  padding: 9px 14px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border-radius: 18px;
   max-width: 80%;
 }
-[data-theme="light"] .coach-typing { background: rgba(0,0,0,0.05); }
+[data-theme="light"] .coach-typing { background: rgba(0,0,0,0.045); }
 .coach-typing-dots { display: inline-flex; gap: 4px; }
 .coach-typing-dots span {
   width: 6px; height: 6px; border-radius: 50%;
@@ -4095,58 +4176,77 @@ body.chat-mode #view-coach { height: 100%; }
 
 /* Chips row ──────────────────────────────────────────────────────── */
 .coach-chips {
-  display: flex; flex-wrap: wrap; gap: 8px;
-  padding: 6px 16px 0;
+  display: flex; flex-wrap: nowrap; gap: 6px;
+  padding: 4px 14px 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+.coach-chips::-webkit-scrollbar { display: none; }
 .coach-chips:empty { display: none; }
 .coach-chip {
-  padding: 7px 12px; border-radius: 18px;
-  background: transparent; color: var(--text);
-  border: 1px solid var(--border);
-  font-size: 0.82rem; font-weight: 500;
+  flex-shrink: 0;
+  padding: 6px 12px; border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
+  border: 1px solid transparent;
+  font-size: 0.8rem; font-weight: 500;
   cursor: pointer; font-family: var(--font);
   transition: all 0.15s;
+  white-space: nowrap;
 }
 .coach-chip:hover {
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg-card-hover));
-  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text);
 }
 .coach-chip:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
 /* Composer ──────────────────────────────────────────────────────── */
+/* Floating "island" composer — sits inside the page bg with its own
+   shadow + rounded surface. The send button is absolutely positioned
+   inside the input shell so the input fills the row visually. */
 .coach-composer {
-  display: flex; align-items: flex-end; gap: 8px;
-  padding: 10px 12px max(14px, env(safe-area-inset-bottom));
-  border-top: 1px solid var(--border);
-  background: var(--bg-card);
+  display: flex; align-items: flex-end; gap: 0;
+  padding: 8px 12px max(12px, env(safe-area-inset-bottom));
+  background: var(--bg);
+  border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
 }
 .coach-composer-inner {
-  flex: 1; position: relative;
+  flex: 1;
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+[data-theme="light"] .coach-composer-inner {
+  box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+}
+.coach-composer-inner:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent),
+              0 2px 10px rgba(0,0,0,0.18);
 }
 .coach-input {
   display: block; width: 100%;
   resize: none;
-  min-height: 40px; max-height: 140px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  background: var(--bg-card-hover);
+  min-height: 44px; max-height: 140px;
+  padding: 11px 52px 11px 16px;
+  border: none;
+  border-radius: 22px;
+  background: transparent;
   color: var(--text);
   font-family: var(--font);
   font-size: 0.95rem; line-height: 1.4;
-  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.coach-input:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
-}
+.coach-input:focus { outline: none; }
 .coach-char-count {
   position: absolute;
-  right: 12px; bottom: -16px;
+  right: 56px; bottom: -16px;
   font-size: 0.7rem; color: var(--text-muted);
   pointer-events: none;
 }
@@ -4154,23 +4254,25 @@ body.chat-mode #view-coach { height: 100%; }
 .coach-char-count--warn { color: var(--red); font-weight: 600; }
 
 .coach-send-btn {
+  position: absolute;
+  right: 6px; bottom: 6px;
   flex-shrink: 0;
-  width: 40px; height: 40px; border-radius: 50%;
+  width: 32px; height: 32px; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--accent); color: #fff;
   border: none; cursor: pointer;
   transition: background 0.15s, transform 0.1s, opacity 0.15s;
 }
-.coach-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.coach-send-btn:not(:disabled):hover { transform: scale(1.05); }
+.coach-send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.coach-send-btn:not(:disabled):hover { background: color-mix(in srgb, var(--accent) 88%, #ffffff); }
+.coach-send-btn:not(:disabled):active { transform: scale(0.94); }
 .coach-send-btn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
 }
+.coach-send-btn svg { width: 15px; height: 15px; }
 .coach-send-btn .coach-stop-icon { display: none; }
-.coach-send-btn--stop {
-  background: var(--red, #e74c3c);
-}
+.coach-send-btn--stop { background: var(--red, #e74c3c); }
 .coach-send-btn--stop .coach-send-icon { display: none; }
 .coach-send-btn--stop .coach-stop-icon { display: inline-block; }
 
@@ -4246,8 +4348,10 @@ body.chat-mode #view-coach { height: 100%; }
 
 /* Mobile ────────────────────────────────────────────────────────── */
 @media (max-width: 700px) {
-  .coach-shell { border-radius: 0; border-left: none; border-right: none; }
-  .coach-msg { max-width: 86%; }
+  .coach-shell { border-radius: 0; }
+  .coach-msg { max-width: 84%; }
+  .coach-messages { padding: 14px 12px 10px; }
+  .coach-composer { padding: 6px 8px max(10px, env(safe-area-inset-bottom)); }
 
   .coach-drawer {
     width: 100%;
