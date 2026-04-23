@@ -78,14 +78,17 @@ serve(async (req) => {
 
     const accessToken = await refreshTokenIfNeeded(conn);
 
-    // Always look back at least 14 days for normal sync (catches edge cases
-    // where Strava's start_date sits right at the previous boundary). Deep
-    // sync (no since) goes back 60 days.
+    // TWEAK-5: when the client supplies an explicit `since` (e.g. "Synka allt"
+    // sends the start of last calendar year), we honour it verbatim — no min-
+    // with-14-days-ago clamp. That used to silently strip away any historical
+    // backfill request, which is why season totals lagged Strava by hundreds
+    // of km. For incremental syncs (no `since`) we keep the original behaviour:
+    // last_sync_at, capped to the last 14 days as a safety net, falling back
+    // to 60 days when the connection is brand new.
     const fourteenDaysAgo = Math.floor(Date.now() / 1000) - 14 * 24 * 3600;
     let after: number;
     if (since) {
-      const sinceTs = Math.floor(new Date(since).getTime() / 1000);
-      after = Math.min(sinceTs, fourteenDaysAgo);
+      after = Math.floor(new Date(since).getTime() / 1000);
     } else {
       const sixtyDaysAgo = Math.floor(Date.now() / 1000) - 60 * 24 * 3600;
       const lastSyncTs = conn.last_sync_at
@@ -126,7 +129,10 @@ serve(async (req) => {
     debug.athlete_id = athlete.id;
     debug.token_scope = conn.access_token ? "present" : "missing";
 
-    const maxPages = since ? 10 : 5;
+    // TWEAK-5: deep backfills (with `since`) need many more pages than an
+    // incremental sync. 30 pages × 50 = 1500 activities, enough to cover
+    // ~16 months of regular training without a refetch.
+    const maxPages = since ? 30 : 5;
     while (page <= maxPages) {
       const url = `https://www.strava.com/api/v3/athlete/activities?after=${after}&per_page=50&page=${page}`;
       const activitiesRes = await fetch(url, {

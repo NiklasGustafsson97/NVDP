@@ -3583,6 +3583,14 @@ async function _ensurePlanDerivedRaceGoal(plan, profileId) {
       (g) => g.goal_type === 'plan_derived_race' && g.plan_id === plan.id,
     );
     const title = plan.goal_text ? plan.goal_text : 'Racemål från plan';
+    // TWEAK-3: pull the race distance off the plan's constraints JSON when the
+    // wizard captured one. Falls back to whatever parseGoalText derived from
+    // free text on older plans.
+    const raceDistanceKm = (() => {
+      const v = plan?.constraints?.race_distance_km;
+      const n = typeof v === 'number' ? v : parseFloat(v);
+      return (Number.isFinite(n) && n > 0) ? n : null;
+    })();
     if (!existing) {
       const payload = {
         profile_id: profileId,
@@ -3593,20 +3601,26 @@ async function _ensurePlanDerivedRaceGoal(plan, profileId) {
         target_unit: 'race',
         target_date: plan.goal_date,
         baseline_date: plan.start_date || null,
+        ...(raceDistanceKm ? { target_distance_km: raceDistanceKm } : {}),
       };
       const { data, error } = await sb.from('user_goals').insert(payload).select().single();
       if (!error && data) _userGoals.unshift(data);
-    } else if (
-      existing.target_date !== plan.goal_date ||
-      existing.title !== title
-    ) {
-      const { data, error } = await sb.from('user_goals')
-        .update({ target_date: plan.goal_date, title })
-        .eq('id', existing.id)
-        .select()
-        .single();
-      if (!error && data) {
-        Object.assign(existing, data);
+    } else {
+      const patch = {};
+      if (existing.target_date !== plan.goal_date) patch.target_date = plan.goal_date;
+      if (existing.title !== title) patch.title = title;
+      if (raceDistanceKm && existing.target_distance_km !== raceDistanceKm) {
+        patch.target_distance_km = raceDistanceKm;
+      }
+      if (Object.keys(patch).length > 0) {
+        const { data, error } = await sb.from('user_goals')
+          .update(patch)
+          .eq('id', existing.id)
+          .select()
+          .single();
+        if (!error && data) {
+          Object.assign(existing, data);
+        }
       }
     }
   } catch (e) {
@@ -4098,10 +4112,12 @@ function renderSeasonTotals(workouts) {
 
   const sumHours = (arr) => arr.reduce((s, w) => s + (w.duration_minutes || 0), 0) / 60;
   const sumKm = (arr) => arr.reduce((s, w) => s + (w.distance_km || 0), 0);
+  const sumElev = (arr) => arr.reduce((s, w) => s + (w.elevation_gain_m || 0), 0);
 
   const totalSessions = workouts.length;
   const totalHours = (workouts.reduce((s, w) => s + (w.duration_minutes || 0), 0) / 60).toFixed(1);
   const totalDist = workouts.reduce((s, w) => s + (w.distance_km || 0), 0);
+  const totalElev = sumElev(workouts);
 
   const ytdSessionsNow = ytdNow.length;
   const ytdSessionsPrev = ytdPrev.length;
@@ -4109,6 +4125,8 @@ function renderSeasonTotals(workouts) {
   const ytdHoursPrev = sumHours(ytdPrev);
   const ytdKmNow = sumKm(ytdNow);
   const ytdKmPrev = sumKm(ytdPrev);
+  const ytdElevNow = sumElev(ytdNow);
+  const ytdElevPrev = sumElev(ytdPrev);
 
   // Format the YoY delta as a small pill under each stat. We hide the pill
   // entirely if there's no history a year back (`prev === 0`) instead of
@@ -4138,6 +4156,11 @@ function renderSeasonTotals(workouts) {
         <span class="season-stat-val">${totalDist.toFixed(0)}km</span>
         <span class="season-stat-label">Distans</span>
         ${yoyPill(ytdKmNow, ytdKmPrev)}
+      </div>
+      <div class="season-stat">
+        <span class="season-stat-val">${Math.round(totalElev).toLocaleString('sv-SE')}m</span>
+        <span class="season-stat-label">Höjdmeter</span>
+        ${yoyPill(ytdElevNow, ytdElevPrev)}
       </div>
     </div>`;
   }
@@ -6267,11 +6290,21 @@ async function syncStrava() {
   if (btn) { btn.classList.remove('syncing'); btn.textContent = 'Synka'; }
 }
 
+// TWEAK-5: cutoff for the deep "Synka allt" backfill. We pull from 1 jan
+// of last calendar year — that covers the full current season + the prior
+// year needed for YoY comparisons in season totals, without dragging in
+// ancient data the user no longer cares about.
+function _deepSyncSinceDate() {
+  const prevYear = new Date().getFullYear() - 1;
+  return `${prevYear}-01-01`;
+}
+
 async function syncStravaAll() {
   if (!_stravaConnection || !currentProfile) return;
+  const sinceDate = _deepSyncSinceDate();
   const confirmed = await showConfirmModal(
     'Synka allt från Strava',
-    'Detta hämtar alla aktiviteter från Strava, inte bara nya. Det tar längre tid och behövs normalt bara om data saknas.\n\nVanlig synk sker automatiskt varje timme.',
+    `Detta hämtar alla aktiviteter sedan ${sinceDate} från Strava (täcker nuvarande säsong + förra året för jämförelser). Det tar längre tid än en vanlig synk.\n\nVanlig synk sker automatiskt varje timme.`,
     'Synka allt ändå',
     false
   );
@@ -6288,7 +6321,7 @@ async function syncStravaAll() {
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ profile_id: currentProfile.id, since: null }),
+      body: JSON.stringify({ profile_id: currentProfile.id, since: _deepSyncSinceDate() }),
     });
 
     const result = await res.json();
@@ -6819,6 +6852,12 @@ function openPlanWizard() {
 
   document.getElementById('wizard-goal-fields').classList.add('hidden');
   document.getElementById('wiz-race-fields').style.display = 'none';
+  const raceDistSel = document.getElementById('wiz-race-distance');
+  if (raceDistSel) raceDistSel.value = '10';
+  const raceDistCustom = document.getElementById('wiz-race-distance-custom');
+  if (raceDistCustom) raceDistCustom.value = '';
+  const raceDistCustomWrap = document.getElementById('wiz-race-distance-custom-wrap');
+  if (raceDistCustomWrap) raceDistCustomWrap.hidden = true;
 
   const actGrid = document.getElementById('wiz-activity-types');
   actGrid.innerHTML = ACTIVITY_TYPES.filter(t => t !== 'Vila').map(t =>
@@ -6837,6 +6876,9 @@ function openPlanWizard() {
   document.getElementById('wiz-recent-5k').value = '';
   document.getElementById('wiz-recent-10k').value = '';
   document.getElementById('wiz-easy-pace').value = '';
+  const prefillHint = document.getElementById('wiz-prefill-hint');
+  if (prefillHint) prefillHint.classList.add('hidden');
+  prefillWizardFromLastPlan();
 
   const freeText = document.getElementById('wiz-free-text');
   if (freeText) freeText.value = '';
@@ -6854,11 +6896,53 @@ function closePlanWizard() {
   document.getElementById('plan-wizard').classList.add('hidden');
 }
 
+// TWEAK-2: prefill the wizard's physiology fields (resting HR, max HR, 5k/10k
+// times, easy pace) from the user's most recently created training plan so
+// they don't have to retype values that haven't changed. Runs async after the
+// modal opens — the user typically reads the goal grid first, so the slight
+// delay is invisible.
+async function prefillWizardFromLastPlan() {
+  if (!currentProfile) return;
+  try {
+    const { data: lastPlan, error } = await sb.from('training_plans')
+      .select('baseline')
+      .eq('profile_id', currentProfile.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    const b = lastPlan?.baseline;
+    if (!b || typeof b !== 'object') return;
+
+    let didFill = false;
+    const setIfPresent = (id, val) => {
+      if (val === null || val === undefined || val === '') return;
+      const el = document.getElementById(id);
+      if (!el || el.value) return; // don't clobber what the user already typed
+      el.value = val;
+      didFill = true;
+    };
+    setIfPresent('wiz-resting-hr', b.resting_hr);
+    setIfPresent('wiz-max-hr', b.max_hr);
+    setIfPresent('wiz-recent-5k', b.recent_5k);
+    setIfPresent('wiz-recent-10k', b.recent_10k);
+    setIfPresent('wiz-easy-pace', b.easy_pace);
+
+    if (didFill) {
+      const hint = document.getElementById('wiz-prefill-hint');
+      if (hint) hint.classList.remove('hidden');
+    }
+  } catch (e) {
+    console.warn('Prefill from last plan failed:', e);
+  }
+}
+
 function selectWizardGoal(goalId) {
   _wizardGoalType = goalId;
   document.querySelectorAll('.wizard-goal-card').forEach(c => c.classList.toggle('selected', c.dataset.goal === goalId));
   document.getElementById('wizard-goal-fields').classList.remove('hidden');
   document.getElementById('wiz-race-fields').style.display = (goalId === 'race') ? '' : 'none';
+  if (goalId === 'race') onWizRaceDistanceChange();
 
   const placeholders = {
     race: 't.ex. Halvmarathon under 1:45',
@@ -6872,6 +6956,28 @@ function selectWizardGoal(goalId) {
 
 function toggleWizActivity(btn) {
   btn.classList.toggle('active');
+}
+
+// TWEAK-3: race distance picker. Custom input is shown only when the user
+// picks "Annan…" from the preset dropdown.
+function onWizRaceDistanceChange() {
+  const sel = document.getElementById('wiz-race-distance');
+  const wrap = document.getElementById('wiz-race-distance-custom-wrap');
+  if (!sel || !wrap) return;
+  wrap.hidden = sel.value !== 'custom';
+}
+
+// Returns the chosen race distance in km (or null when invalid). Used by
+// collectWizardPayload + the post-save plan_derived_race goal hookup.
+function readWizRaceDistanceKm() {
+  const sel = document.getElementById('wiz-race-distance');
+  if (!sel) return null;
+  if (sel.value === 'custom') {
+    const v = parseFloat(document.getElementById('wiz-race-distance-custom')?.value || '');
+    return (Number.isFinite(v) && v > 0) ? v : null;
+  }
+  const v = parseFloat(sel.value);
+  return (Number.isFinite(v) && v > 0) ? v : null;
 }
 
 async function autoPopulateBaseline() {
@@ -7032,6 +7138,7 @@ function collectWizardPayload() {
   const goalText = document.getElementById('wiz-goal-text').value.trim();
   const goalDate = document.getElementById('wiz-goal-date').value || null;
   const goalTime = document.getElementById('wiz-goal-time').value.trim();
+  const raceDistanceKm = (_wizardGoalType === 'race') ? readWizRaceDistanceKm() : null;
 
   let fullGoalText = goalText;
   if (goalTime && _wizardGoalType === 'race') fullGoalText += ` (mål: ${goalTime})`;
@@ -7089,6 +7196,7 @@ function collectWizardPayload() {
       available_days: availDays,
       max_session_minutes: maxSessionMin,
       injuries: injuries,
+      ...(raceDistanceKm ? { race_distance_km: raceDistanceKm } : {}),
     },
     baseline: {
       sessions_per_week: baseSessions,

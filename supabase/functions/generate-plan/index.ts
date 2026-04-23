@@ -1076,6 +1076,7 @@ interface PlanRequest {
     available_days: number[];
     max_session_minutes: number;
     injuries?: string;
+    race_distance_km?: number;
   };
   baseline: {
     sessions_per_week: number;
@@ -1106,6 +1107,9 @@ interface BuildUserPromptResult {
 
 function buildUserPrompt(req: PlanRequest, workoutHistory: string): BuildUserPromptResult {
   const goalDateStr = req.goal_date ? `\nMåldatum: ${req.goal_date}` : "";
+  const goalDistanceStr = (req.goal_type === "race" && req.constraints.race_distance_km)
+    ? `\nDistans: ${req.constraints.race_distance_km} km`
+    : "";
   const injuryStr = req.constraints.injuries ? `\nSkador/begränsningar: ${req.constraints.injuries}` : "";
   const availDays = req.constraints.available_days.map((d: number) =>
     ["Mån", "Tis", "Ons", "Tors", "Fre", "Lör", "Sön"][d]
@@ -1120,6 +1124,13 @@ function buildUserPrompt(req: PlanRequest, workoutHistory: string): BuildUserPro
 
   const today = new Date().toISOString().split("T")[0];
   const startDate = req.start_date || today;
+
+  // Ultra-distance note: if the athlete allows very long sessions (>= 240 min),
+  // make sure the model rations them — at most one such pass per week and only
+  // during build/peak phases, never back-to-back with another quality session.
+  const ultraStr = req.constraints.max_session_minutes >= 240
+    ? `\nObs: pass på 240+ min är ultra-långa — schemalägg max ett per vecka, endast i build/peak-faser, och aldrig dagen före/efter ett kvalitetspass.`
+    : "";
 
   let numWeeks: number;
   if (req.goal_date) {
@@ -1169,13 +1180,13 @@ function buildUserPrompt(req: PlanRequest, workoutHistory: string): BuildUserPro
 
 ## GOAL
 Type: ${req.goal_type}
-Description: ${req.goal_text}${goalDateStr}
+Description: ${req.goal_text}${goalDistanceStr}${goalDateStr}
 
 ## CONSTRAINTS
 Max pass per vecka: ${req.constraints.sessions_per_week}
 Max timmar per vecka: ${req.constraints.hours_per_week}
 Tillgängliga dagar: ${availDays}
-Max längd per pass: ${req.constraints.max_session_minutes} min${injuryStr}
+Max längd per pass: ${req.constraints.max_session_minutes} min${ultraStr}${injuryStr}
 
 ## CURRENT BASELINE
 Pass per vecka (snitt): ${req.baseline.sessions_per_week}

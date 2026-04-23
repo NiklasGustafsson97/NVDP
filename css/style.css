@@ -2411,7 +2411,10 @@ input.code-input {
 
 /* ── Season Totals ── */
 .season-totals-grid {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 8px;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 8px;
+}
+@media (max-width: 480px) {
+  .season-totals-grid { grid-template-columns: repeat(2, 1fr); }
 }
 .season-stat { text-align: center; padding: 10px 0; }
 .season-stat-val { font-size: 1.3rem; font-weight: 800; color: var(--text); display: block; }

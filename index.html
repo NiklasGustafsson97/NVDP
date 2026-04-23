@@ -1322,14 +1322,30 @@
           <label>Beskriv ditt mål</label>
           <input type="text" id="wiz-goal-text" placeholder="t.ex. Halvmarathon under 1:45">
         </div>
-        <div class="form-row" id="wiz-race-fields" style="display:none">
-          <div class="form-group flex-1">
-            <label>Loppdatum</label>
-            <input type="date" id="wiz-goal-date">
+        <div id="wiz-race-fields" style="display:none">
+          <div class="form-group">
+            <label>Distans</label>
+            <select id="wiz-race-distance" onchange="onWizRaceDistanceChange()">
+              <option value="5">5 km</option>
+              <option value="10" selected>10 km</option>
+              <option value="21.0975">Halvmaraton</option>
+              <option value="42.195">Maraton</option>
+              <option value="custom">Annan…</option>
+            </select>
           </div>
-          <div class="form-group flex-1">
-            <label>Måltid (valfritt)</label>
-            <input type="text" id="wiz-goal-time" placeholder="1:45:00">
+          <div class="form-group" id="wiz-race-distance-custom-wrap" hidden>
+            <label>Egen distans (km)</label>
+            <input type="number" id="wiz-race-distance-custom" step="0.01" min="0.1" placeholder="t.ex. 15">
+          </div>
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label>Loppdatum</label>
+              <input type="date" id="wiz-goal-date">
+            </div>
+            <div class="form-group flex-1">
+              <label>Måltid (valfritt)</label>
+              <input type="text" id="wiz-goal-time" placeholder="1:45:00">
+            </div>
           </div>
         </div>
       </div>
@@ -1377,6 +1393,7 @@
       </div>
       <div class="wiz-section-divider"></div>
       <div class="wizard-step-subtitle">Puls och tempo (valfritt men ger bättre plan)</div>
+      <div class="wiz-field-hint hidden" id="wiz-prefill-hint" style="margin-bottom:8px;">Förifyllt från din senaste plan &mdash; justera om värdet ändrats.</div>
       <div class="form-row">
         <div class="form-group flex-1">
           <label>Vilopuls (bpm)</label>
@@ -1466,6 +1483,11 @@
           <option value="120">120 min</option>
           <option value="150">150 min</option>
           <option value="180">180 min</option>
+          <option value="210">3 h 30 min</option>
+          <option value="240">4 h</option>
+          <option value="300">5 h</option>
+          <option value="360">6 h</option>
+          <option value="420">7 h (ultra)</option>
         </select>
       </div>
       <div class="wiz-section-divider"></div>
