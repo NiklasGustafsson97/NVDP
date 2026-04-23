@@ -5393,9 +5393,11 @@ function _ewma(values, tau) {
 }
 
 function renderPmcChart(workouts) {
-  const canvas = document.getElementById('chart-pmc');
-  if (!canvas || typeof Chart === 'undefined') return;
+  const tsbCanvas = document.getElementById('chart-pmc');
+  const ctlCanvas = document.getElementById('chart-pmc-ctl');
+  if (!tsbCanvas || typeof Chart === 'undefined') return;
   if (window._chartPmc) window._chartPmc.destroy();
+  if (window._chartPmcCtl) window._chartPmcCtl.destroy();
 
   const heroBadge = document.getElementById('pmc-hero-badge');
   const heroTitle = document.getElementById('pmc-hero-title');
@@ -5414,6 +5416,8 @@ function renderPmcChart(workouts) {
   }
 
   // Scale raw effort to Effort display to align with the effort chart.
+  // ATL is still computed internally because TSB = CTL - ATL, but it's no
+  // longer surfaced anywhere in the UI.
   const loads = series.map((s) => effortRawToDisplay(s.load));
   const ctl = _ewma(loads, 42);
   const atl = _ewma(loads, 7);
@@ -5425,42 +5429,14 @@ function renderPmcChart(workouts) {
 
   const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
   const ctlColor = 'rgba(46, 134, 193, 0.9)';
-  const atlColor = 'rgba(231, 76, 60, 0.9)';
   const tsbColor = 'rgba(46, 204, 113, 0.95)';
 
-  // Default view = bara TSB-linjen, CTL/ATL döljs tills användaren expanderar
-  // "Visa CTL, ATL och förklaring". Vi kollar om panelen redan står öppen
-  // (t.ex. efter en re-render) så toggle-tillståndet bevaras.
-  const detailsOpen = !document.getElementById('pmc-details')?.hasAttribute('hidden');
-
-  window._chartPmc = new Chart(canvas.getContext('2d'), {
+  // Chart 1 — TSB-only på #pmc-card.
+  window._chartPmc = new Chart(tsbCanvas.getContext('2d'), {
     type: 'line',
     data: {
       labels,
       datasets: [
-        {
-          label: 'CTL (fitness)',
-          data: ctl.map((v) => +v.toFixed(2)),
-          borderColor: ctlColor,
-          backgroundColor: 'rgba(46,134,193,0.15)',
-          borderWidth: 2,
-          pointRadius: 0,
-          fill: true,
-          tension: 0.25,
-          yAxisID: 'y',
-          hidden: !detailsOpen,
-        },
-        {
-          label: 'ATL (trötthet)',
-          data: atl.map((v) => +v.toFixed(2)),
-          borderColor: atlColor,
-          borderWidth: 2,
-          pointRadius: 0,
-          fill: false,
-          tension: 0.25,
-          yAxisID: 'y',
-          hidden: !detailsOpen,
-        },
         {
           label: 'TSB (form)',
           data: tsb.map((v) => +v.toFixed(2)),
@@ -5469,7 +5445,6 @@ function renderPmcChart(workouts) {
           pointRadius: 0,
           fill: false,
           tension: 0.25,
-          yAxisID: 'y1',
         },
       ],
     },
@@ -5478,23 +5453,15 @@ function renderPmcChart(workouts) {
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { display: detailsOpen, position: 'bottom', labels: { color: textColor, usePointStyle: true, boxWidth: 10 } },
+        legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (c) => `${c.dataset.label}: Effort ${c.parsed.y.toFixed(1)}`,
+            label: (c) => `TSB: ${c.parsed.y >= 0 ? '+' : ''}${c.parsed.y.toFixed(1)}`,
           },
         },
       },
       scales: {
         y: {
-          display: detailsOpen,
-          beginAtZero: true,
-          grid: { color: 'rgba(255,255,255,0.05)' },
-          ticks: { color: textColor, callback: (v) => Number(v).toFixed(1) },
-          title: { display: true, text: 'CTL / ATL (Effort)', color: textColor },
-        },
-        y1: {
-          position: detailsOpen ? 'right' : 'left',
           grid: { color: 'rgba(255,255,255,0.05)' },
           ticks: {
             color: textColor,
@@ -5514,8 +5481,54 @@ function renderPmcChart(workouts) {
     },
   });
 
+  // Chart 2 — CTL-only på #pmc-ctl-card.
+  if (ctlCanvas) {
+    window._chartPmcCtl = new Chart(ctlCanvas.getContext('2d'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'CTL (fitness)',
+            data: ctl.map((v) => +v.toFixed(2)),
+            borderColor: ctlColor,
+            backgroundColor: 'rgba(46,134,193,0.15)',
+            borderWidth: 2,
+            pointRadius: 0,
+            fill: true,
+            tension: 0.25,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (c) => `CTL: Effort ${c.parsed.y.toFixed(1)}`,
+            },
+          },
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: { color: textColor, callback: (v) => Number(v).toFixed(1) },
+            title: { display: true, text: 'Effort', color: textColor },
+          },
+          x: {
+            grid: { display: false },
+            ticks: { color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
+          },
+        },
+      },
+    });
+  }
+
   const lastCtl = ctl[ctl.length - 1];
-  const lastAtl = atl[atl.length - 1];
   const lastTsb = tsb[tsb.length - 1];
   const prev7Ctl = ctl[ctl.length - 8] ?? 0;
   const ctlDelta = lastCtl - prev7Ctl;
@@ -5524,15 +5537,6 @@ function renderPmcChart(workouts) {
   if (sub) {
     const deltaStr = (ctlDelta >= 0 ? '+' : '') + ctlDelta.toFixed(1);
     sub.textContent = `Fitness Effort ${lastCtl.toFixed(1)} (${deltaStr} senaste veckan)`;
-  }
-
-  const legendEl = document.getElementById('pmc-legend');
-  if (legendEl) {
-    legendEl.innerHTML = `
-      <div class="pmc-legend-item"><span class="pmc-dot" style="background:${ctlColor}"></span><strong>CTL</strong> — rullande 42-dagars belastning (din form).</div>
-      <div class="pmc-legend-item"><span class="pmc-dot" style="background:${atlColor}"></span><strong>ATL</strong> — rullande 7-dagars belastning (akut trötthet).</div>
-      <div class="pmc-legend-item"><span class="pmc-dot" style="background:${tsbColor}"></span><strong>TSB</strong> — form − trötthet. &gt;+5 = peakar, −10 till −30 = bygger, &lt;−30 = risk.</div>
-    `;
   }
 
   // Hero — the one number most people actually look at.
@@ -5564,12 +5568,12 @@ function renderPmcChart(workouts) {
   // Legacy hidden status node — keep populated in case something else reads it.
   const statusEl = document.getElementById('pmc-status');
   if (statusEl) {
-    statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(title)} (TSB ${tsbStr}). ${escapeHTML(sub2)} <span class="pmc-atl-note">ATL Effort ${lastAtl.toFixed(1)}</span>`;
+    statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(title)} (TSB ${tsbStr}). ${escapeHTML(sub2)}`;
   }
 }
 
 // ─────────────────────────────────────────────────────────────
-//  PMC card UX helpers — info popover + collapsible details.
+//  PMC card UX helpers — info popover.
 // ─────────────────────────────────────────────────────────────
 function togglePmcInfo() {
   const pop = document.getElementById('pmc-info-popover');
@@ -5579,39 +5583,8 @@ function togglePmcInfo() {
   btn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 
-function togglePmcDetails() {
-  const details = document.getElementById('pmc-details');
-  const toggle = document.getElementById('pmc-details-toggle');
-  if (!details || !toggle) return;
-  const willOpen = details.hasAttribute('hidden');
-  if (willOpen) {
-    details.removeAttribute('hidden');
-    toggle.setAttribute('aria-expanded', 'true');
-    toggle.classList.add('pmc-details-toggle--open');
-    toggle.querySelector('span').textContent = 'Dölj CTL, ATL och förklaring';
-  } else {
-    details.setAttribute('hidden', '');
-    toggle.setAttribute('aria-expanded', 'false');
-    toggle.classList.remove('pmc-details-toggle--open');
-    toggle.querySelector('span').textContent = 'Visa CTL, ATL och förklaring';
-  }
-
-  const chart = window._chartPmc;
-  if (chart) {
-    try {
-      chart.setDatasetVisibility(0, willOpen);
-      chart.setDatasetVisibility(1, willOpen);
-      if (chart.options?.scales?.y) chart.options.scales.y.display = willOpen;
-      if (chart.options?.scales?.y1) chart.options.scales.y1.position = willOpen ? 'right' : 'left';
-      if (chart.options?.plugins?.legend) chart.options.plugins.legend.display = willOpen;
-      chart.update();
-    } catch (_) { /* ignore */ }
-  }
-}
-
 if (typeof window !== 'undefined') {
   window.togglePmcInfo = togglePmcInfo;
-  window.togglePmcDetails = togglePmcDetails;
 }
 
 // ─────────────────────────────────────────────────────────────

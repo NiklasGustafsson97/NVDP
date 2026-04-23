@@ -1152,7 +1152,9 @@ select option { background: #1a1a2e; color: var(--text); }
 .pws-stat-delta {
   font-size: 0.72rem; font-weight: 600;
   margin-top: 2px;
+  display: inline-flex; align-items: center; gap: 4px;
 }
+.pws-stat-delta-ico { flex: 0 0 auto; }
 .pws-stat-delta.up { color: var(--green); }
 .pws-stat-delta.down { color: var(--red); }
 .pws-stat-delta.flat { color: var(--text-dim); }
@@ -2741,13 +2743,6 @@ input.code-input {
 .effort-legend-item .effort-legend-dot { margin-top: 4px; flex: 0 0 auto; }
 .effort-legend-meta { color: var(--text-muted, var(--text-dim)); font-style: italic; padding-top: 4px; border-top: 1px dashed var(--border); margin-top: 2px; }
 
-.pmc-legend {
-  display: flex; flex-direction: column; gap: 4px;
-  margin-top: 10px;
-  font-size: 0.75rem; color: var(--text-dim);
-}
-.pmc-legend-item { display: flex; align-items: center; gap: 8px; }
-.pmc-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .pmc-status {
   margin-top: 12px;
   padding: 10px 12px;
@@ -2852,34 +2847,6 @@ input.code-input {
   text-align: right;
 }
 .pmc-fitness-line:empty { display: none; }
-
-.pmc-details-toggle {
-  margin-top: 12px;
-  width: 100%;
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 10px 14px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text-muted);
-  font-size: 0.82rem; font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-.pmc-details-toggle:hover {
-  background: var(--bg-card-hover);
-  color: var(--text);
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
-}
-.pmc-details-toggle svg { transition: transform 0.2s ease; }
-.pmc-details-toggle--open svg { transform: rotate(180deg); }
-.pmc-details-toggle:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
-}
-
-.pmc-details { margin-top: 12px; }
-.pmc-details[hidden] { display: none; }
 
 .polarization-bar {
   display: flex; width: 100%;
