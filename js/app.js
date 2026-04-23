@@ -3719,6 +3719,14 @@ function setMixUnit(unit) {
   // and lifetime per-activity totals, controlled by the same Tid/Distans
   // toggle. Keep them in sync here so we don't need a second control.
   _seasonBarMode = unit;
+  // Sprint follow-up: Sasongstotaler-kortet i Allmän progress har nu sin
+  // egen Tid/Distans-toggle. Synka båda så att de aldrig drar isär — den
+  // ena kan klickas, den andra ska följa med visuellt.
+  const isKm = unit === 'km';
+  const t1 = document.querySelector('#mix-unit-toggle input');
+  const t2 = document.querySelector('#season-bars-unit-toggle input');
+  if (t1) t1.checked = isKm;
+  if (t2) t2.checked = isKm;
   loadTrends();
 }
 
@@ -4514,6 +4522,123 @@ function _formatSecondsAsPace(totalSec) {
     : `${m}:${String(s).padStart(2, '0')}`;
 }
 
+// Invert Daniels' VDOT formula: given a VDOT score and a race distance,
+// predict the finishing time (in seconds). The forward VDOT formula
+// (see _vdotFromWorkout) couples velocity and duration through %max, so
+// no closed-form inverse exists — we bisect over time. Monotonicity
+// holds: longer time -> slower velocity -> lower vo2 -> lower predicted
+// VDOT, so binary search converges in ~60 iterations to sub-second
+// precision over the 1-800 min search window (covers everything from a
+// hard mile to a 13 h ultra).
+function _predictRaceTimeFromVdot(vdot, distanceKm) {
+  if (!Number.isFinite(vdot) || vdot <= 0) return null;
+  if (!Number.isFinite(distanceKm) || distanceKm <= 0) return null;
+  let lo = 1;
+  let hi = 800;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    const v = (distanceKm * 1000) / mid;
+    const vo2 = -4.60 + 0.182258 * v + 0.000104 * v * v;
+    const pct = 0.8
+      + 0.1894393 * Math.exp(-0.012778 * mid)
+      + 0.2989558 * Math.exp(-0.1932605 * mid);
+    if (pct <= 0) { lo = mid; continue; }
+    const predVdot = vo2 / pct;
+    if (predVdot > vdot) lo = mid; else hi = mid;
+  }
+  return ((lo + hi) / 2) * 60;
+}
+
+// Probability that the user will hit their race-time target on race day.
+// Inputs:
+//   goal      — user_goals row (race_time or plan_derived_race) with
+//               target_value (sec), target_distance_km, target_date.
+//   workouts  — recent workout list (already filtered to runs is fine,
+//               we re-filter here via _isVdotQualifyingPass).
+//   indicators — output of _computeRaceIndicators(); we use its
+//                volume/consistency status to dampen the probability
+//                when training is trending the wrong way.
+// Output:
+//   { pct, label, cls, projection_sec }
+//   pct=null when there is too little data to project.
+function _computeRaceProbability(goal, workouts, indicators) {
+  if (!goal || !goal.target_value || !goal.target_distance_km || !goal.target_date) {
+    return { pct: null, label: 'För lite data', cls: 'unknown', projection_sec: null };
+  }
+  const targetSec = Number(goal.target_value);
+  const distKm = Number(goal.target_distance_km);
+  const targetDate = new Date(goal.target_date + 'T00:00:00');
+  const now = new Date();
+
+  const maxHr = (currentProfile && Number(currentProfile.user_max_hr)) || EF_DEFAULT_MAX_HR;
+  const start28 = addDays(now, -28);
+  const start56 = addDays(now, -56);
+  function inWin(w, s, e) {
+    if (!w.workout_date) return false;
+    const d = new Date(w.workout_date + 'T00:00:00');
+    return d >= s && d < e;
+  }
+  function avgVdot(arr) {
+    const vs = arr
+      .filter((w) => _isVdotQualifyingPass(w, maxHr))
+      .map((w) => _vdotFromWorkout(w))
+      .filter((v) => v !== null);
+    if (!vs.length) return { avg: NaN, n: 0 };
+    return { avg: vs.reduce((a, b) => a + b, 0) / vs.length, n: vs.length };
+  }
+  const recent = workouts.filter((w) => inWin(w, start28, now));
+  const earlier = workouts.filter((w) => inWin(w, start56, start28));
+  const r = avgVdot(recent);
+  const e = avgVdot(earlier);
+
+  // Need at least one recent qualifying pass to project at all.
+  if (!Number.isFinite(r.avg) || r.n < 1) {
+    return { pct: null, label: 'För lite data', cls: 'unknown', projection_sec: null };
+  }
+
+  // Weekly improvement rate. If we don't have an earlier window, assume
+  // flat (no projected gains) — the safer default than guessing a trend
+  // from a single window.
+  let perWeek = 0;
+  if (Number.isFinite(e.avg) && e.n >= 1) {
+    perWeek = (r.avg - e.avg) / 4; // 28 d / 7
+  }
+
+  const weeksToRace = Math.max(0, _daysBetween(now, targetDate) / 7);
+  // Cap projected gains to avoid wild extrapolation: realistic VDOT
+  // improvement maxes around +0.5 / week sustained; we cap at +0.4/week.
+  const cappedPerWeek = Math.max(-0.5, Math.min(0.4, perWeek));
+  const projectedVdot = r.avg + cappedPerWeek * weeksToRace;
+  const projectedSec = _predictRaceTimeFromVdot(projectedVdot, distKm);
+  if (!Number.isFinite(projectedSec)) {
+    return { pct: null, label: 'För lite data', cls: 'unknown', projection_sec: null };
+  }
+
+  // Logistic mapping: gap = (projected − target) / target. Negative gap
+  // means we're projecting faster than target (good). k=0.04 means a 4 %
+  // shortfall lands at ~50 %, 8 % shortfall at ~12 %, 4 % surplus at ~88 %.
+  const gap = (projectedSec - targetSec) / targetSec;
+  let pct = 1 / (1 + Math.exp(gap / 0.04));
+
+  // Penalty when training is trending the wrong way. Only react to
+  // 'lagging' — if volume/consistency are merely 'on-track' we leave the
+  // pace projection as the source of truth.
+  if (indicators) {
+    if (indicators.volume?.status?.cls === 'lagging') pct *= 0.9;
+    if (indicators.consistency?.status?.cls === 'lagging') pct *= 0.9;
+  }
+
+  pct = Math.max(0.01, Math.min(0.99, pct));
+  const pctRounded = Math.round(pct * 100);
+  let label, cls;
+  if (pctRounded >= 75) { label = 'Mycket troligt'; cls = 'great'; }
+  else if (pctRounded >= 50) { label = 'Troligt'; cls = 'good'; }
+  else if (pctRounded >= 25) { label = 'Osäkert'; cls = 'warn'; }
+  else { label = 'Tufft'; cls = 'risk'; }
+
+  return { pct: pctRounded, label, cls, projection_sec: projectedSec };
+}
+
 function renderRaceGoalCard(goal, workouts) {
   const now = new Date();
   const startDate = goal.baseline_date
@@ -4563,12 +4688,59 @@ function renderRaceGoalCard(goal, workouts) {
 
   // Sub text: target pace for race_time, plan-derived note otherwise.
   let subTxt = '';
-  if (goal.goal_type === 'race_time' && goal.target_distance_km && goal.target_value) {
+  if (goal.target_distance_km && goal.target_value) {
     const totalSec = Number(goal.target_value);
-    const paceSec = totalSec / Number(goal.target_distance_km);
-    subTxt = `${Number(goal.target_distance_km).toFixed(2)} km på ${_formatSecondsAsPace(totalSec)} · pace ${_formatSecondsAsPace(paceSec)}/km`;
-  } else if (goal.goal_type === 'plan_derived_race') {
-    subTxt = 'Automatiskt från aktiv plan';
+    if (totalSec > 0) {
+      const paceSec = totalSec / Number(goal.target_distance_km);
+      subTxt = `${Number(goal.target_distance_km).toFixed(2)} km på ${_formatSecondsAsPace(totalSec)} · pace ${_formatSecondsAsPace(paceSec)}/km`;
+    }
+  }
+
+  // "From your plan" block: shown only when this goal was auto-derived
+  // from an active AI plan. Gives the user one-click context (which plan
+  // is this tied to?) and a shortcut back to the schedule.
+  let planBlockHtml = '';
+  if (goal.goal_type === 'plan_derived_race' && _activePlan && goal.plan_id === _activePlan.id) {
+    const planName = _activePlan.name || _activePlan.goal_text || 'Aktiv träningsplan';
+    planBlockHtml = `<div class="goal-plan-block">
+      <div class="goal-plan-block-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      </div>
+      <div class="goal-plan-block-text">
+        <div class="goal-plan-block-label">Från ditt schema</div>
+        <div class="goal-plan-block-name">${_escapeHtml(planName)}</div>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="navigate('dashboard')">Visa schema</button>
+    </div>`;
+  }
+
+  // Probability pill: only when we have a quantitative target time AND a
+  // qualifying VDOT history. _computeRaceProbability returns pct=null when
+  // it can't project, in which case we fall back to a soft hint.
+  let probabilityHtml = '';
+  if (goal.target_distance_km && goal.target_value && Number(goal.target_value) > 0) {
+    const prob = _computeRaceProbability(goal, workouts, ind);
+    if (prob.pct !== null) {
+      const targetTxt = _formatSecondsAsPace(Number(goal.target_value));
+      const projTxt = prob.projection_sec
+        ? `Projicerad tid på racedagen: ${_formatSecondsAsPace(prob.projection_sec)}`
+        : '';
+      probabilityHtml = `<div class="goal-probability goal-probability--${prob.cls}">
+        <div class="gp-pct">${prob.pct}%</div>
+        <div class="gp-text">
+          <div class="gp-label">${prob.label} att klara ${_escapeHtml(targetTxt)}</div>
+          ${projTxt ? `<div class="gp-detail">${_escapeHtml(projTxt)}</div>` : ''}
+        </div>
+      </div>`;
+    } else {
+      probabilityHtml = `<div class="goal-probability goal-probability--unknown">
+        <div class="gp-pct">—</div>
+        <div class="gp-text">
+          <div class="gp-label">För lite data för sannolikhet</div>
+          <div class="gp-detail">Logga några löppass med puls (≥ 85 % HRmax) så projicerar vi racetiden.</div>
+        </div>
+      </div>`;
+    }
   }
 
   const canDelete = goal.goal_type === 'race_time'; // plan-derived rides with the plan
@@ -4584,6 +4756,8 @@ function renderRaceGoalCard(goal, workouts) {
       </div>
       ${deleteBtn}
     </div>
+    ${planBlockHtml}
+    ${probabilityHtml}
     ${timelineHtml}
     ${indicatorsHtml}
   </div>`;
@@ -6089,8 +6263,8 @@ function renderGroupChart(allWorkouts, members) {
     label: m.name.split(' ')[0],
     data: weeks.map(w => isGrpNorm ? +effortRawToDisplay(weekData[w]?.[m.id] || 0).toFixed(2) : (weekData[w]?.[m.id] || 0) / 60),
     borderColor: colors[i % colors.length],
-    backgroundColor: colors[i % colors.length] + '18',
-    tension: 0.35, fill: true, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2.5
+    backgroundColor: colors[i % colors.length],
+    tension: 0.35, fill: false, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2.5
   }));
 
   chartGroupWeekly = new Chart(canvas.getContext('2d'), {
@@ -6138,14 +6312,13 @@ function renderGroupEffortChart(allWorkouts, members) {
   const datasets = members.map((m, i) => ({
     label: m.name.split(' ')[0],
     data: weeks.map(w => +effortRawToDisplay(weekMap[w]?.[m.id]?.effort || 0).toFixed(2)),
-    backgroundColor: colors[i % colors.length] + '88',
     borderColor: colors[i % colors.length],
-    borderWidth: 1,
-    borderRadius: 3,
+    backgroundColor: colors[i % colors.length],
+    tension: 0.35, fill: false, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2.5,
   }));
 
   window._chartGroupEffort = new Chart(canvas.getContext('2d'), {
-    type: 'bar',
+    type: 'line',
     data: { labels, datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
@@ -6155,7 +6328,7 @@ function renderGroupEffortChart(allWorkouts, members) {
         tooltip: { callbacks: { label: c => `${c.dataset.label}: Effort ${c.parsed.y.toFixed(1)}` } }
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor }, title: { display: true, text: 'Effort', color: textColor } },
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor, callback: v => v.toFixed(1) }, title: { display: true, text: 'Effort', color: textColor } },
         x: { grid: { display: false }, ticks: { color: textColor } }
       }
     }
@@ -6258,15 +6431,31 @@ function copyGroupCode() {
   });
 }
 
+function toggleGroupSettings() {
+  const card = document.getElementById('group-settings-card');
+  if (!card) return;
+  // toggle returns true when the class was added (=newly hidden), false
+  // when it was removed (=now visible). We invert to know visibility.
+  const wasHidden = card.classList.toggle('hidden');
+  if (!wasHidden) {
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
 function updateGroupSettingsCard() {
   const card = document.getElementById('group-settings-card');
   const info = document.getElementById('group-settings-info');
+  const gearBtn = document.getElementById('group-settings-btn');
   if (!card || !info) return;
   if (!currentProfile?.group_id) {
-    if (card) card.classList.add('hidden');
+    card.classList.add('hidden');
+    if (gearBtn) gearBtn.classList.add('hidden');
     return;
   }
-  card.classList.remove('hidden');
+  // Settings card stays hidden by default — user opens it via the gear
+  // button in the page header. We only fill the content here so it's
+  // ready to display the moment they click the gear.
+  if (gearBtn) gearBtn.classList.remove('hidden');
   const code = _cachedGroupCode || '------';
   const memberEls = _cachedGroupMembers || [];
   const isAdmin = _cachedGroupCreatedBy === currentProfile.id;
@@ -6320,6 +6509,31 @@ let _sentNudges = new Set();
 
 const GWD_DEFAULT_SHOW = 3;
 
+// Count consecutive missed training days for a member, starting from
+// yesterday and walking backwards. A "missed" day is a non-rest, non-
+// future calendar day with zero logged workouts. Rest days neither
+// count as missed nor break the streak — they're skipped. Returns
+// early as soon as the streak is broken or we've inspected `lookback`
+// days. Lookback of 10 days is enough to catch any 3-in-a-row streak
+// that crosses Sunday/Monday week boundaries.
+function _consecutiveMissedDays(memberId, allWorkouts, plans, lookback = 10) {
+  const now = new Date();
+  let streak = 0;
+  for (let i = 1; i <= lookback; i++) {
+    const day = addDays(now, -i);
+    const dayStr = isoDate(day);
+    const dow = (day.getDay() + 6) % 7; // Mon=0 .. Sun=6
+    const hasWorkout = allWorkouts.some(
+      (w) => w.profile_id === memberId && w.workout_date === dayStr
+    );
+    if (hasWorkout) break;
+    if (isRestDay(dow, plans)) continue;
+    streak++;
+    if (streak >= 3) break; // no need to keep counting past the threshold
+  }
+  return streak;
+}
+
 function renderGroupWeekDetail(allWorkouts, members, plans) {
   const el = document.getElementById('group-week-detail');
   if (!el) return;
@@ -6354,15 +6568,16 @@ function renderGroupWeekDetail(allWorkouts, members, plans) {
       return `<div class="grp-day-cell ${cls}"><div class="day-lbl">${DAY_NAMES[di]}</div>${label}</div>`;
     }).join('');
 
-    return { m, mi, totalMins, missedCount, sessionCount, daysHTML };
+    const missedStreak = _consecutiveMissedDays(m.id, allWorkouts, plans);
+    return { m, mi, totalMins, missedCount, missedStreak, sessionCount, daysHTML };
   });
 
   memberStats.sort((a, b) => b.sessionCount - a.sessionCount || b.totalMins - a.totalMins);
 
-  const cards = memberStats.map(({ m, mi, totalMins, missedCount, sessionCount, daysHTML }) => {
+  const cards = memberStats.map(({ m, mi, totalMins, missedStreak, sessionCount, daysHTML }) => {
     const isMe = m.id === currentProfile.id;
     const nudgeId = `nudge-${m.id}`;
-    const canNudge = !isMe && missedCount > 0;
+    const canNudge = !isMe && missedStreak >= 3;
     const alreadySent = _sentNudges.has(m.id);
     // SECURITY (assessment H1): m.name is DB-sourced, so we avoid inlining
     // it into the onclick attribute. Pass only the id and look up the name

@@ -677,6 +677,20 @@
       <div class="card" id="season-totals-card">
         <div class="card-title mb-8">Säsongstotaler</div>
         <div id="season-totals-summary"></div>
+        <div class="season-totals-bars-block">
+          <div class="season-totals-bars-header">
+            <div class="card-title">Totalt per aktivitet</div>
+            <div class="ios-toggle-row" style="margin:0;gap:6px;">
+              <span class="ios-toggle-label" style="font-size:0.75rem;">Tid</span>
+              <label class="ios-switch ios-switch-sm" id="season-bars-unit-toggle">
+                <input type="checkbox" onchange="setMixUnit(this.checked?'km':'hours')">
+                <span class="ios-slider"></span>
+              </label>
+              <span class="ios-toggle-label" style="font-size:0.75rem;">Distans</span>
+            </div>
+          </div>
+          <div id="season-activity-bars"></div>
+        </div>
       </div>
 
       <div id="weekly-summary-card" class="card hidden">
@@ -714,9 +728,6 @@
             </div>
           </div>
           <div class="chart-container chart-container--skeleton" id="chart-mix-wrap"><div class="chart-skeleton" id="chart-skeleton-mix"></div><canvas id="chart-mix-personal"></canvas></div>
-          <div class="combined-mix-divider" aria-hidden="true"></div>
-          <div class="combined-mix-totals-label">Totalt per aktivitet</div>
-          <div id="season-activity-bars"></div>
         </div>
 
         <div class="card">
@@ -803,9 +814,14 @@
 
     <!-- ── GROUP ── -->
     <section id="view-group" class="view">
-      <div class="page-header">
-        <h1>Grupp</h1>
-        <span id="group-subtitle" class="hidden"></span>
+      <div class="page-header page-header--with-action">
+        <div class="page-header-text">
+          <h1>Grupp</h1>
+          <span id="group-subtitle" class="hidden"></span>
+        </div>
+        <button type="button" id="group-settings-btn" class="topbar-icon-btn hidden" onclick="toggleGroupSettings()" aria-label="Gruppinställningar" title="Gruppinställningar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
       </div>
 
       <!-- No group state -->
@@ -853,17 +869,17 @@
           <div class="chart-container"><canvas id="chart-group-weekly"></canvas></div>
         </div>
 
-        <div class="card">
-          <div class="card-title mb-8">Säsongstotaler (timmar)</div>
-          <div id="group-totals-bars"></div>
-        </div>
-
         <div class="card" id="group-effort-card">
           <div class="card-header">
             <span class="card-title">Effort per vecka</span>
           </div>
           <div class="chart-container"><canvas id="chart-group-effort"></canvas></div>
           <div class="effort-legend" id="group-effort-legend"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title mb-8">Säsongstotaler (timmar)</div>
+          <div id="group-totals-bars"></div>
         </div>
 
         <div class="card">
@@ -874,7 +890,7 @@
           <button class="btn btn-ghost btn-sm feed-more-btn hidden" id="feed-more-btn" onclick="showMoreFeed()">Visa fler</button>
         </div>
 
-        <div class="card" id="group-settings-card" style="margin-top:24px;">
+        <div class="card hidden" id="group-settings-card" style="margin-top:24px;">
           <div class="card-header"><span class="card-title">Gruppinställningar</span></div>
           <div id="group-settings-info" class="sm-group-info"></div>
         </div>

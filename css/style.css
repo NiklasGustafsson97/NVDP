@@ -403,6 +403,10 @@ select option { background: #1a1a2e; color: var(--text); }
 /* a11y: each main view promoted to h1, so style both h1 and h2 the same. */
 .page-header h1, .page-header h2 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.5px; }
 .page-header p { color: var(--text-muted); font-size: 0.9rem; margin-top: 4px; }
+.page-header--with-action {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.page-header--with-action .page-header-text { min-width: 0; }
 .dash-log-shortcut, .trends-log-shortcut {
   position: absolute; top: 0; right: 0;
   font-weight: 600;
@@ -1168,6 +1172,17 @@ select option { background: #1a1a2e; color: var(--text); }
   margin-bottom: 8px;
 }
 
+/* Sasongstotaler — "Totalt per aktivitet"-block flyttat fran Aktiviteter */
+.season-totals-bars-block {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.season-totals-bars-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+
 /* Season totals YoY pill */
 .season-stat-yoy {
   display: inline-block;
@@ -1344,6 +1359,79 @@ select option { background: #1a1a2e; color: var(--text); }
 @media (max-width: 480px) {
   .goal-indicators { grid-template-columns: 1fr; }
 }
+
+/* "Fran ditt schema" plan link block on plan-derived race goals */
+.goal-plan-block {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; margin-bottom: 12px;
+  border-radius: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+}
+.goal-plan-block-icon {
+  flex: 0 0 auto;
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+  background: rgba(214,99,158,0.15);
+  color: var(--pink, #d6639e);
+}
+.goal-plan-block-text { flex: 1 1 auto; min-width: 0; }
+.goal-plan-block-label {
+  font-size: 0.65rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-dim);
+}
+.goal-plan-block-name {
+  font-size: 0.9rem; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Probability pill — large headline indicator on race goal cards */
+.goal-probability {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 14px; margin-bottom: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+}
+.gp-pct {
+  flex: 0 0 auto;
+  font-size: 1.6rem; font-weight: 800;
+  line-height: 1;
+  min-width: 56px; text-align: center;
+}
+.gp-text { flex: 1 1 auto; min-width: 0; }
+.gp-label {
+  font-size: 0.92rem; font-weight: 700; color: var(--text);
+  line-height: 1.25;
+}
+.gp-detail {
+  font-size: 0.74rem; color: var(--text-dim);
+  margin-top: 2px;
+}
+.goal-probability--great {
+  border-color: rgba(56,178,124,0.55);
+  background: rgba(56,178,124,0.10);
+}
+.goal-probability--great .gp-pct { color: var(--green); }
+.goal-probability--good {
+  border-color: rgba(56,178,124,0.35);
+  background: rgba(56,178,124,0.05);
+}
+.goal-probability--good .gp-pct { color: var(--green); }
+.goal-probability--warn {
+  border-color: rgba(243,156,18,0.45);
+  background: rgba(243,156,18,0.08);
+}
+.goal-probability--warn .gp-pct { color: #f39c12; }
+.goal-probability--risk {
+  border-color: rgba(231,76,60,0.50);
+  background: rgba(231,76,60,0.08);
+}
+.goal-probability--risk .gp-pct { color: var(--red); }
+.goal-probability--unknown { opacity: 0.85; }
+.goal-probability--unknown .gp-pct { color: var(--text-dim); }
 
 /* Add-goal modal — form tweaks */
 .goal-add-error {
