@@ -137,17 +137,21 @@ jobs:
       - name: Verify all functions have a deploy step
         run: |
           set -euo pipefail
+          # NOTE: do NOT name this variable GITHUB_WORKFLOW — that's a reserved
+          # GitHub Actions env var (holds the workflow name, not a path) and
+          # step-level env overrides for reserved names are silently ignored,
+          # which used to make the grep below match against a nonexistent file
+          # and produce false "no deploy step" errors.
+          WF_FILE="${GITHUB_WORKSPACE}/.github/workflows/deploy-functions.yml"
           missing=0
           for dir in supabase/functions/*/; do
             name=$(basename "$dir")
             # Skip the _shared module and anything without an index.ts.
             [ "$name" = "_shared" ] && continue
             [ -f "$dir/index.ts" ] || continue
-            if ! grep -Eq "supabase functions deploy $name( |$)" "$GITHUB_WORKFLOW"; then
+            if ! grep -Eq "supabase functions deploy $name( |$)" "$WF_FILE"; then
               echo "::error::Function '$name' has no deploy step in deploy-functions.yml"
               missing=1
             fi
           done
           if [ "$missing" -eq 1 ]; then exit 1; fi
-        env:
-          GITHUB_WORKFLOW: ${{ github.workspace }}/.github/workflows/deploy-functions.yml
