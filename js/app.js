@@ -6287,8 +6287,13 @@ function renderPmcChart(workouts) {
 // ─────────────────────────────────────────────────────────────
 //  Card UX helpers — generic info popover.
 //  Used by Effort per vecka, Personal fitness score, and Group Effort.
+//  NOTE: name intentionally avoids `togglePopover`, which is a native
+//  HTMLElement method (Popover API). Inline `onclick` handlers resolve
+//  identifiers against the element first, so a global `togglePopover`
+//  gets shadowed by the button's built-in method and throws
+//  NotSupportedError on non-popover elements.
 // ─────────────────────────────────────────────────────────────
-function togglePopover(popoverId, btnId) {
+function toggleInfoPopover(popoverId, btnId) {
   const pop = document.getElementById(popoverId);
   const btn = btnId ? document.getElementById(btnId) : null;
   if (!pop) return;
@@ -6297,7 +6302,7 @@ function togglePopover(popoverId, btnId) {
 }
 
 if (typeof window !== 'undefined') {
-  window.togglePopover = togglePopover;
+  window.toggleInfoPopover = toggleInfoPopover;
 }
 
 // ─────────────────────────────────────────────────────────────
