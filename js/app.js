@@ -1891,40 +1891,26 @@ const RECENT_PAGE = 10;
 function showMoreRecent() {
   const el = document.getElementById('recent-workouts');
   if (!el || !_recentWorkouts.length) return;
+  // Strava-style feed cards (shared with group + social) instead of the
+  // older compact list rows. Each card is clickable to open the workout
+  // modal; we bind handlers per-row after insert so DB-sourced fields
+  // never end up in inline onclick attributes.
+  el.classList.add('feed-stack');
   const batch = _recentWorkouts.slice(_recentShown, _recentShown + RECENT_PAGE);
-  // SECURITY (assessment H1): bind click handlers by id after render, rather
-  // than serialising DB rows into inline onclick attributes.
+  const ownerName = currentProfile?.name || 'Du';
+  const ownerColor = currentProfile?.color || ACTIVITY_COLORS.Löpning || '#2E86C1';
+  const ownerAvatar = currentProfile?.avatar || ownerName[0].toUpperCase();
   const html = batch.map(w => {
-    const distStr = w.distance_km ? ` | ${w.distance_km} km` : '';
-    const intBadge = w.intensity ? `<span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
-    const mapThumb = w.map_polyline ? `<div class="wo-map wo-map-mini" data-polyline="${escapeHTML(w.map_polyline)}"></div>` : '';
-    const secondary = [];
-    if (w.avg_hr) secondary.push(`\u2665 ${w.avg_hr} bpm`);
-    if (w.elevation_gain_m) secondary.push(`\u25B2 ${Math.round(w.elevation_gain_m)} m`);
-    if (w.avg_speed_kmh && w.activity_type === 'Löpning') {
-      const pace = 60 / w.avg_speed_kmh;
-      const pMin = Math.floor(pace);
-      const pSec = String(Math.round((pace - pMin) * 60)).padStart(2, '0');
-      secondary.push(`${pMin}:${pSec}/km`);
-    }
-    const secondaryHtml = secondary.length ? `<div class="meta wo-secondary-meta">${secondary.join(' · ')}</div>` : '';
-    return `
-    <div class="workout-item clickable${w.map_polyline ? ' workout-item-with-map' : ''}" data-recent-wid="${escapeHTML(w.id)}">
-      <div class="workout-icon" style="background:${ACTIVITY_COLORS[w.activity_type] || '#555'}22;">
-        ${activityEmoji(w.activity_type)}
-      </div>
-      <div class="workout-info">
-        <div class="name">${escapeHTML(w.activity_type)}${intBadge}${workoutScoreChip(w)}</div>
-        <div class="meta">${formatDate(w.workout_date)}${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? ' — ' + escapeHTML(w.notes) : ''}</div>
-        <div class="meta wo-primary-meta">${w.duration_minutes} min${distStr}</div>
-        ${secondaryHtml}
-      </div>
-      ${mapThumb}
-    </div>`;
+    return _buildFeedCardHtml(w, {
+      ownerName,
+      ownerColor,
+      ownerAvatar,
+      cardClickAttr: '',
+      cardDataAttrs: `data-recent-wid="${escapeHTML(w.id)}"`,
+    });
   }).join('');
   _recentShown += batch.length;
 
-  // Remove old "show more" button if present
   const oldBtn = el.querySelector('.recent-more-btn');
   if (oldBtn) oldBtn.remove();
 
@@ -2823,15 +2809,16 @@ function _isoWeekKey(dateStr) {
   return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
-// Returns the small letter-tag span (or empty string) for a month-cell
-// item. Priority: long > quality > z2.
+// Returns the small letter-tag span for a month-cell item. Priority:
+// long > quality > z2. Strength / non-aerobic falls back to "K" since
+// gym + hyrox sessions are by nature high-intensity. We always emit a
+// tag so every cell carries at-a-glance context.
 function _smcTagHtml(item, dateObj, weekMaxByIso) {
   const text = `${item.label || ''} ${item.desc || ''}`.toLowerCase();
   const zone = (item.zone || '').toLowerCase();
   const mins = item.mins || 0;
   const type = (item.type || '').toLowerCase();
 
-  // Long pass: explicit label, or longest of the week, or duration heuristic.
   const isoKey = _isoWeekKey(isoDate(dateObj));
   const weekMax = isoKey ? (weekMaxByIso.get(isoKey) || 0) : 0;
   const isLong =
@@ -2841,17 +2828,50 @@ function _smcTagHtml(item, dateObj, weekMaxByIso) {
     (type.includes('cyk') && mins >= 120);
   if (isLong) return '<span class="smc-pass-tag smc-pass-tag--long" title="Långpass">L</span>';
 
-  // Quality: high-zone or interval/tempo language.
   const isQuality =
     ['z3', 'z4', 'z5', 'mixed'].includes(zone) ||
-    /intervall|tempo|kvalitet|fartlek|backe|tröskel|threshold/.test(text);
+    /intervall|tempo|kvalitet|fartlek|backe|tröskel|threshold|hyrox|wod|crossfit/.test(text) ||
+    type.includes('hyrox');
   if (isQuality) return '<span class="smc-pass-tag smc-pass-tag--quality" title="Kvalitetspass">K</span>';
 
-  // Easy aerobic.
-  if (zone === 'z1' || zone === 'z2') {
-    return '<span class="smc-pass-tag smc-pass-tag--z2" title="Lugnt aerobt pass">Z2</span>';
+  // Strength / gym always reads as quality stress.
+  if (type.includes('gym') || type.includes('styrk') || /styrka|gym|lyft|crossfit/.test(text)) {
+    return '<span class="smc-pass-tag smc-pass-tag--quality" title="Styrkepass">K</span>';
   }
-  return '';
+
+  // Everything else (explicit z1/z2 OR endurance with no zone) collapses
+  // to Z2 — that's the calmest aerobic bucket and the right default for
+  // unspecified löp/cykel/promenad.
+  return '<span class="smc-pass-tag smc-pass-tag--z2" title="Lugnt aerobt pass">Z2</span>';
+}
+
+// Rough distance estimate from minutes when target_distance_km is
+// missing on the plan row. Uses zone-aware pace defaults so the user
+// sees a sensible km figure on every aerobic pass without having to
+// hand-edit each one.
+function _smcEstimateKm(item) {
+  if (item.km && item.km > 0) return item.km;
+  const mins = item.mins || 0;
+  if (!mins) return 0;
+  const type = (item.type || '').toLowerCase();
+  const zone = (item.zone || '').toLowerCase();
+  // Running pace (min/km) by zone; default Z2.
+  const runPace = { z1: 6.6, z2: 6.0, z3: 5.0, z4: 4.5, z5: 4.0, mixed: 5.2 };
+  // Cycling speed (km/h) by zone; default Z2.
+  const cycKmh  = { z1: 18,  z2: 24,  z3: 28,  z4: 32,  z5: 36,  mixed: 28 };
+  if (type.includes('löp') || type.includes('vandring') || type.includes('promenad')) {
+    const pace = runPace[zone] || runPace.z2;
+    return mins / pace;
+  }
+  if (type.includes('cyk')) {
+    const kmh = cycKmh[zone] || cycKmh.z2;
+    return (mins / 60) * kmh;
+  }
+  // Stakmaskin / längdskidor — treat as endurance with Z2 default speed.
+  if (type.includes('skid') || type.includes('stak')) {
+    return (mins / 60) * 12;
+  }
+  return 0; // Gym / Hyrox / Annat: distance not meaningful.
 }
 
 function renderSchemaMonth(ctx) {
@@ -2952,7 +2972,8 @@ function renderSchemaMonth(ctx) {
       const visible = items.slice(0, 2);
       for (const it of visible) {
         const tagHtml = _smcTagHtml(it, d, weekMaxByIso);
-        const distStr = it.km ? `${(+it.km).toFixed(it.km % 1 ? 1 : 0)}km` : '';
+        const km = _smcEstimateKm(it);
+        const distStr = km > 0 ? `${km < 10 ? km.toFixed(1) : Math.round(km)}km` : '';
         const minStr = it.mins ? `${it.mins}'` : '';
         const meta = [distStr, minStr].filter(Boolean).join(' · ');
         lines.push(
@@ -7034,9 +7055,75 @@ function _feedSourceBadge(w) {
   return '';
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Shared Strava-style card builder used by group / social / personal feeds.
+// Keeps the visual language identical across all three surfaces; callers
+// vary only in (a) what handler opens the workout modal, and (b) which
+// reaction/comment buttons (if any) sit in the action row. Hero uses a
+// real Leaflet map (lazy-loaded via .wo-map) so the user can actually see
+// the streets the route ran on; fallback is a coloured gradient + emoji.
+// ───────────────────────────────────────────────────────────────────────────
+function _buildFeedCardHtml(w, opts) {
+  opts = opts || {};
+  const ownerName = opts.ownerName || '';
+  const ownerColor = opts.ownerColor || '#2E86C1';
+  const ownerAvatar = (opts.ownerAvatar != null && opts.ownerAvatar !== '') ? String(opts.ownerAvatar) : (ownerName[0] || '?').toUpperCase();
+  // Single-character avatars that aren't latin letters/digits are treated
+  // as emoji (so we render them transparent w/o the coloured circle).
+  const isEmojiAvatar = ownerAvatar && ownerAvatar.length <= 2 && !/^[a-zA-Z0-9]$/.test(ownerAvatar);
+
+  const intBadge = w.intensity ? `<span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
+  const showNote = w.notes && w.notes !== 'Importerad' && !String(w.notes).startsWith('[Strava]');
+  const notesSnip = showNote ? `<div class="feed-notes">${escapeHTML(w.notes)}</div>` : '';
+
+  const heroInner = w.map_polyline
+    ? `<div class="wo-map feed-hero-map" data-polyline="${escapeHTML(w.map_polyline)}"></div>`
+    : `<div class="feed-hero-fallback" style="background:linear-gradient(135deg, ${ownerColor}55, ${ownerColor}22);"><span class="feed-hero-emoji">${activityEmoji(w.activity_type)}</span></div>`;
+
+  const title = _autoWorkoutTitle(w);
+  const dateLine = `${escapeHTML(formatDate(w.workout_date))}${w.workout_time ? ' · ' + escapeHTML(w.workout_time) : ''}`;
+
+  const headerExtra = opts.headerClickAttr || '';
+  const headerCursor = opts.headerClickAttr ? 'cursor:pointer;' : '';
+  const avatarStyle = isEmojiAvatar
+    ? `background:transparent;font-size:1.05rem;${headerCursor}`
+    : `background:${ownerColor};${headerCursor}`;
+
+  // Action row: caller passes pre-built HTML (different for group vs
+  // social vs no-actions on personal recent). When omitted we render no
+  // actions block so there's no empty footer.
+  const actionsHtml = opts.actionsHtml || '';
+  const lastCommentHtml = opts.lastCommentHtml || '';
+
+  const cardClick = opts.cardClickAttr || '';
+  const cardId = opts.cardId ? ` id="${escapeHTML(opts.cardId)}"` : '';
+  const cardData = opts.cardDataAttrs || '';
+
+  return `<article class="feed-card"${cardId} ${cardClick} ${cardData}>
+    <header class="feed-card-header">
+      <div class="feed-avatar" style="${avatarStyle}" ${headerExtra}>${escapeHTML(ownerAvatar)}</div>
+      <div class="feed-info">
+        <div class="feed-name" style="${headerCursor}" ${headerExtra}>${escapeHTML(ownerName || '?')}</div>
+        <div class="feed-date">${dateLine}</div>
+      </div>
+      ${_feedSourceBadge(w)}
+    </header>
+    <div class="feed-card-title">
+      <span class="feed-card-title-emoji">${activityEmoji(w.activity_type)}</span>
+      <span class="feed-card-title-text">${escapeHTML(title)}</span>
+      ${intBadge}
+    </div>
+    <div class="feed-hero">${heroInner}</div>
+    <div class="feed-kpi-grid">${_kpiGridHtml(w)}</div>
+    ${notesSnip}
+    ${actionsHtml}
+    ${lastCommentHtml}
+  </article>`;
+}
+
 function renderFeedItems(items, members, reactions, comments) {
   const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
-  return items.map(w => {
+  const html = items.map(w => {
     const globalIdx = _feedAllItems.indexOf(w);
     const mi = members.findIndex(m => m.id === w.profile_id);
     const member = members[mi] || {};
@@ -7048,10 +7135,6 @@ function renderFeedItems(items, members, reactions, comments) {
     const commentCount = wComments.length;
     const lastComment = wComments.length ? wComments[wComments.length - 1] : null;
 
-    const intBadge = w.intensity ? `<span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
-    const showNote = w.notes && w.notes !== 'Importerad' && !w.notes.startsWith('[Strava]');
-    const notesSnip = showNote ? `<div class="feed-notes">${escapeHTML(w.notes)}</div>` : '';
-
     let lastCommentHtml = '';
     if (lastComment) {
       const commenter = members.find(m => m.id === lastComment.profile_id);
@@ -7060,42 +7143,28 @@ function renderFeedItems(items, members, reactions, comments) {
       lastCommentHtml = `<div class="feed-last-comment"><span class="feed-comment-author">${escapeHTML(commenterName)}</span> ${escapeHTML(truncated)}</div>`;
     }
 
-    const heroInner = w.map_polyline
-      ? _polylineToSvg(w.map_polyline, { stroke: color })
-      : `<div class="feed-hero-fallback" style="background:linear-gradient(135deg, ${color}55, ${color}22);"><span class="feed-hero-emoji">${activityEmoji(w.activity_type)}</span></div>`;
+    const actionsHtml = `<div class="feed-reactions" onclick="event.stopPropagation()">
+      <button class="react-btn-sm${myReaction?.reaction === 'like' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','like')" aria-label="Gilla">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg> ${likes.length || ''}
+      </button>
+      <button class="react-btn-sm${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','dislike')" aria-label="Ogilla">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg> ${dislikes.length || ''}
+      </button>
+      <span class="feed-comment-count" aria-label="Kommentarer">💬 ${commentCount || ''}</span>
+    </div>`;
 
-    const title = _autoWorkoutTitle(w);
-    const dateLine = `${escapeHTML(formatDate(w.workout_date))}${w.workout_time ? ' · ' + escapeHTML(w.workout_time) : ''}`;
-
-    return `<article class="feed-card" onclick="openFeedWorkout(${globalIdx})">
-      <header class="feed-card-header">
-        <div class="feed-avatar" style="background:${color}">${escapeHTML((member.name || '?')[0].toUpperCase())}</div>
-        <div class="feed-info">
-          <div class="feed-name">${escapeHTML(member.name || '?')}</div>
-          <div class="feed-date">${dateLine}</div>
-        </div>
-        ${_feedSourceBadge(w)}
-      </header>
-      <div class="feed-card-title">
-        <span class="feed-card-title-emoji">${activityEmoji(w.activity_type)}</span>
-        <span class="feed-card-title-text">${escapeHTML(title)}</span>
-        ${intBadge}
-      </div>
-      <div class="feed-hero">${heroInner}</div>
-      <div class="feed-kpi-grid">${_kpiGridHtml(w)}</div>
-      ${notesSnip}
-      <div class="feed-reactions" onclick="event.stopPropagation()">
-        <button class="react-btn-sm${myReaction?.reaction === 'like' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','like')" aria-label="Gilla">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg> ${likes.length || ''}
-        </button>
-        <button class="react-btn-sm${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','dislike')" aria-label="Ogilla">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg> ${dislikes.length || ''}
-        </button>
-        <span class="feed-comment-count" aria-label="Kommentarer">💬 ${commentCount || ''}</span>
-      </div>
-      ${lastCommentHtml}
-    </article>`;
+    return _buildFeedCardHtml(w, {
+      ownerName: member.name || '?',
+      ownerColor: color,
+      ownerAvatar: (member.name || '?')[0].toUpperCase(),
+      cardClickAttr: `onclick="openFeedWorkout(${globalIdx})"`,
+      actionsHtml,
+      lastCommentHtml,
+    });
   }).join('');
+  // Lazy-init Leaflet for any new .feed-hero-map nodes the next paint.
+  requestAnimationFrame(() => initMapThumbnails());
+  return html;
 }
 
 function openFeedWorkout(idx) {
@@ -8090,21 +8159,33 @@ function renderGenerateButton() {
 // ── Schema-pill kebab menu ──
 let _schemaPillMenuOpen = false;
 
+function _ensureSchemaPillBackdrop() {
+  let bd = document.getElementById('schema-pill-menu-backdrop');
+  if (!bd) {
+    bd = document.createElement('div');
+    bd.id = 'schema-pill-menu-backdrop';
+    bd.className = 'schema-pill-menu-backdrop hidden';
+    bd.addEventListener('click', closeSchemaPillMenu);
+    document.body.appendChild(bd);
+  }
+  return bd;
+}
+
 function toggleSchemaPillMenu(ev) {
   if (ev) ev.stopPropagation();
   const menu = document.getElementById('schema-pill-menu');
   const btn = document.getElementById('schema-pill-menu-btn');
   if (!menu || !btn) return;
   _schemaPillMenuOpen = !_schemaPillMenuOpen;
+  const bd = _ensureSchemaPillBackdrop();
   menu.classList.toggle('hidden', !_schemaPillMenuOpen);
+  bd.classList.toggle('hidden', !_schemaPillMenuOpen);
   btn.setAttribute('aria-expanded', _schemaPillMenuOpen ? 'true' : 'false');
   if (_schemaPillMenuOpen) {
     setTimeout(() => {
-      document.addEventListener('click', _schemaPillMenuOutsideHandler);
       document.addEventListener('keydown', _schemaPillMenuKeyHandler);
     }, 0);
   } else {
-    document.removeEventListener('click', _schemaPillMenuOutsideHandler);
     document.removeEventListener('keydown', _schemaPillMenuKeyHandler);
   }
 }
@@ -8114,15 +8195,11 @@ function closeSchemaPillMenu() {
   _schemaPillMenuOpen = false;
   const menu = document.getElementById('schema-pill-menu');
   const btn = document.getElementById('schema-pill-menu-btn');
+  const bd = document.getElementById('schema-pill-menu-backdrop');
   if (menu) menu.classList.add('hidden');
+  if (bd) bd.classList.add('hidden');
   if (btn) btn.setAttribute('aria-expanded', 'false');
-  document.removeEventListener('click', _schemaPillMenuOutsideHandler);
   document.removeEventListener('keydown', _schemaPillMenuKeyHandler);
-}
-
-function _schemaPillMenuOutsideHandler(e) {
-  const wrap = document.querySelector('.schema-pill-menu-wrap');
-  if (wrap && !wrap.contains(e.target)) closeSchemaPillMenu();
 }
 
 function _schemaPillMenuKeyHandler(e) {
@@ -10389,10 +10466,6 @@ async function renderSocialFeed(append) {
     const name = p?.name || 'Okänd';
     const avatar = p?.avatar || name[0].toUpperCase();
     const color = p?.color || '#2E86C1';
-    const isEmoji = p?.avatar && p.avatar.length <= 2;
-    const wDate = new Date(w.workout_date).toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' });
-    const intBadge = w.intensity ? ` <span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
-    const distText = w.distance_km ? ` · ${w.distance_km} km` : '';
     const wReactions = reactionsByWorkout[w.id] || [];
     const wLikes = wReactions.filter(r => r.reaction === 'like');
     const wDislikes = wReactions.filter(r => r.reaction === 'dislike');
@@ -10410,57 +10483,54 @@ async function renderSocialFeed(append) {
       </div>`;
     }).join('');
 
-    const mapHtml = w.map_polyline ? `<div class="wo-map wo-map-side" id="sf-map-${escapeHTML(w.id)}" data-polyline="${escapeHTML(w.map_polyline)}"></div>` : '';
-
-    // SECURITY: pass workout id via data-attribute and look up the full object
-    // on click rather than serialising DB-sourced fields into an inline handler.
-    const likeActive = myReaction?.reaction === 'like' ? ' liked' : '';
-    const dislikeActive = myReaction?.reaction === 'dislike' ? ' liked' : '';
+    // Reaction buttons: own workouts get a static read-only count, others
+    // get clickable like/dislike. Comment toggle opens the comments panel.
+    const likeActive = myReaction?.reaction === 'like' ? ' active' : '';
+    const dislikeActive = myReaction?.reaction === 'dislike' ? ' active' : '';
     const reactBtns = isOwnWorkout
-      ? `<span class="sf-action-btn sf-action-static" title="Du kan inte reagera p\u00e5 ditt eget pass">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+      ? `<span class="react-btn-sm react-btn-static" title="Du kan inte reagera p\u00e5 ditt eget pass">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
           ${wLikes.length > 0 ? wLikes.length : ''}
         </span>
-        <span class="sf-action-btn sf-action-static">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
+        <span class="react-btn-sm react-btn-static">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
           ${wDislikes.length > 0 ? wDislikes.length : ''}
         </span>`
-      : `<button class="sf-action-btn${likeActive}" onclick="toggleSocialReaction('${escapeHTML(w.id)}','like')" title="Bra pass">
-          <svg viewBox="0 0 24 24" fill="${myReaction?.reaction === 'like' ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+      : `<button class="react-btn-sm${likeActive}" onclick="event.stopPropagation();toggleSocialReaction('${escapeHTML(w.id)}','like')" title="Bra pass">
+          <svg viewBox="0 0 24 24" fill="${myReaction?.reaction === 'like' ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
           ${wLikes.length > 0 ? wLikes.length : ''}
         </button>
-        <button class="sf-action-btn${dislikeActive}" onclick="toggleSocialReaction('${escapeHTML(w.id)}','dislike')" title="Hmm \u2026">
-          <svg viewBox="0 0 24 24" fill="${myReaction?.reaction === 'dislike' ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
+        <button class="react-btn-sm${dislikeActive}" onclick="event.stopPropagation();toggleSocialReaction('${escapeHTML(w.id)}','dislike')" title="Hmm \u2026">
+          <svg viewBox="0 0 24 24" fill="${myReaction?.reaction === 'dislike' ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
           ${wDislikes.length > 0 ? wDislikes.length : ''}
         </button>`;
-    const profileClick = isOwnWorkout ? '' : `onclick="event.stopPropagation();openFriendProfile('${escapeHTML(w.profile_id)}')"`;
-    const profileCursor = isOwnWorkout ? '' : 'cursor:pointer;';
-    return `<div class="social-feed-item" data-workout-id="${escapeHTML(w.id)}">
-      <div class="sf-header">
-        <div class="sf-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1rem' : '0.75rem'};${profileCursor}" ${profileClick}>${escapeHTML(avatar)}</div>
-        <span class="sf-name" style="${profileCursor}" ${profileClick}>${escapeHTML(name)}</span>
-        <span class="sf-date">${escapeHTML(wDate)}</span>
-      </div>
-      <div class="sf-body sf-body-clickable${w.map_polyline ? ' sf-body-with-map' : ''}" data-workout-open-id="${escapeHTML(w.id)}">
-        <div class="sf-body-text">
-          ${buildWorkoutBody(w)}
-          ${w.notes && w.notes !== 'Importerad' && !w.notes?.startsWith('[Strava]') ? `<div class="wo-notes">${escapeHTML(w.notes)}</div>` : ''}
-        </div>
-        ${mapHtml}
-      </div>
-      <div class="sf-actions">
-        ${reactBtns}
-        <button class="sf-action-btn" onclick="toggleSocialComments('${escapeHTML(w.id)}')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          ${wComments.length > 0 ? wComments.length : ''}
-        </button>
-      </div>
-      <div class="sf-comments hidden" id="sf-comments-${escapeHTML(w.id)}">${commentsHtml}</div>
-      <div class="sf-comment-form hidden" id="sf-comment-form-${escapeHTML(w.id)}">
-        <input type="text" placeholder="Skriv en kommentar..." onkeydown="if(event.key==='Enter')submitSocialComment('${escapeHTML(w.id)}',this)">
-        <button onclick="submitSocialComment('${escapeHTML(w.id)}',this.previousElementSibling)">Skicka</button>
-      </div>
+
+    const actionsHtml = `<div class="feed-reactions" onclick="event.stopPropagation()">
+      ${reactBtns}
+      <button class="react-btn-sm" onclick="event.stopPropagation();toggleSocialComments('${escapeHTML(w.id)}')" aria-label="Kommentarer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        ${wComments.length > 0 ? wComments.length : ''}
+      </button>
+    </div>
+    <div class="sf-comments hidden" id="sf-comments-${escapeHTML(w.id)}" onclick="event.stopPropagation()">${commentsHtml}</div>
+    <div class="sf-comment-form hidden" id="sf-comment-form-${escapeHTML(w.id)}" onclick="event.stopPropagation()">
+      <input type="text" placeholder="Skriv en kommentar..." onkeydown="if(event.key==='Enter')submitSocialComment('${escapeHTML(w.id)}',this)">
+      <button onclick="submitSocialComment('${escapeHTML(w.id)}',this.previousElementSibling)">Skicka</button>
     </div>`;
+
+    const headerClickAttr = isOwnWorkout
+      ? ''
+      : `onclick="event.stopPropagation();openFriendProfile('${escapeHTML(w.profile_id)}')"`;
+
+    return _buildFeedCardHtml(w, {
+      ownerName: name,
+      ownerAvatar: avatar,
+      ownerColor: color,
+      cardClickAttr: '',
+      cardDataAttrs: `data-workout-open-id="${escapeHTML(w.id)}" data-workout-id="${escapeHTML(w.id)}"`,
+      headerClickAttr,
+      actionsHtml,
+    });
   }).join('');
 
   // Wire workout-open clicks via delegation (set up once per feedEl). This
@@ -10514,12 +10584,19 @@ async function refreshSocialFeedReactionButtons(workoutId) {
   const dislikes = reactions.filter(r => r.reaction === 'dislike');
   const myReaction = reactions.find(r => r.profile_id === currentProfile.id);
 
-  const item = document.querySelector(`.social-feed-item[data-workout-id="${CSS.escape(workoutId)}"]`);
+  // The social feed now renders Strava-style cards (.feed-card with the
+  // workout id on data-workout-id) so the selector + button class differ
+  // from the legacy .social-feed-item layout. We update both the active
+  // class and the inline svg fill so it visually toggles like the rest
+  // of the feed reactions across the app.
+  const item = document.querySelector(`.feed-card[data-workout-id="${CSS.escape(workoutId)}"]`)
+    || document.querySelector(`.social-feed-item[data-workout-id="${CSS.escape(workoutId)}"]`);
   if (!item) return;
-  const actionBtns = item.querySelectorAll('.sf-action-btn');
+  const actionBtns = item.querySelectorAll('.react-btn-sm, .sf-action-btn');
   actionBtns.forEach(btn => {
     const handler = btn.getAttribute('onclick') || '';
     if (handler.includes("'like'")) {
+      btn.classList.toggle('active', myReaction?.reaction === 'like');
       btn.classList.toggle('liked', myReaction?.reaction === 'like');
       const svg = btn.querySelector('svg');
       if (svg) svg.setAttribute('fill', myReaction?.reaction === 'like' ? 'currentColor' : 'none');
@@ -10528,6 +10605,7 @@ async function refreshSocialFeedReactionButtons(workoutId) {
       if (svg) btn.appendChild(svg);
       if (countText) btn.append(countText);
     } else if (handler.includes("'dislike'")) {
+      btn.classList.toggle('active', myReaction?.reaction === 'dislike');
       btn.classList.toggle('liked', myReaction?.reaction === 'dislike');
       const svg = btn.querySelector('svg');
       if (svg) svg.setAttribute('fill', myReaction?.reaction === 'dislike' ? 'currentColor' : 'none');
@@ -10808,11 +10886,14 @@ async function submitSocialComment(workoutId, input) {
       </div>`;
     }).join('');
 
-    const commentBtn = commentsEl.closest('.social-feed-item').querySelector('.sf-action-btn:nth-child(2)');
+    // Social feed now wraps everything in `.feed-card`; fall back to the
+    // legacy `.social-feed-item` so old screens (if any) still work.
+    const card = commentsEl.closest('.feed-card') || commentsEl.closest('.social-feed-item');
+    const commentBtn = card?.querySelector('.feed-reactions .react-btn-sm:last-of-type, .sf-actions .sf-action-btn:nth-child(2)');
     if (commentBtn) {
       const svg = commentBtn.querySelector('svg');
       commentBtn.innerHTML = '';
-      commentBtn.appendChild(svg);
+      if (svg) commentBtn.appendChild(svg);
       commentBtn.append(' ' + (comments || []).length);
     }
   } catch (e) {
