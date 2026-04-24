@@ -6066,9 +6066,10 @@ function renderPmcChart(workouts) {
   if (window._chartPmcCtl) window._chartPmcCtl.destroy();
 
   // Find earliest workout so we can build the FULL CTL history (needed for
-  // the personal fitness baseline). The chart itself still only shows the
-  // last 120 days, but the ratio denominator is anchored to the user's
-  // first month of training.
+  // the personal fitness baseline). The chart itself only shows the latest
+  // 12 ISO weeks (matching every other progress chart's cadence), but the
+  // ratio denominator is still anchored to the user's first month of
+  // training so the headline number is comparable across windows.
   const allDates = [];
   for (const w of workouts) if (w.workout_date) allDates.push(w.workout_date);
   if (allDates.length === 0) {
@@ -6107,14 +6108,35 @@ function renderPmcChart(workouts) {
     }
   }
 
-  // Slice the last 120 days for the actual chart.
-  const VISIBLE_DAYS = 120;
-  const sliceStart = Math.max(0, fullSeries.length - VISIBLE_DAYS);
-  const series = fullSeries.slice(sliceStart);
-  const ctl = fullCtl.slice(sliceStart);
-  const labels = series.map((s) => {
-    const d = new Date(s.date + 'T00:00:00');
-    return `${d.getDate()}/${d.getMonth() + 1}`;
+  // Aggregate the daily CTL into ISO-week buckets so the x-axis can use
+  // V-numbers like every other Din progress chart. We take the mean of the
+  // CTL values within each week — CTL itself is already a smoothed EWMA so
+  // the weekly mean just resamples it at a coarser cadence without losing
+  // trend information.
+  const weekAgg = new Map(); // mondayIso -> { sum, count }
+  for (let i = 0; i < fullSeries.length; i++) {
+    const dayIso = fullSeries[i].date;
+    const monIso = isoDate(mondayOfWeek(new Date(dayIso + 'T00:00:00')));
+    if (!weekAgg.has(monIso)) weekAgg.set(monIso, { sum: 0, count: 0 });
+    const e = weekAgg.get(monIso);
+    e.sum += fullCtl[i];
+    e.count++;
+  }
+  const dataWeeks = [...weekAgg.keys()].sort();
+  if (dataWeeks.length === 0) {
+    _renderChartInsight('pmc-ctl-insight', { band: 'neutral', title: 'För lite data', sub: 'Logga några pass så fylls fitness-kurvan i.' });
+    return;
+  }
+
+  // Contiguous Monday timeline + 12-week sliding window navigator, same
+  // pattern as renderEffortChart / renderEasyHrChart.
+  const allWeekKeys = _buildContiguousWeeks(dataWeeks[0], dataWeeks[dataWeeks.length - 1]);
+  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-pmc-ctl']);
+  const visibleWeeks = win.weeks;
+  const labels = visibleWeeks.map((k) => `V${weekNumber(parseISOWeekKeyLocal(k))}`);
+  const ctl = visibleWeeks.map((k) => {
+    const e = weekAgg.get(k);
+    return e ? e.sum / e.count : null;
   });
 
   const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
@@ -6125,11 +6147,13 @@ function renderPmcChart(workouts) {
   // The ratio version starts at ~1.0 and drifts upward as fitness improves
   // vs day 28 of training.
   const useRatio = baselineCtl !== null;
-  const fitnessData = useRatio
-    ? ctl.map((c) => +(c / baselineCtl).toFixed(3))
-    : ctl.map((c) => +c.toFixed(2));
+  const fitnessData = ctl.map((c) => {
+    if (c === null) return null;
+    return useRatio ? +(c / baselineCtl).toFixed(3) : +c.toFixed(2);
+  });
   const yTitle = useRatio ? 'Fitness-score' : 'Belastning (bygger baseline)';
-  const yMin = useRatio ? Math.max(0, Math.min(...fitnessData) * 0.95) : 0;
+  const numericData = fitnessData.filter((v) => v !== null);
+  const yMin = useRatio && numericData.length ? Math.max(0, Math.min(...numericData) * 0.95) : 0;
   window._chartPmcCtl = new Chart(ctlCanvas.getContext('2d'), {
     type: 'line',
     data: {
@@ -6141,9 +6165,11 @@ function renderPmcChart(workouts) {
           borderColor: ctlColor,
           backgroundColor: 'rgba(46,134,193,0.15)',
           borderWidth: 2,
-          pointRadius: 0,
+          pointRadius: 3,
+          pointHoverRadius: 5,
           fill: true,
           tension: 0.25,
+          spanGaps: true,
         },
       ],
     },
@@ -6171,16 +6197,18 @@ function renderPmcChart(workouts) {
         },
         x: {
           grid: { display: false },
-          ticks: { color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
+          ticks: { color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 },
         },
       },
     },
   });
 
-  const lastCtl = ctl[ctl.length - 1];
+  _renderChartWeekNav('chart-pmc-ctl', allWeekKeys.length, win, () => renderPmcChart(workouts));
 
-  // Fitness insight — show the ratio if we have a baseline, otherwise
-  // explain that we're still building one.
+  // Insight uses the FULL daily series so the headline always describes
+  // "now", not whichever 12-week window the user happens to be browsing.
+  const lastCtl = fullCtl[fullCtl.length - 1];
+
   if (baselineCtl !== null) {
     const ratio = lastCtl / baselineCtl;
     const ratioPct = (ratio - 1) * 100;
@@ -6553,7 +6581,17 @@ function renderEasyHrChart(workouts) {
   // Contiguous Monday timeline; weeks without qualifying passes render as
   // null gaps (spanGaps keeps the line continuous so a missed Z2 week doesn't
   // break the trend visually).
-  const allWeekKeys = _buildContiguousWeeks(dataKeys[0], dataKeys[dataKeys.length - 1]);
+  //
+  // We also trim leading empty weeks: if the user has one stray qualifying
+  // pass from months ago plus recent activity, _buildContiguousWeeks would
+  // otherwise stretch the categorical x-axis across a dozen empty bars.
+  // Cap the lookback at WEEKLY_CHART_WINDOW (12) and start at the first week
+  // with data inside that window so the chart begins where data actually
+  // begins.
+  const lastDataKey = dataKeys[dataKeys.length - 1];
+  const earliestVisibleKey = isoDate(addDays(parseISOWeekKeyLocal(lastDataKey), -7 * (WEEKLY_CHART_WINDOW - 1)));
+  const firstKey = dataKeys.find((k) => k >= earliestVisibleKey) ?? lastDataKey;
+  const allWeekKeys = _buildContiguousWeeks(firstKey, lastDataKey);
   const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-easy-hr']);
   const visibleWeeks = win.weeks;
 
@@ -6718,11 +6756,14 @@ const VO2MAX_QUAL_HR_PCT = 0.70;
 // long-running average; 28 days is long enough to dampen single-pass noise
 // without lagging the trend by months.
 const VO2MAX_SMOOTH_DAYS = 28;
-// Visible window for the VO2max chart. We clip both data and x-axis to
-// "last 12 weeks" so the chart matches the cadence of every other chart
-// in Din progress, instead of letting Chart.js auto-fit ~12 months of
-// sparse history (which produced a confusing V29 -> V49 -> V1 -> V13
-// wrap-around when the user only had a handful of qualifying passes).
+// Visible window CAP for the VO2max chart. We clip data to "last 12 weeks"
+// so the chart matches the cadence of every other chart in Din progress
+// (instead of letting Chart.js auto-fit ~12 months of sparse history,
+// which produced a confusing V29 -> V49 -> V1 -> V13 wrap-around when the
+// user only had a handful of qualifying passes). The x-axis left bound is
+// tightened further to the Monday of the first qualifying pass inside the
+// window — see renderVo2maxChart — so we don't render empty leading weeks
+// when data only starts in, say, V14.
 const VO2MAX_VISIBLE_DAYS = 84;
 const _MS_PER_DAY = 86400000;
 
@@ -6823,6 +6864,12 @@ function renderVo2maxChart(workouts) {
     return;
   }
 
+  // Tighten the left bound to the Monday of the first qualifying pass in
+  // the window so we don't render V5..V13 of empty padding when data only
+  // starts at V14. The 12-week cap above is still the upper bound on how
+  // far back we look; this just trims leading whitespace within it.
+  const tightStartMs = mondayOfWeek(new Date(visiblePoints[0].x)).valueOf();
+
   if (visiblePoints.length === 1) {
     const v = visiblePoints[0].y;
     _renderChartInsight('vo2max-insight', {
@@ -6832,11 +6879,11 @@ function renderVo2maxChart(workouts) {
       headline: v.toFixed(1),
       headlineLabel: 'VO2MAX',
     });
-    _drawVo2maxChart(canvas, visiblePoints, /* withTrend */ false, windowStartMs, windowEndMs);
+    _drawVo2maxChart(canvas, visiblePoints, /* withTrend */ false, tightStartMs, windowEndMs);
     return;
   }
 
-  _drawVo2maxChart(canvas, visiblePoints, /* withTrend */ true, windowStartMs, windowEndMs);
+  _drawVo2maxChart(canvas, visiblePoints, /* withTrend */ true, tightStartMs, windowEndMs);
 
   // Step 3: insight uses the smoothed value (not raw per-pass) so a single
   // hot tempo pass doesn't flip the narrative from "stabil" to "form upp"
