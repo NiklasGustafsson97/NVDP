@@ -1229,11 +1229,24 @@ function calendarBaselineMonday(fromMonday) {
 // year boundary because weekNumber() is year-local. These helpers give every
 // chart a contiguous Monday-by-Monday timeline plus a 12-week sliding window.
 
-const WEEKLY_CHART_WINDOW = 12;
+const WEEKLY_CHART_WINDOW_OPTIONS = [6, 12, 36];
+const WEEKLY_CHART_WINDOW_DEFAULT = 12;
+// Kept for any legacy callers / constants that still reference it.
+const WEEKLY_CHART_WINDOW = WEEKLY_CHART_WINDOW_DEFAULT;
 
 /** State per chart canvas id → end-anchor index into the contiguous week list.
- *  A value of null (or missing) means "show the latest 12 weeks". */
+ *  A value of null (or missing) means "show the latest window". */
 window._weeklyChartAnchor = window._weeklyChartAnchor || {};
+
+/** State per chart canvas id → currently selected window size (one of
+ *  WEEKLY_CHART_WINDOW_OPTIONS). Defaults to WEEKLY_CHART_WINDOW_DEFAULT. */
+window._weeklyChartWindow = window._weeklyChartWindow || {};
+
+/** Resolve the current window size for a chart, falling back to default. */
+function _getChartWindowSize(chartId) {
+  const v = window._weeklyChartWindow[chartId];
+  return WEEKLY_CHART_WINDOW_OPTIONS.includes(v) ? v : WEEKLY_CHART_WINDOW_DEFAULT;
+}
 
 /** Build a contiguous list of Monday ISO keys between two Monday ISO keys
  *  (inclusive). Used so chart X axis is monotonic in real time and gaps in
@@ -1255,10 +1268,12 @@ function _buildContiguousWeeks(firstMonIso, lastMonIso) {
   return out;
 }
 
-/** Return the 12-week window ending at anchorIdx (clamped). If anchorIdx is
- *  null/undefined, defaults to the latest window. Returns
+/** Return the N-week window ending at anchorIdx (clamped). If anchorIdx is
+ *  null/undefined, defaults to the latest window. `size` defaults to the
+ *  app-wide default (12) but per-chart callers should pass the user-selected
+ *  size from _getChartWindowSize(chartId). Returns
  *  { weeks, startIdx, endIdx, anchor } where anchor is the resolved end index. */
-function _sliceWeekWindow(allWeekKeys, anchorIdx, size = WEEKLY_CHART_WINDOW) {
+function _sliceWeekWindow(allWeekKeys, anchorIdx, size = WEEKLY_CHART_WINDOW_DEFAULT) {
   const n = allWeekKeys.length;
   if (n === 0) return { weeks: [], startIdx: 0, endIdx: -1, anchor: -1 };
   let end = (anchorIdx === null || anchorIdx === undefined) ? n - 1 : anchorIdx;
@@ -1286,7 +1301,11 @@ function _formatWeekRangeLabel(firstMonIso, lastMonIso) {
 
 /** Inject (or refresh) a small navigator strip into the parent .card of the
  *  given chart canvas. Buttons mutate window._weeklyChartAnchor[chartId] and
- *  call rerender() to redraw the chart. */
+ *  window._weeklyChartWindow[chartId] and call rerender() to redraw the chart.
+ *  The strip carries a 6/12/36-week segmented selector so the user can trade
+ *  granularity (6 → recent trends) for horizon (36 → seasonal context); the
+ *  prev/next buttons page by the active window so the visual stride matches
+ *  the visible range. */
 function _renderChartWeekNav(chartId, totalWeeks, windowInfo, rerender) {
   const canvas = document.getElementById(chartId);
   if (!canvas) return;
@@ -1295,21 +1314,28 @@ function _renderChartWeekNav(chartId, totalWeeks, windowInfo, rerender) {
   const card = container.parentElement; // typically the .card wrapper
   if (!card) return;
 
+  const activeSize = _getChartWindowSize(chartId);
+
   let nav = card.querySelector(`.chart-week-nav[data-chart="${chartId}"]`);
   if (!nav) {
     nav = document.createElement('div');
     nav.className = 'chart-week-nav';
     nav.dataset.chart = chartId;
+    const sizeButtons = WEEKLY_CHART_WINDOW_OPTIONS.map((n) => `
+      <button type="button" class="chart-week-nav-size-btn" data-size="${n}"
+              role="radio" aria-checked="false" aria-label="Visa ${n} veckor">${n} v</button>
+    `).join('');
     nav.innerHTML = `
-      <button type="button" class="chart-week-nav-btn" data-dir="prev" aria-label="Föregående 12 veckor">‹</button>
+      <div class="chart-week-nav-size" role="radiogroup" aria-label="Antal veckor">${sizeButtons}</div>
+      <button type="button" class="chart-week-nav-btn" data-dir="prev" aria-label="Föregående fönster">‹</button>
       <span class="chart-week-nav-range"></span>
-      <button type="button" class="chart-week-nav-btn" data-dir="next" aria-label="Nästa 12 veckor">›</button>
+      <button type="button" class="chart-week-nav-btn" data-dir="next" aria-label="Nästa fönster">›</button>
       <button type="button" class="chart-week-nav-latest" data-dir="latest">Senaste</button>
     `;
     container.parentElement.insertBefore(nav, container);
   }
 
-  const { weeks, startIdx, endIdx, anchor } = windowInfo;
+  const { weeks, startIdx, endIdx } = windowInfo;
   const rangeEl = nav.querySelector('.chart-week-nav-range');
   if (rangeEl) {
     rangeEl.textContent = weeks.length
@@ -1319,11 +1345,34 @@ function _renderChartWeekNav(chartId, totalWeeks, windowInfo, rerender) {
   const prevBtn = nav.querySelector('[data-dir="prev"]');
   const nextBtn = nav.querySelector('[data-dir="next"]');
   const latestBtn = nav.querySelector('[data-dir="latest"]');
-  if (prevBtn) prevBtn.disabled = startIdx <= 0;
-  if (nextBtn) nextBtn.disabled = endIdx >= totalWeeks - 1;
+  if (prevBtn) {
+    prevBtn.disabled = startIdx <= 0;
+    prevBtn.setAttribute('aria-label', `Föregående ${activeSize} veckor`);
+  }
+  if (nextBtn) {
+    nextBtn.disabled = endIdx >= totalWeeks - 1;
+    nextBtn.setAttribute('aria-label', `Nästa ${activeSize} veckor`);
+  }
   if (latestBtn) latestBtn.hidden = endIdx >= totalWeeks - 1;
 
-  // Replace listeners by reattaching (idempotent).
+  nav.querySelectorAll('.chart-week-nav-size-btn').forEach((btn) => {
+    const size = Number(btn.dataset.size);
+    const isActive = size === activeSize;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-checked', isActive ? 'true' : 'false');
+    btn.onclick = () => {
+      if (size === activeSize) return;
+      window._weeklyChartWindow[chartId] = size;
+      // Snap to the latest data on size change so the new window always
+      // shows the most recent N weeks (avoids "I picked 36 weeks but the
+      // chart is still anchored to an old window" surprise).
+      window._weeklyChartAnchor[chartId] = null;
+      rerender();
+    };
+  });
+
+  // Replace listeners by reattaching (idempotent). Pages by the currently
+  // active window size so the prev/next stride matches what the user sees.
   const handler = (delta, jumpToLatest) => () => {
     const cur = (window._weeklyChartAnchor[chartId] === null || window._weeklyChartAnchor[chartId] === undefined)
       ? totalWeeks - 1
@@ -1337,8 +1386,8 @@ function _renderChartWeekNav(chartId, totalWeeks, windowInfo, rerender) {
     }
     rerender();
   };
-  if (prevBtn) { prevBtn.onclick = handler(-WEEKLY_CHART_WINDOW, false); }
-  if (nextBtn) { nextBtn.onclick = handler(+WEEKLY_CHART_WINDOW, false); }
+  if (prevBtn) { prevBtn.onclick = handler(-activeSize, false); }
+  if (nextBtn) { nextBtn.onclick = handler(+activeSize, false); }
   if (latestBtn) { latestBtn.onclick = handler(0, true); }
 }
 
@@ -5679,7 +5728,7 @@ function renderMixChart(workouts) {
   const allDataWeeks = Object.keys(weekWorkouts).sort();
   if (allDataWeeks.length === 0) return;
   const allWeekKeys = _buildContiguousWeeks(allDataWeeks[0], allDataWeeks[allDataWeeks.length - 1]);
-  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-mix-personal']);
+  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-mix-personal'], _getChartWindowSize('chart-mix-personal'));
   const visibleWeeks = win.weeks;
 
   const labels = visibleWeeks.map(w => {
@@ -5771,8 +5820,8 @@ function renderEffortChart(workouts) {
   const isDeloadAll = allWeekKeys.map(w => isDeloadWeek(parseISOWeekKeyLocal(w)));
   const { targetUpper: targetUpperAll, targetLower: targetLowerAll, classes: classesAll } = _effortBandClassify(effortDataAll);
 
-  // Slice down to the visible 12-week window.
-  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-effort']);
+  // Slice down to the visible window (size selectable: 6 / 12 / 36).
+  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-effort'], _getChartWindowSize('chart-effort'));
   const visibleWeeks = win.weeks;
   const effortData = effortDataAll.slice(win.startIdx, win.endIdx + 1);
   const hoursData = hoursDataAll.slice(win.startIdx, win.endIdx + 1);
@@ -6131,7 +6180,7 @@ function renderPmcChart(workouts) {
   // Contiguous Monday timeline + 12-week sliding window navigator, same
   // pattern as renderEffortChart / renderEasyHrChart.
   const allWeekKeys = _buildContiguousWeeks(dataWeeks[0], dataWeeks[dataWeeks.length - 1]);
-  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-pmc-ctl']);
+  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-pmc-ctl'], _getChartWindowSize('chart-pmc-ctl'));
   const visibleWeeks = win.weeks;
   const labels = visibleWeeks.map((k) => `V${weekNumber(parseISOWeekKeyLocal(k))}`);
   const ctl = visibleWeeks.map((k) => {
@@ -6585,14 +6634,15 @@ function renderEasyHrChart(workouts) {
   // We also trim leading empty weeks: if the user has one stray qualifying
   // pass from months ago plus recent activity, _buildContiguousWeeks would
   // otherwise stretch the categorical x-axis across a dozen empty bars.
-  // Cap the lookback at WEEKLY_CHART_WINDOW (12) and start at the first week
-  // with data inside that window so the chart begins where data actually
-  // begins.
+  // Cap the lookback at the user-selected window size (6 / 12 / 36) and start
+  // at the first week with data inside that window so the chart begins where
+  // data actually begins.
+  const easyHrSize = _getChartWindowSize('chart-easy-hr');
   const lastDataKey = dataKeys[dataKeys.length - 1];
-  const earliestVisibleKey = isoDate(addDays(parseISOWeekKeyLocal(lastDataKey), -7 * (WEEKLY_CHART_WINDOW - 1)));
+  const earliestVisibleKey = isoDate(addDays(parseISOWeekKeyLocal(lastDataKey), -7 * (easyHrSize - 1)));
   const firstKey = dataKeys.find((k) => k >= earliestVisibleKey) ?? lastDataKey;
   const allWeekKeys = _buildContiguousWeeks(firstKey, lastDataKey);
-  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-easy-hr']);
+  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-easy-hr'], easyHrSize);
   const visibleWeeks = win.weeks;
 
   const labels = visibleWeeks.map((k) => `V${weekNumber(parseISOWeekKeyLocal(k))}`);
@@ -6756,15 +6806,12 @@ const VO2MAX_QUAL_HR_PCT = 0.70;
 // long-running average; 28 days is long enough to dampen single-pass noise
 // without lagging the trend by months.
 const VO2MAX_SMOOTH_DAYS = 28;
-// Visible window CAP for the VO2max chart. We clip data to "last 12 weeks"
-// so the chart matches the cadence of every other chart in Din progress
-// (instead of letting Chart.js auto-fit ~12 months of sparse history,
-// which produced a confusing V29 -> V49 -> V1 -> V13 wrap-around when the
-// user only had a handful of qualifying passes). The x-axis left bound is
-// tightened further to the Monday of the first qualifying pass inside the
-// window — see renderVo2maxChart — so we don't render empty leading weeks
-// when data only starts in, say, V14.
-const VO2MAX_VISIBLE_DAYS = 84;
+// VO2max no longer hard-codes its visible window — it uses the same
+// per-chart 6 / 12 / 36-week selector as every other Din progress chart.
+// _getChartWindowSize('chart-vo2max') resolves the active size; the X axis
+// is still tightened further to the Monday of the first qualifying pass
+// inside the window so we don't render empty leading weeks when data only
+// starts mid-window.
 const _MS_PER_DAY = 86400000;
 
 function _isVdotQualifyingPass(w, hrMax) {
@@ -6830,8 +6877,8 @@ function renderVo2maxChart(workouts) {
   // window because points is already date-sorted; this keeps the smoothing
   // O(n) and means each smoothed value at date D averages every qualifying
   // VDOT in [D − 28d, D]. Note we run this over the FULL history so that
-  // the leftmost dot in the visible 12 w window still has a real 28 d
-  // lookback behind it, even though we'll clip the display below.
+  // the leftmost dot in the visible window still has a real 28 d lookback
+  // behind it, even though we'll clip the display below.
   let lo = 0;
   let runningSum = 0;
   for (let i = 0; i < points.length; i++) {
@@ -6846,28 +6893,43 @@ function renderVo2maxChart(workouts) {
     points[i].windowCount = winSize;
   }
 
-  // Step 2b: clip to the visible 12 w window AFTER smoothing so the chart
-  // matches the cadence of every other Din progress chart. Without this
-  // clip Chart.js auto-fitted ~12 months of sparse history, which produced
-  // the V29 -> V49 -> V1 -> V13 wrap-around the user reported.
-  const nowMs = Date.now();
-  const windowStartMs = nowMs - VO2MAX_VISIBLE_DAYS * _MS_PER_DAY;
-  const windowEndMs = nowMs;
-  const visiblePoints = points.filter((p) => p.x >= windowStartMs);
+  // Step 2b: clip to the visible window using the unified per-chart
+  // selector (6 / 12 / 36 weeks, default 12). _sliceWeekWindow + the shared
+  // nav strip mean VO2max obeys the same cadence as every other Din
+  // progress chart. The X axis is still tightened to the Monday of the
+  // first qualifying pass inside the window so we don't render leading
+  // empty weeks when data only starts mid-window.
+  const vo2Size = _getChartWindowSize('chart-vo2max');
+  const firstPointMonIso = isoDate(mondayOfWeek(new Date(points[0].x)));
+  const lastPointMonIso = isoDate(mondayOfWeek(new Date(points[points.length - 1].x)));
+  const allWeekKeys = _buildContiguousWeeks(firstPointMonIso, lastPointMonIso);
+  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-vo2max'], vo2Size);
+  const visibleWeeks = win.weeks;
+  const windowStartMs = visibleWeeks.length
+    ? parseISOWeekKeyLocal(visibleWeeks[0]).valueOf()
+    : 0;
+  const windowEndMs = visibleWeeks.length
+    ? addDays(parseISOWeekKeyLocal(visibleWeeks[visibleWeeks.length - 1]), 7).valueOf()
+    : Date.now();
+  const visiblePoints = points.filter((p) => p.x >= windowStartMs && p.x < windowEndMs);
+
+  // Always render the nav strip — even on sparse states — so the user can
+  // page back to where there is data.
+  _renderChartWeekNav('chart-vo2max', allWeekKeys.length, win, () => renderVo2maxChart(workouts));
 
   if (visiblePoints.length === 0) {
     _renderChartInsight('vo2max-insight', {
       band: 'neutral',
       title: 'Inga kvalpass i fönstret',
-      sub: `Inga kvalpass de senaste ${Math.round(VO2MAX_VISIBLE_DAYS / 7)} veckorna. Logga ett löppass med puls så ritar vi trenden.`,
+      sub: `Inga kvalpass i de valda ${vo2Size} veckorna. Logga ett löppass med puls eller bläddra bakåt för att se historik.`,
     });
     return;
   }
 
   // Tighten the left bound to the Monday of the first qualifying pass in
-  // the window so we don't render V5..V13 of empty padding when data only
-  // starts at V14. The 12-week cap above is still the upper bound on how
-  // far back we look; this just trims leading whitespace within it.
+  // the window so we don't render leading empty weeks when data only
+  // starts mid-window. The selected window cap above is still the upper
+  // bound on how far back we look; this just trims leading whitespace.
   const tightStartMs = mondayOfWeek(new Date(visiblePoints[0].x)).valueOf();
 
   if (visiblePoints.length === 1) {
@@ -6890,7 +6952,7 @@ function renderVo2maxChart(workouts) {
   // overnight.
   const last = visiblePoints[visiblePoints.length - 1];
   const latestSmoothed = last.smoothed;
-  const passCountStr = `${visiblePoints.length} kvalpass · senaste ${Math.round(VO2MAX_VISIBLE_DAYS / 7)} v`;
+  const passCountStr = `${visiblePoints.length} kvalpass · valda ${vo2Size} v`;
 
   // Compare smoothed value now vs ~4 weeks earlier — pick the latest point
   // in the visible window whose date is <= (now - 28d). If we don't have
@@ -7219,7 +7281,7 @@ function renderGroupChart(allWorkouts, members) {
   const dataWeeks = Object.keys(weekData).sort();
   if (dataWeeks.length === 0) return;
   const allWeekKeys = _buildContiguousWeeks(dataWeeks[0], dataWeeks[dataWeeks.length - 1]);
-  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-group-weekly']);
+  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-group-weekly'], _getChartWindowSize('chart-group-weekly'));
   const visibleWeeks = win.weeks;
 
   const labels = visibleWeeks.map(w => {
@@ -7306,7 +7368,7 @@ function renderGroupEffortChart(allWorkouts, members) {
   const dataWeeks = Object.keys(weekMap).sort();
   if (dataWeeks.length === 0) return;
   const allWeekKeys = _buildContiguousWeeks(dataWeeks[0], dataWeeks[dataWeeks.length - 1]);
-  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-group-effort']);
+  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-group-effort'], _getChartWindowSize('chart-group-effort'));
   const visibleWeeks = win.weeks;
 
   const labels = visibleWeeks.map(w => {

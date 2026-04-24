@@ -563,29 +563,41 @@
       </div>
 
       <div class="card" id="effort-card">
-        <div class="card-header">
-          <span class="card-title">Belastning per vecka</span>
-          <button type="button" class="pmc-info-btn" id="effort-info-btn"
-                  onclick="togglePopover('effort-info-popover','effort-info-btn')"
-                  aria-label="Visa förklaring" aria-expanded="false">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-          </button>
+        <div class="chart-titlebar">
+          <div class="chart-titlebar-text">
+            <div class="chart-titlebar-title">Belastning per vecka</div>
+            <div class="chart-titlebar-desc">Träningsbelastning (TSS) per vecka, staplad efter pass-typ.</div>
+          </div>
+          <div class="chart-titlebar-actions">
+            <button type="button" class="chart-titlebar-info" id="effort-info-btn"
+                    onclick="togglePopover('effort-info-popover','effort-info-btn')"
+                    aria-label="Visa förklaring" aria-expanded="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="pmc-info-popover hidden" id="effort-info-popover" role="region" aria-label="Belastning-förklaring">
+          <p><strong>Belastning per vecka</strong> visar din samlade träningsstress (TSS, Training Stress Score) staplad per vecka och färgad efter pass-typ. TSS kombinerar varaktighet och intensitet — en hård intervall-pass ger mer än samma minuter joggning.</p>
+          <p class="pmc-info-meta">Färgerna i staplarna matchar pass-typerna (lugnt, tröskel, intervall, lång, etc.) så du ser var belastningen kommer ifrån. Använd nav-fältet ovanför grafen för att växla mellan 6, 12 eller 36 veckors fönster.</p>
+          <div class="effort-legend" id="effort-legend"></div>
         </div>
         <div class="chart-container chart-container--skeleton" id="chart-effort-wrap"><div class="chart-skeleton" id="chart-skeleton-effort"></div><canvas id="chart-effort"></canvas></div>
         <div class="chart-insight" id="effort-insight"></div>
-        <div class="pmc-info-popover hidden" id="effort-info-popover" role="region" aria-label="Belastning-förklaring">
-          <div class="effort-legend" id="effort-legend"></div>
-        </div>
       </div>
 
       <div class="card" id="pmc-ctl-card">
-        <div class="card-header">
-          <span class="card-title">Personal fitness score</span>
-          <button type="button" class="pmc-info-btn" id="pmc-ctl-info-btn"
-                  onclick="togglePopover('pmc-ctl-info-popover','pmc-ctl-info-btn')"
-                  aria-label="Visa förklaring" aria-expanded="false">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-          </button>
+        <div class="chart-titlebar">
+          <div class="chart-titlebar-text">
+            <div class="chart-titlebar-title">Personal fitness score</div>
+            <div class="chart-titlebar-desc">Din fitness (CTL) jämfört med startnivå. 1.00 = utgångsläge.</div>
+          </div>
+          <div class="chart-titlebar-actions">
+            <button type="button" class="chart-titlebar-info" id="pmc-ctl-info-btn"
+                    onclick="togglePopover('pmc-ctl-info-popover','pmc-ctl-info-btn')"
+                    aria-label="Visa förklaring" aria-expanded="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            </button>
+          </div>
         </div>
 
         <div class="pmc-info-popover hidden" id="pmc-ctl-info-popover" role="region" aria-label="Förklaring">
@@ -603,13 +615,33 @@
       </div>
 
       <div class="card" id="polarization-card">
-        <div class="card-header">
-          <span class="card-title">Intensitetsmix (senaste 4 v)</span>
-          <button type="button" class="card-warn-btn hidden" id="polarization-proxy-warn"
-                  onclick="togglePopover('polarization-proxy-popover','polarization-proxy-warn')"
-                  aria-label="Pulsdata saknas — visa förklaring" aria-expanded="false">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          </button>
+        <div class="chart-titlebar">
+          <div class="chart-titlebar-text">
+            <div class="chart-titlebar-title">Intensitetsmix</div>
+            <div class="chart-titlebar-desc">Andel av tiden i låg vs hög intensitet, senaste 4 veckorna.</div>
+          </div>
+          <div class="chart-titlebar-actions">
+            <button type="button" class="card-warn-btn hidden" id="polarization-proxy-warn"
+                    onclick="togglePopover('polarization-proxy-popover','polarization-proxy-warn')"
+                    aria-label="Pulsdata saknas — visa förklaring" aria-expanded="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </button>
+            <button type="button" class="chart-titlebar-info" id="polarization-info-btn"
+                    onclick="togglePopover('polarization-info-popover','polarization-info-btn')"
+                    aria-label="Visa förklaring" aria-expanded="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="pmc-info-popover hidden" id="polarization-info-popover" role="region" aria-label="Intensitetsmix-förklaring">
+          <p><strong>Intensitetsmix</strong> visar hur stor andel av din träningstid de senaste 4 veckorna som varit <strong>låg intensitet</strong> (zon 1–2, lugnt) jämfört med <strong>hög intensitet</strong> (zon 3+, tröskel/intervall/tävling).</p>
+          <p>Klassiskt polariserat upplägg (Seiler) siktar på ungefär <strong>80 % lugnt och 20 % hårt</strong>. För mycket "lagom mellan-intensitet" tröttar ner kroppen utan att ge tillräcklig stimulans åt vare sig grundträning eller toppform.</p>
+          <p class="pmc-info-meta">Vi använder pulsdata när det finns och faller tillbaka på en pace-baserad proxy när det inte gör det. När någon del av tiden klassats via proxy syns en gul varningsknapp som förklarar hur stor andel det rör sig om.</p>
+        </div>
+        <div class="pmc-info-popover hidden" id="polarization-proxy-popover" role="region" aria-label="Förklaring av pace-proxy">
+          <p><strong>Pulsdata saknas för en del pass.</strong></p>
+          <p>För dessa pass uppskattar vi intensiteten utifrån farten jämfört med din egen snabbaste uthålliga fart de senaste 12 veckorna. Det är en proxy och inte lika exakt som riktiga pulsdata — koppla en pulsmätare för bättre precision.</p>
+          <p class="pmc-info-meta" id="polarization-proxy-share-line"></p>
         </div>
         <div class="polarization-bar" id="polarization-bar">
           <div class="polarization-seg polarization-seg--easy" id="pol-seg-easy"></div>
@@ -617,25 +649,26 @@
         </div>
         <div class="polarization-legend" id="polarization-legend"></div>
         <div class="chart-insight" id="polarization-insight"></div>
-        <div class="pmc-info-popover hidden" id="polarization-proxy-popover" role="region" aria-label="Förklaring av pace-proxy">
-          <p><strong>Pulsdata saknas för en del pass.</strong></p>
-          <p>För dessa pass uppskattar vi intensiteten utifrån farten jämfört med din egen snabbaste uthålliga fart de senaste 12 veckorna. Det är en proxy och inte lika exakt som riktiga pulsdata — koppla en pulsmätare för bättre precision.</p>
-          <p class="pmc-info-meta" id="polarization-proxy-share-line"></p>
-        </div>
       </div>
 
       <div class="card" id="easy-hr-card">
-        <div class="card-header">
-          <span class="card-title">
-            Aerob effektivitet (EF)
-            <span
-              class="card-help"
-              tabindex="0"
-              role="button"
-              aria-label="Vad är EF?"
-              title="EF = GAP-fart (km/h) ÷ snittpuls × 100, beräknat på splits i Z2 (60–80 % av maxHR), efter att de första 10 minuterna av varje pass kapats. GAP är höjd-justerad fart (Minetti). Högre EF = du springer fortare till samma puls = bättre aerob form."
-            >&#9432;</span>
-          </span>
+        <div class="chart-titlebar">
+          <div class="chart-titlebar-text">
+            <div class="chart-titlebar-title">Aerob effektivitet (EF)</div>
+            <div class="chart-titlebar-desc">GAP-fart per puls i Z2 — högre EF betyder bättre aerob form.</div>
+          </div>
+          <div class="chart-titlebar-actions">
+            <button type="button" class="chart-titlebar-info" id="easy-hr-info-btn"
+                    onclick="togglePopover('easy-hr-info-popover','easy-hr-info-btn')"
+                    aria-label="Visa förklaring" aria-expanded="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="pmc-info-popover hidden" id="easy-hr-info-popover" role="region" aria-label="EF-förklaring">
+          <p><strong>Aerob effektivitet (EF)</strong> mäter hur fort du springer per puls­slag på lugna pass. Högre EF = du springer fortare till samma puls = bättre aerob form.</p>
+          <p class="pmc-info-meta">Tekniskt: <strong>EF = GAP-fart (km/h) ÷ snittpuls × 100</strong>, beräknat på splits i Z2 (60–80 % av maxHR) efter att de första 10 minuterna av varje pass kapats (där pulsen fortfarande driftar uppåt). GAP är höjd-justerad fart enligt Minettis modell, så uppförs- och nedförsbackar inte snedvrider mätningen.</p>
+          <p class="pmc-info-meta">Trenden är intressantare än enskilda pass — en mild stigande linje över 6–12 veckor är tecknet på att grundträningen ger frukt. Värme, dehydrering och dålig sömn drar ner EF tillfälligt utan att din egentliga form tappat.</p>
         </div>
         <div class="chart-container chart-container--skeleton" id="chart-easy-hr-wrap">
           <div class="chart-skeleton" id="chart-skeleton-easy-hr"></div>
@@ -645,17 +678,23 @@
       </div>
 
       <div class="card" id="vo2max-card">
-        <div class="card-header">
-          <span class="card-title">
-            VO2max (estimerad)
-            <span
-              class="card-help"
-              tabindex="0"
-              role="button"
-              aria-label="Vad är VO2max?"
-              title="Estimerad VO2max i ml/kg/min — samma metric som Garmin visar. Per pass: vi tar fart och varaktighet, räknar ut syreförbrukning vid pacen och vilken andel av maxsyreupptag det motsvarar för den varaktigheten. Visar dels enskilda pass som prickar och dels en 28-dagars snittlinje (det är trenden du ska titta på). Tempopass och tävlingar lyfter kurvan; rena Z1-jogg gör det inte. Tekniskt grundas formeln på Jack Daniels VDOT, samma definition som används i Strava och Garmin."
-            >&#9432;</span>
-          </span>
+        <div class="chart-titlebar">
+          <div class="chart-titlebar-text">
+            <div class="chart-titlebar-title">VO2max (estimerad)</div>
+            <div class="chart-titlebar-desc">Estimerad syreupptag per löppass med 28-dagars trendlinje.</div>
+          </div>
+          <div class="chart-titlebar-actions">
+            <button type="button" class="chart-titlebar-info" id="vo2max-info-btn"
+                    onclick="togglePopover('vo2max-info-popover','vo2max-info-btn')"
+                    aria-label="Visa förklaring" aria-expanded="false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="pmc-info-popover hidden" id="vo2max-info-popover" role="region" aria-label="VO2max-förklaring">
+          <p><strong>VO2max</strong> visar estimerad syreupptag i ml/kg/min — samma metric som Garmin och Strava visar.</p>
+          <p>Per pass tar vi fart och varaktighet, räknar ut syreförbrukning vid pacen och vilken andel av maxsyreupptaget det motsvarar för den passlängden. Du ser <strong>enskilda pass som prickar</strong> och en <strong>28-dagars snittlinje</strong> — det är trendlinjen du ska titta på.</p>
+          <p class="pmc-info-meta">Tempopass och tävlingar lyfter kurvan; rena Z1-jogg gör det inte (de filtreras bort eftersom snittpulsen är för låg). Formeln baseras på Jack Daniels VDOT, samma definition som används i Strava och Garmin.</p>
         </div>
         <div class="chart-container chart-container--skeleton" id="chart-vo2max-wrap">
           <div class="chart-skeleton" id="chart-skeleton-vo2max"></div>
@@ -706,8 +745,24 @@
 
       <div class="progress-subtab" id="progress-subtab-aktiviteter" role="tabpanel" aria-labelledby="progress-subtab-aktiviteter-btn" hidden>
         <div class="card" id="combined-activity-mix-card">
-          <div class="card-header">
-            <span class="card-title" id="trends-mix-title">Aktivitetsmix (timmar)</span>
+          <div class="chart-titlebar">
+            <div class="chart-titlebar-text">
+              <div class="chart-titlebar-title" id="trends-mix-title">Aktivitetsmix (timmar)</div>
+              <div class="chart-titlebar-desc">Tid eller distans per aktivitetstyp och vecka.</div>
+            </div>
+            <div class="chart-titlebar-actions">
+              <button type="button" class="chart-titlebar-info" id="mix-info-btn"
+                      onclick="togglePopover('mix-info-popover','mix-info-btn')"
+                      aria-label="Visa förklaring" aria-expanded="false">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="pmc-info-popover hidden" id="mix-info-popover" role="region" aria-label="Aktivitetsmix-förklaring">
+            <p><strong>Aktivitetsmix</strong> staplar all din träning per vecka, färgad efter aktivitetstyp (löpning, cykel, simning, styrka, etc.). Gör det enkelt att se balansen mellan disciplinerna och om någon aktivitet petats undan av andra.</p>
+            <p class="pmc-info-meta">Växla mellan <strong>Tid</strong> (timmar) och <strong>Distans</strong> (km) med växeln nedan — distans visas bara för aktiviteter där det finns en logisk km-mätning. Använd nav-fältet för att välja 6, 12 eller 36 veckors fönster.</p>
+          </div>
+          <div class="chart-mix-controls" style="display:flex;justify-content:flex-end;margin-bottom:8px;">
             <div class="ios-toggle-row" style="margin:0;gap:6px;">
               <span class="ios-toggle-label" style="font-size:0.75rem;">Tid</span>
               <label class="ios-switch ios-switch-sm" id="mix-unit-toggle">
@@ -859,27 +914,48 @@
           </div>
 
           <div class="card">
-            <div class="card-header">
-              <span class="card-title" id="grp-chart-title">Timmar per vecka</span>
+            <div class="chart-titlebar">
+              <div class="chart-titlebar-text">
+                <div class="chart-titlebar-title" id="grp-chart-title">Timmar per vecka</div>
+                <div class="chart-titlebar-desc">Total tränings­tid per vecka, summerat för gruppen.</div>
+              </div>
+              <div class="chart-titlebar-actions">
+                <button type="button" class="chart-titlebar-info" id="group-weekly-info-btn"
+                        onclick="togglePopover('group-weekly-info-popover','group-weekly-info-btn')"
+                        aria-label="Visa förklaring" aria-expanded="false">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="pmc-info-popover hidden" id="group-weekly-info-popover" role="region" aria-label="Gruppvolym-förklaring">
+              <p><strong>Timmar per vecka</strong> visar total tränings­tid, staplat per gruppmedlem och summerat per vecka. Användbart för att se gruppens samlade volym och vem som drar ner respektive bidrar mest.</p>
+              <p class="pmc-info-meta">Färgerna i staplarna mappar till medlemmarna i gruppen — håll musen över en stapel för att se vem som ligger bakom respektive del. Använd nav-fältet för att välja 6, 12 eller 36 veckors fönster.</p>
             </div>
             <div class="chart-container"><canvas id="chart-group-weekly"></canvas></div>
             <div class="chart-insight" id="group-weekly-insight"></div>
           </div>
 
           <div class="card" id="group-effort-card">
-            <div class="card-header">
-              <span class="card-title">Belastning per vecka</span>
-              <button type="button" class="pmc-info-btn" id="group-effort-info-btn"
-                      onclick="togglePopover('group-effort-info-popover','group-effort-info-btn')"
-                      aria-label="Visa förklaring" aria-expanded="false">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-              </button>
+            <div class="chart-titlebar">
+              <div class="chart-titlebar-text">
+                <div class="chart-titlebar-title">Belastning per vecka</div>
+                <div class="chart-titlebar-desc">Genomsnittlig belastning (TSS) per vecka och gruppmedlem.</div>
+              </div>
+              <div class="chart-titlebar-actions">
+                <button type="button" class="chart-titlebar-info" id="group-effort-info-btn"
+                        onclick="togglePopover('group-effort-info-popover','group-effort-info-btn')"
+                        aria-label="Visa förklaring" aria-expanded="false">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="pmc-info-popover hidden" id="group-effort-info-popover" role="region" aria-label="Belastning-förklaring">
+              <p><strong>Belastning per vecka (grupp)</strong> visar samlad träningsstress (TSS) per vecka och gruppmedlem, så du ser hur gruppens samlade volym och intensitet rör sig över tid.</p>
+              <p class="pmc-info-meta">TSS kombinerar varaktighet och intensitet — en hård intervall-pass ger mer än samma minuter joggning. Använd nav-fältet för att välja 6, 12 eller 36 veckors fönster.</p>
+              <div class="effort-legend" id="group-effort-legend"></div>
             </div>
             <div class="chart-container"><canvas id="chart-group-effort"></canvas></div>
             <div class="chart-insight" id="group-effort-insight"></div>
-            <div class="pmc-info-popover hidden" id="group-effort-info-popover" role="region" aria-label="Belastning-förklaring">
-              <div class="effort-legend" id="group-effort-legend"></div>
-            </div>
           </div>
 
           <div class="card">

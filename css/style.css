@@ -1129,6 +1129,36 @@ select option { background: #1a1a2e; color: var(--text); }
 }
 .chart-week-nav-latest:hover { background: rgba(214,99,158,0.10); }
 .chart-week-nav-latest[hidden] { display: none; }
+
+/* Segmented 6 / 12 / 36 week-window selector — sits next to the prev/next
+ * buttons on every time-series chart. Lets the user trade granularity
+ * (6 weeks → recent trends) for horizon (36 weeks → seasonal context). */
+.chart-week-nav-size {
+  display: inline-flex;
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface-2, rgba(255,255,255,0.04));
+}
+.chart-week-nav-size-btn {
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  transition: background 0.15s, color 0.15s;
+}
+.chart-week-nav-size-btn + .chart-week-nav-size-btn {
+  border-left: 1px solid var(--border, rgba(255,255,255,0.08));
+}
+.chart-week-nav-size-btn:hover { color: var(--text, #ddd); }
+.chart-week-nav-size-btn.active {
+  background: var(--accent, #d6639e);
+  color: #fff;
+}
 .toggle-row { display: flex; gap: 8px; margin-bottom: 16px; }
 .toggle-btn {
   padding: 6px 14px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;
@@ -3248,6 +3278,58 @@ input.code-input {
 .card-warn-btn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px color-mix(in srgb, #f59e0b 30%, transparent);
+}
+
+/* ── Unified chart title bar ──
+ * Lives ABOVE every chart card so each graph carries an explicit title,
+ * a one-line description of what's being plotted, and an info button
+ * that pops the long-form explanation. Visual weight mirrors the
+ * .chart-insight bar that lives at the bottom of the card so the
+ * top/bottom framing reads as a matched pair. */
+.chart-titlebar {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border-radius: 12px;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border);
+}
+.chart-titlebar-text { flex: 1; min-width: 0; }
+.chart-titlebar-title {
+  font-size: 0.98rem; font-weight: 700; letter-spacing: -0.2px;
+  color: var(--text); line-height: 1.2;
+}
+.chart-titlebar-desc {
+  margin-top: 3px;
+  font-size: 0.8rem; color: var(--text-muted); line-height: 1.4;
+}
+.chart-titlebar-actions {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.chart-titlebar-info {
+  width: 28px; height: 28px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.chart-titlebar-info:hover {
+  background: var(--bg-card-hover);
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+.chart-titlebar-info:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+@media (max-width: 480px) {
+  .chart-titlebar { padding: 10px 12px; }
+  .chart-titlebar-title { font-size: 0.92rem; }
+  .chart-titlebar-desc { font-size: 0.74rem; }
 }
 
 /* ── Unified chart insight box ──
