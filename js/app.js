@@ -1418,8 +1418,32 @@ async function fetchWorkouts(profileId, from, to) {
 }
 
 async function fetchAllWorkouts() {
-  const { data } = await sb.from('workouts').select('*').order('workout_date', { ascending: true });
-  return data || [];
+  // PostgREST defaults to a 1000-row cap per response. Without explicit
+  // pagination we silently lose history once a group passes that threshold —
+  // which makes weekly trend charts (group + personal) appear to "start" at
+  // whatever week the truncation lands on. Page through the table in 1000-row
+  // chunks so charts always see the full history.
+  const PAGE = 1000;
+  const all = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await sb
+      .from('workouts')
+      .select('*')
+      .order('workout_date', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) {
+      console.error('fetchAllWorkouts page error', error);
+      break;
+    }
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < PAGE) break;
+    from += PAGE;
+    // Safety net so a runaway loop never hangs the app.
+    if (from > 100000) break;
+  }
+  return all;
 }
 
 async function fetchReactions(workoutId) {
