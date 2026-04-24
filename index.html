@@ -54,7 +54,7 @@
   -->
   <link rel="icon" type="image/svg+xml"
     href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Crect%20width='100'%20height='100'%20rx='20'%20fill='%233498DB'/%3E%3Ctext%20x='50'%20y='70'%20font-family='Arial,sans-serif'%20font-size='62'%20font-weight='bold'%20text-anchor='middle'%20fill='white'%3EN%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/style.css?v=688de8e">
+  <link rel="stylesheet" href="css/style.css?v=chart-insight-v1">
   <!--
     PERF (Improvement #4): all script tags below now use `defer` so they
     download in parallel with HTML parsing and execute, in document order,
@@ -565,10 +565,17 @@
       <div class="card" id="effort-card">
         <div class="card-header">
           <span class="card-title">Effort per vecka</span>
-          <span class="card-sub" id="effort-subtitle"></span>
+          <button type="button" class="pmc-info-btn" id="effort-info-btn"
+                  onclick="togglePopover('effort-info-popover','effort-info-btn')"
+                  aria-label="Visa förklaring" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          </button>
         </div>
         <div class="chart-container chart-container--skeleton" id="chart-effort-wrap"><div class="chart-skeleton" id="chart-skeleton-effort"></div><canvas id="chart-effort"></canvas></div>
-        <div class="effort-legend" id="effort-legend"></div>
+        <div class="chart-insight" id="effort-insight"></div>
+        <div class="pmc-info-popover hidden" id="effort-info-popover" role="region" aria-label="Effort-förklaring">
+          <div class="effort-legend" id="effort-legend"></div>
+        </div>
       </div>
 
       <div class="card" id="pmc-card">
@@ -590,48 +597,37 @@
           <p class="pmc-info-meta"><strong>OBS — TSB rör sig "bakvänt":</strong> när du tränar hårt går TSB <em>ner</em> (du staplar trötthet snabbare än du bygger fitness). När du vilar går TSB <em>upp</em> (tröttheten faller snabbt, fitness faller långsamt). Du peakar genom att tapera, inte genom att köra hårt sista veckan. Samma räknesätt som Garmin Training Status och TrainingPeaks.</p>
         </div>
 
-        <div class="pmc-hero" id="pmc-hero">
-          <span class="pmc-hero-badge pmc-hero-badge--neutral" id="pmc-hero-badge" aria-hidden="true"></span>
-          <div class="pmc-hero-text">
-            <div class="pmc-hero-title" id="pmc-hero-title">Beräknar form…</div>
-            <div class="pmc-hero-sub" id="pmc-hero-sub"></div>
-          </div>
-          <div class="pmc-hero-tsb" id="pmc-hero-tsb" aria-hidden="true"></div>
-        </div>
-
         <div class="chart-container chart-container--skeleton" id="chart-pmc-wrap">
           <div class="chart-skeleton" id="chart-skeleton-pmc"></div>
           <canvas id="chart-pmc"></canvas>
         </div>
 
-        <div class="pmc-status hidden" id="pmc-status" aria-hidden="true"></div>
+        <div class="chart-insight" id="pmc-insight"></div>
       </div>
 
       <div class="card" id="pmc-ctl-card">
         <div class="card-header">
           <span class="card-title">Fitness</span>
-          <span class="card-sub">Långsiktig belastning (CTL)</span>
         </div>
-
-        <div class="pmc-fitness-line" id="pmc-subtitle"></div>
 
         <div class="chart-container chart-container--skeleton" id="chart-pmc-ctl-wrap">
           <div class="chart-skeleton" id="chart-skeleton-pmc-ctl"></div>
           <canvas id="chart-pmc-ctl"></canvas>
         </div>
+
+        <div class="chart-insight" id="pmc-ctl-insight"></div>
       </div>
 
       <div class="card" id="polarization-card">
         <div class="card-header">
           <span class="card-title">Intensitetsmix (senaste 4 v)</span>
-          <span class="card-sub" id="polarization-subtitle"></span>
         </div>
         <div class="polarization-bar" id="polarization-bar">
           <div class="polarization-seg polarization-seg--easy" id="pol-seg-easy"></div>
           <div class="polarization-seg polarization-seg--hard" id="pol-seg-hard"></div>
         </div>
         <div class="polarization-legend" id="polarization-legend"></div>
-        <div class="pmc-status" id="polarization-status"></div>
+        <div class="chart-insight" id="polarization-insight"></div>
       </div>
 
       <div class="card" id="easy-hr-card">
@@ -646,13 +642,12 @@
               title="EF = GAP-fart (km/h) ÷ snittpuls × 100, beräknat på splits i Z2 (60–80 % av maxHR), efter att de första 10 minuterna av varje pass kapats. GAP är höjd-justerad fart (Minetti). Högre EF = du springer fortare till samma puls = bättre aerob form."
             >&#9432;</span>
           </span>
-          <span class="card-sub" id="easy-hr-subtitle"></span>
         </div>
         <div class="chart-container chart-container--skeleton" id="chart-easy-hr-wrap">
           <div class="chart-skeleton" id="chart-skeleton-easy-hr"></div>
           <canvas id="chart-easy-hr"></canvas>
         </div>
-        <div class="pmc-status" id="easy-hr-status"></div>
+        <div class="chart-insight" id="easy-hr-insight"></div>
       </div>
 
       <div class="card" id="vo2max-card">
@@ -667,13 +662,12 @@
               title="Beräknad från dina löppass via Jack Daniels VDOT-formel (samma definition som Strava och Garmin använder). Per pass: vi tar fart och varaktighet, räknar ut syreförbrukning vid pacen och vilken andel av VO2max det motsvarar för den varaktigheten. Per vecka visas ditt bästa pass — VDOT speglar aktuell tävlingsform. Veckor utan löpning lämnas som lucka. Tempopass och tävlingar lyfter kurvan; rena Z1-jogg gör det inte."
             >&#9432;</span>
           </span>
-          <span class="card-sub" id="vo2max-subtitle"></span>
         </div>
         <div class="chart-container chart-container--skeleton" id="chart-vo2max-wrap">
           <div class="chart-skeleton" id="chart-skeleton-vo2max"></div>
           <canvas id="chart-vo2max"></canvas>
         </div>
-        <div class="pmc-status" id="vo2max-status"></div>
+        <div class="chart-insight" id="vo2max-insight"></div>
       </div>
 
       <div class="card" id="season-totals-card">
@@ -875,14 +869,23 @@
               <span class="card-title" id="grp-chart-title">Timmar per vecka</span>
             </div>
             <div class="chart-container"><canvas id="chart-group-weekly"></canvas></div>
+            <div class="chart-insight" id="group-weekly-insight"></div>
           </div>
 
           <div class="card" id="group-effort-card">
             <div class="card-header">
               <span class="card-title">Effort per vecka</span>
+              <button type="button" class="pmc-info-btn" id="group-effort-info-btn"
+                      onclick="togglePopover('group-effort-info-popover','group-effort-info-btn')"
+                      aria-label="Visa förklaring" aria-expanded="false">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              </button>
             </div>
             <div class="chart-container"><canvas id="chart-group-effort"></canvas></div>
-            <div class="effort-legend" id="group-effort-legend"></div>
+            <div class="chart-insight" id="group-effort-insight"></div>
+            <div class="pmc-info-popover hidden" id="group-effort-info-popover" role="region" aria-label="Effort-förklaring">
+              <div class="effort-legend" id="group-effort-legend"></div>
+            </div>
           </div>
 
           <div class="card">
@@ -1789,8 +1792,8 @@
   </div>
 </div>
 
-<script defer src="js/config.js?v=688de8e"></script>
-<script defer src="js/app.js?v=688de8e"></script>
+<script defer src="js/config.js?v=chart-insight-v1"></script>
+<script defer src="js/app.js?v=chart-insight-v1"></script>
 <!--
   Beta-gate logic. Loaded after app.js because it depends on `gateOpen`,
   `NVDP_resumeAfterGate` and `registerAction` defined there. Previously this

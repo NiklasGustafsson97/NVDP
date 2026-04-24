@@ -3151,23 +3151,7 @@ input.code-input {
 .effort-legend-item .effort-legend-dot { margin-top: 4px; flex: 0 0 auto; }
 .effort-legend-meta { color: var(--text-muted, var(--text-dim)); font-style: italic; padding-top: 4px; border-top: 1px dashed var(--border); margin-top: 2px; }
 
-.pmc-status {
-  margin-top: 12px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: var(--bg-card-hover);
-  font-size: 0.85rem; line-height: 1.45;
-  color: var(--text); display: flex; align-items: center; gap: 8px;
-  flex-wrap: wrap;
-}
-.pmc-badge { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-.pmc-badge--fresh { background: var(--green, #2ecc71); }
-.pmc-badge--neutral { background: var(--accent, #3498db); }
-.pmc-badge--productive { background: #f39c12; }
-.pmc-badge--risk { background: #e74c3c; }
-.pmc-atl-note { margin-left: auto; font-size: 0.75rem; color: var(--text-muted); }
-
-/* ── PMC card v2 (hero + collapsible details) ──────────────────── */
+/* ── PMC card v2 (info-icon popover) ──────────────────── */
 .pmc-info-btn {
   margin-left: auto;
   width: 28px; height: 28px;
@@ -3206,55 +3190,68 @@ input.code-input {
   color: var(--text-muted);
 }
 
-.pmc-hero {
+/* ── Unified chart insight box ──
+ * Lives BELOW every weekly trend chart so the "this is what the graph
+ * tells you" callout looks identical across cards (Effort, Formtopp,
+ * Fitness, EF, VO2max, Polarization, Group). Mirrors the .pmc-hero
+ * pattern (badge dot · title/sub · optional right-side headline number)
+ * so the visual language stays consistent with the previously loved
+ * Formtopp callout. */
+.chart-insight {
   display: flex; align-items: center; gap: 14px;
   margin-top: 14px;
-  padding: 14px 16px;
+  padding: 12px 14px;
   border-radius: 12px;
   background: var(--bg-card-hover);
   border: 1px solid var(--border);
 }
-.pmc-hero-badge {
+.chart-insight:empty { display: none; }
+.chart-insight-badge {
   width: 12px; height: 12px; border-radius: 50%;
   flex-shrink: 0;
   box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 18%, transparent);
 }
-.pmc-hero-badge--fresh { background: var(--green, #2ecc71); color: var(--green, #2ecc71); }
-.pmc-hero-badge--neutral { background: var(--text-muted); color: var(--text-muted); }
-.pmc-hero-badge--productive { background: #f39c12; color: #f39c12; }
-.pmc-hero-badge--risk { background: var(--red, #e74c3c); color: var(--red, #e74c3c); }
-.pmc-hero-text { flex: 1; min-width: 0; }
-.pmc-hero-title {
-  font-size: 1.15rem; font-weight: 700; letter-spacing: -0.3px;
-  color: var(--text); line-height: 1.1;
+.chart-insight-text { flex: 1; min-width: 0; }
+.chart-insight-title {
+  font-size: 0.95rem; font-weight: 700; letter-spacing: -0.2px;
+  color: var(--text); line-height: 1.2;
 }
-.pmc-hero-sub {
-  margin-top: 4px;
-  font-size: 0.85rem; color: var(--text-muted); line-height: 1.4;
+.chart-insight-sub {
+  margin-top: 3px;
+  font-size: 0.8rem; color: var(--text-muted); line-height: 1.4;
 }
-.pmc-hero-tsb {
+.chart-insight-headline {
   flex-shrink: 0;
   display: flex; flex-direction: column; align-items: flex-end;
   gap: 2px;
   padding-left: 12px;
   border-left: 1px solid var(--border);
-}
-.pmc-hero-tsb-value {
-  font-size: 1.25rem; font-weight: 700; color: var(--text);
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.5px;
 }
-.pmc-hero-tsb-label {
-  font-size: 0.65rem; color: var(--text-muted);
+.chart-insight-value {
+  font-size: 1.15rem; font-weight: 700; color: var(--text);
+  letter-spacing: -0.4px; line-height: 1;
+}
+.chart-insight-label {
+  font-size: 0.62rem; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600;
 }
-
-.pmc-fitness-line {
-  margin-top: 10px;
-  font-size: 0.8rem; color: var(--text-muted);
-  text-align: right;
+.chart-insight--ok      { background: color-mix(in srgb, var(--green) 8%, var(--bg-card-hover));
+                          border-color: color-mix(in srgb, var(--green) 28%, var(--border)); }
+.chart-insight--warn    { background: color-mix(in srgb, var(--amber) 9%, var(--bg-card-hover));
+                          border-color: color-mix(in srgb, var(--amber) 30%, var(--border)); }
+.chart-insight--bad     { background: color-mix(in srgb, var(--red) 9%, var(--bg-card-hover));
+                          border-color: color-mix(in srgb, var(--red) 32%, var(--border)); }
+.chart-insight--neutral { background: var(--bg-card-hover); border-color: var(--border); }
+.chart-insight--ok      .chart-insight-badge { background: var(--green); color: var(--green); }
+.chart-insight--warn    .chart-insight-badge { background: var(--amber); color: var(--amber); }
+.chart-insight--bad     .chart-insight-badge { background: var(--red);   color: var(--red); }
+.chart-insight--neutral .chart-insight-badge { background: var(--text-muted); color: var(--text-muted); }
+@media (max-width: 480px) {
+  .chart-insight { gap: 10px; padding: 10px 12px; }
+  .chart-insight-headline { padding-left: 8px; }
+  .chart-insight-value { font-size: 1rem; }
 }
-.pmc-fitness-line:empty { display: none; }
 
 .polarization-bar {
   display: flex; width: 100%;

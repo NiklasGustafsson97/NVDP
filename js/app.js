@@ -1342,6 +1342,38 @@ function _renderChartWeekNav(chartId, totalWeeks, windowInfo, rerender) {
   if (latestBtn) { latestBtn.onclick = handler(0, true); }
 }
 
+/** Render the unified "this is what the graph tells you" callout below a
+ *  chart card. Every weekly trend chart targets one of these slots so the
+ *  insight format (badge + title + sub + optional headline) looks identical
+ *  across the app. Clears + re-applies className so band changes (ok / warn /
+ *  bad / neutral) animate cleanly between renders. */
+function _renderChartInsight(slotId, opts) {
+  const el = document.getElementById(slotId);
+  if (!el) return;
+  opts = opts || {};
+  const band = ['ok', 'warn', 'bad', 'neutral'].includes(opts.band) ? opts.band : 'neutral';
+  const title = opts.title || '';
+  const sub = opts.sub || '';
+  const headline = (opts.headline === 0 || opts.headline) ? String(opts.headline) : '';
+  const headlineLabel = opts.headlineLabel || '';
+  if (!title && !sub && !headline) {
+    el.className = 'chart-insight';
+    el.innerHTML = '';
+    return;
+  }
+  el.className = `chart-insight chart-insight--${band}`;
+  el.innerHTML = `
+    <span class="chart-insight-badge" aria-hidden="true"></span>
+    <div class="chart-insight-text">
+      ${title ? `<div class="chart-insight-title">${escapeHTML(title)}</div>` : ''}
+      ${sub ? `<div class="chart-insight-sub">${escapeHTML(sub)}</div>` : ''}
+    </div>
+    ${headline ? `<div class="chart-insight-headline">
+      <span class="chart-insight-value">${escapeHTML(headline)}</span>
+      ${headlineLabel ? `<span class="chart-insight-label">${escapeHTML(headlineLabel)}</span>` : ''}
+    </div>` : ''}`;
+}
+
 function getCurrentPeriod(date) {
   const d = new Date(date);
   if (d >= new Date(P2_START) && d <= new Date(P2_END)) return 2;
@@ -5789,41 +5821,43 @@ function renderEffortChart(workouts) {
     }
   });
 
-  // Subtitle: count how many of the last N graded (non-deload) weeks landed
+  // Insight: count how many of the last N graded (non-deload) weeks landed
   // inside the band. Deload weeks are skipped because they're planned dips,
   // not signal. We look at the last 8 graded weeks for the rolling stat —
   // long enough to be meaningful, short enough that a fix this week shows
-  // up in the number.
-  const subEl = document.getElementById('effort-subtitle');
-  if (subEl) {
-    // Subtitle always reports on the most recent calendar weeks across the
-    // FULL series — it's a snapshot of "now", not of whatever 12-week window
-    // the user happens to be browsing.
-    const gradedRecent = [];
-    for (let i = effortDataAll.length - 1; i >= 0 && gradedRecent.length < 8; i--) {
-      if (classesAll[i] === 'neutral') continue;
-      if (isDeloadAll[i]) continue;
-      gradedRecent.push(classesAll[i]);
-    }
-    if (gradedRecent.length === 0) {
-      subEl.textContent = `Bygg ≥ ${EFFORT_BAND_LOOKBACK + 1} v historik så ritar vi mål-bandet.`;
-    } else {
-      const onCnt = gradedRecent.filter((c) => c === 'on').length;
-      const overCnt = gradedRecent.filter((c) => c === 'over').length;
-      const underCnt = gradedRecent.filter((c) => c === 'under').length;
-      const total = gradedRecent.length;
-      const lastCls = classesAll[classesAll.length - 1];
-      const lastTag = isDeloadAll[isDeloadAll.length - 1]
-        ? ' (planerad deload)'
-        : lastCls === 'over'
-          ? ' (för hög)'
-          : lastCls === 'under'
-            ? ' (för låg)'
-            : lastCls === 'on'
-              ? ' (i bandet)'
-              : '';
-      subEl.textContent = `${onCnt} av ${total} senaste i bandet · ${overCnt} över / ${underCnt} under · denna v${lastTag}`;
-    }
+  // up in the number. Insight always reports on the most recent calendar
+  // weeks across the FULL series — it's a snapshot of "now", not of
+  // whatever 12-week window the user happens to be browsing.
+  const gradedRecent = [];
+  for (let i = effortDataAll.length - 1; i >= 0 && gradedRecent.length < 8; i--) {
+    if (classesAll[i] === 'neutral') continue;
+    if (isDeloadAll[i]) continue;
+    gradedRecent.push(classesAll[i]);
+  }
+  if (gradedRecent.length === 0) {
+    _renderChartInsight('effort-insight', {
+      band: 'neutral',
+      title: 'Inte graderad än',
+      sub: `Bygg ≥ ${EFFORT_BAND_LOOKBACK + 1} v historik så ritar vi mål-bandet.`,
+    });
+  } else {
+    const onCnt = gradedRecent.filter((c) => c === 'on').length;
+    const overCnt = gradedRecent.filter((c) => c === 'over').length;
+    const underCnt = gradedRecent.filter((c) => c === 'under').length;
+    const total = gradedRecent.length;
+    const lastCls = classesAll[classesAll.length - 1];
+    const lastDeload = isDeloadAll[isDeloadAll.length - 1];
+    let title, band;
+    if (lastDeload) { title = 'Planerad deload'; band = 'neutral'; }
+    else if (lastCls === 'on') { title = 'I bandet denna vecka'; band = 'ok'; }
+    else if (lastCls === 'over') { title = 'För hög denna vecka'; band = 'bad'; }
+    else if (lastCls === 'under') { title = 'För låg denna vecka'; band = 'warn'; }
+    else { title = 'Inte graderad än'; band = 'neutral'; }
+    _renderChartInsight('effort-insight', {
+      band,
+      title,
+      sub: `${onCnt} av ${total} senaste i bandet · ${overCnt} över / ${underCnt} under`,
+    });
   }
 
   const legendEl = document.getElementById('effort-legend');
@@ -5881,19 +5915,18 @@ function renderPmcChart(workouts) {
   if (window._chartPmc) window._chartPmc.destroy();
   if (window._chartPmcCtl) window._chartPmcCtl.destroy();
 
-  const heroBadge = document.getElementById('pmc-hero-badge');
-  const heroTitle = document.getElementById('pmc-hero-title');
-  const heroSub = document.getElementById('pmc-hero-sub');
-  const heroTsb = document.getElementById('pmc-hero-tsb');
-
   const series = _dailyLoadSeries(workouts, 120);
   if (series.every((s) => s.load === 0)) {
-    if (heroTitle) heroTitle.textContent = 'För lite data';
-    if (heroSub) heroSub.textContent = 'Logga några pass så fylls formen i.';
-    if (heroTsb) heroTsb.textContent = '';
-    if (heroBadge) heroBadge.className = 'pmc-hero-badge pmc-hero-badge--neutral';
-    const sub = document.getElementById('pmc-subtitle');
-    if (sub) sub.textContent = '';
+    _renderChartInsight('pmc-insight', {
+      band: 'neutral',
+      title: 'För lite data',
+      sub: 'Logga några pass så fylls formen i.',
+    });
+    _renderChartInsight('pmc-ctl-insight', {
+      band: 'neutral',
+      title: 'För lite data',
+      sub: 'Logga några pass så fylls fitness-kurvan i.',
+    });
     return;
   }
 
@@ -6015,57 +6048,70 @@ function renderPmcChart(workouts) {
   const prev7Ctl = ctl[ctl.length - 8] ?? 0;
   const ctlDelta = lastCtl - prev7Ctl;
 
-  const sub = document.getElementById('pmc-subtitle');
-  if (sub) {
-    const deltaStr = (ctlDelta >= 0 ? '+' : '') + ctlDelta.toFixed(1);
-    sub.textContent = `Fitness Effort ${lastCtl.toFixed(1)} (${deltaStr} senaste veckan)`;
-  }
-
-  // Hero — the one number most people actually look at.
-  let band, title, sub2;
+  // Formtopp — the one number most people actually look at. Map the legacy
+  // pmc bands (fresh / neutral / productive / risk) onto the unified
+  // chart-insight bands (ok / neutral / warn / bad) so this insight box
+  // looks identical to every other weekly chart.
+  let pmcBand, insightBand, title, sub2;
   if (lastTsb > 5) {
-    band = 'fresh';
+    pmcBand = 'fresh'; insightBand = 'ok';
     title = 'Utvilad';
     sub2 = 'Bra tajming för ett nyckelpass eller tävling.';
   } else if (lastTsb > -10) {
-    band = 'neutral';
+    pmcBand = 'neutral'; insightBand = 'neutral';
     title = 'I balans';
     sub2 = 'Form och trötthet i balans — kör enligt plan.';
   } else if (lastTsb > -30) {
-    band = 'productive';
+    pmcBand = 'productive'; insightBand = 'warn';
     title = 'Bygger fitness';
     sub2 = 'Produktiv belastning. Planera in en deload snart.';
   } else {
-    band = 'risk';
+    pmcBand = 'risk'; insightBand = 'bad';
     title = 'Hög trötthet';
     sub2 = 'Dra ner — risk för överträning.';
   }
 
   const tsbStr = (lastTsb >= 0 ? '+' : '') + lastTsb.toFixed(1);
-  if (heroBadge) heroBadge.className = `pmc-hero-badge pmc-hero-badge--${band}`;
-  if (heroTitle) heroTitle.textContent = title;
-  if (heroSub) heroSub.textContent = sub2;
-  if (heroTsb) heroTsb.innerHTML = `<span class="pmc-hero-tsb-value">${escapeHTML(tsbStr)}</span><span class="pmc-hero-tsb-label">TSB · form</span>`;
+  _renderChartInsight('pmc-insight', {
+    band: insightBand,
+    title,
+    sub: sub2,
+    headline: tsbStr,
+    headlineLabel: 'TSB · form',
+  });
 
-  // Legacy hidden status node — keep populated in case something else reads it.
-  const statusEl = document.getElementById('pmc-status');
-  if (statusEl) {
-    statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(title)} (TSB ${tsbStr}). ${escapeHTML(sub2)}`;
-  }
+  // Fitness (CTL) insight — short trend on the long-term load curve.
+  const ctlDeltaStr = (ctlDelta >= 0 ? '+' : '') + ctlDelta.toFixed(1);
+  _renderChartInsight('pmc-ctl-insight', {
+    band: ctlDelta >= 0 ? 'ok' : 'neutral',
+    title: 'Långsiktig belastning (CTL)',
+    sub: `Fitness Effort ${lastCtl.toFixed(1)} (${ctlDeltaStr} senaste veckan)`,
+    headline: lastCtl.toFixed(1),
+    headlineLabel: 'CTL',
+  });
+
+  // Legacy band reference kept in case other code paths key off it.
+  void pmcBand;
 }
 
 // ─────────────────────────────────────────────────────────────
-//  PMC card UX helpers — info popover.
+//  Card UX helpers — generic info popover.
+//  Used by Formtopp, Effort per vecka, and Group Effort per vecka.
+//  togglePmcInfo() is kept as a thin alias so existing HTML and any
+//  external callers keep working.
 // ─────────────────────────────────────────────────────────────
-function togglePmcInfo() {
-  const pop = document.getElementById('pmc-info-popover');
-  const btn = document.getElementById('pmc-info-btn');
-  if (!pop || !btn) return;
+function togglePopover(popoverId, btnId) {
+  const pop = document.getElementById(popoverId);
+  const btn = btnId ? document.getElementById(btnId) : null;
+  if (!pop) return;
   const open = pop.classList.toggle('hidden') === false;
-  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
+
+function togglePmcInfo() { togglePopover('pmc-info-popover', 'pmc-info-btn'); }
 
 if (typeof window !== 'undefined') {
+  window.togglePopover = togglePopover;
   window.togglePmcInfo = togglePmcInfo;
 }
 
@@ -6097,12 +6143,10 @@ function _classifyWorkoutIntensity(w) {
 }
 
 function renderPolarizationCard(workouts) {
-  const subEl = document.getElementById('polarization-subtitle');
   const legendEl = document.getElementById('polarization-legend');
-  const statusEl = document.getElementById('polarization-status');
   const segEasy = document.getElementById('pol-seg-easy');
   const segHard = document.getElementById('pol-seg-hard');
-  if (!subEl || !legendEl || !statusEl || !segEasy || !segHard) return;
+  if (!legendEl || !segEasy || !segHard) return;
 
   const today = new Date();
   const cutoff = addDays(today, -28);
@@ -6125,12 +6169,15 @@ function renderPolarizationCard(workouts) {
   if (total === 0) {
     segEasy.style.width = '100%'; segHard.style.width = '0%';
     segEasy.style.background = 'var(--bg-card-hover)';
+    segEasy.textContent = ''; segHard.textContent = '';
     legendEl.innerHTML = '';
-    statusEl.textContent = 'För lite data — logga några pass så fylls mätaren.';
-    subEl.textContent = '';
+    _renderChartInsight('polarization-insight', {
+      band: 'neutral',
+      title: 'För lite data',
+      sub: 'Logga några pass så fylls mätaren.',
+    });
     return;
   }
-
   const pEasy = (easy / total) * 100;
   const pHard = (hard / total) * 100;
   const pMod = (modSeconds / total) * 100;
@@ -6147,27 +6194,37 @@ function renderPolarizationCard(workouts) {
     <div class="polarization-legend-item"><span class="pol-dot pol-dot--hard"></span>Hårt (Z3-Z5) — ${fmt(hard)} · ${Math.round(pHard)}%</div>
   `;
 
-  subEl.textContent = `Mål: ~80% easy, ~20% hårt`;
-
   // Z3-time is still tracked separately so we can warn when "hard" is
   // really just a bunch of unintentional gray-zone work.
   const z3DominantHard = pMod >= 12 && modSeconds > (hard - modSeconds);
 
-  let band, msg;
+  let band, title, sub;
   if (pEasy >= 75 && pHard >= 10 && pHard <= 25) {
-    band = 'fresh'; msg = `Polariserad mix (${Math.round(pEasy)}/${Math.round(pHard)}). Exakt där du ska vara.`;
+    band = 'ok';
+    title = `Polariserad mix (${Math.round(pEasy)}/${Math.round(pHard)})`;
+    sub = 'Exakt där du ska vara — mål ~80% easy, ~20% hårt.';
   } else if (pEasy < 70) {
-    band = 'risk'; msg = `Bara ${Math.round(pEasy)}% easy. För lite lågintensivt — bygg mer aerob bas i Z1-Z2.`;
+    band = 'bad';
+    title = `Bara ${Math.round(pEasy)}% easy`;
+    sub = 'För lite lågintensivt — bygg mer aerob bas i Z1-Z2.';
   } else if (pHard > 25) {
-    band = 'risk'; msg = `${Math.round(pHard)}% hårt. Risk för överträning — backa intensiteten.`;
+    band = 'bad';
+    title = `${Math.round(pHard)}% hårt`;
+    sub = 'Risk för överträning — backa intensiteten.';
   } else if (pHard < 8) {
-    band = 'neutral'; msg = `Bara ${Math.round(pHard)}% hårt. Du kan lägga in mer kvalitet om formen tillåter.`;
+    band = 'neutral';
+    title = `Bara ${Math.round(pHard)}% hårt`;
+    sub = 'Du kan lägga in mer kvalitet om formen tillåter.';
   } else if (z3DominantHard) {
-    band = 'productive'; msg = `${Math.round(pMod)}% i Z3 ("gråzonen"). Styr mer mot Z2 (lugnt) eller Z4 (tydligt hårt) istället.`;
+    band = 'warn';
+    title = `${Math.round(pMod)}% i Z3 ("gråzonen")`;
+    sub = 'Styr mer mot Z2 (lugnt) eller Z4 (tydligt hårt) istället.';
   } else {
-    band = 'neutral'; msg = `Mix: ${Math.round(pEasy)}/${Math.round(pHard)}. OK balans.`;
+    band = 'neutral';
+    title = `Mix: ${Math.round(pEasy)}/${Math.round(pHard)}`;
+    sub = 'OK balans — mål ~80% easy, ~20% hårt.';
   }
-  statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(msg)}`;
+  _renderChartInsight('polarization-insight', { band, title, sub });
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -6240,9 +6297,7 @@ function efPassAggregate(workout, hrMin, hrMax) {
 
 function renderEasyHrChart(workouts) {
   const canvas = document.getElementById('chart-easy-hr');
-  const statusEl = document.getElementById('easy-hr-status');
-  const subEl = document.getElementById('easy-hr-subtitle');
-  if (!canvas || !statusEl || !subEl || typeof Chart === 'undefined') return;
+  if (!canvas || typeof Chart === 'undefined') return;
   if (window._chartEasyHr) window._chartEasyHr.destroy();
 
   const maxHr = (currentProfile && Number(currentProfile.user_max_hr)) || EF_DEFAULT_MAX_HR;
@@ -6272,10 +6327,13 @@ function renderEasyHrChart(workouts) {
   const dataKeys = [...byWeek.keys()].sort();
 
   if (dataKeys.length < 2) {
-    subEl.textContent = '';
-    statusEl.textContent = qualifiedPasses === 0
-      ? `Inga kvalificerade pass än. Behöver löppass med splits från Strava och puls i ${hrMin}–${hrMax} bpm efter de första 10 min.`
-      : 'Behöver minst 2 veckor med kvalificerade Z2-pass för att rita trenden.';
+    _renderChartInsight('easy-hr-insight', {
+      band: 'neutral',
+      title: qualifiedPasses === 0 ? 'Inga kvalificerade pass än' : 'Bygg historik',
+      sub: qualifiedPasses === 0
+        ? `Behöver löppass med splits från Strava och puls i ${hrMin}–${hrMax} bpm efter de första 10 min.`
+        : 'Behöver minst 2 veckor med kvalificerade Z2-pass för att rita trenden.',
+    });
     return;
   }
 
@@ -6367,33 +6425,45 @@ function renderEasyHrChart(workouts) {
     },
   });
 
-  // Subtitle / status work off the FULL series so they always describe the
-  // most recent trend regardless of which window is being browsed.
+  // Insight works off the FULL series so it always describes the most
+  // recent trend regardless of which window is being browsed.
   const recentEf = efDataAll.slice(-4);
   const earlierEf = efDataAll.slice(-8, -4);
   const avgRecent = recentEf.reduce((a, b) => a + b, 0) / recentEf.length;
-  subEl.textContent = `Senaste 4 v: EF ${avgRecent.toFixed(2)} · Z2-band ${hrMin}–${hrMax} bpm`;
 
   _renderChartWeekNav('chart-easy-hr', allWeekKeys.length, win, () => renderEasyHrChart(workouts));
 
   if (earlierEf.length === 0) {
-    statusEl.textContent = 'Bygg historik: behöver ~8 veckor med kvalificerade Z2-pass för att jämföra trenden.';
+    _renderChartInsight('easy-hr-insight', {
+      band: 'neutral',
+      title: 'Bygg historik',
+      sub: `Behöver ~8 veckor med kvalificerade Z2-pass för att jämföra trenden. Senaste 4 v: EF ${avgRecent.toFixed(2)}.`,
+      headline: avgRecent.toFixed(2),
+      headlineLabel: 'EF · 4 V',
+    });
     return;
   }
   const avgEarlier = earlierEf.reduce((a, b) => a + b, 0) / earlierEf.length;
   const deltaPct = (avgRecent - avgEarlier) / avgEarlier * 100;
-  let band, msg;
+  let band, title, sub;
   if (deltaPct >= 3) {
-    band = 'fresh';
-    msg = `Aerob form starkare — EF upp ${deltaPct.toFixed(1)} % mot förra 4-veckors-perioden (samma puls bär ${(avgRecent - avgEarlier).toFixed(2)} km/h fortare GAP).`;
+    band = 'ok';
+    title = `Aerob form starkare (+${deltaPct.toFixed(1)} %)`;
+    sub = `Samma puls bär ${(avgRecent - avgEarlier).toFixed(2)} km/h fortare GAP. Z2-band ${hrMin}–${hrMax} bpm.`;
   } else if (deltaPct <= -3) {
-    band = 'risk';
-    msg = `EF ner ${Math.abs(deltaPct).toFixed(1)} % mot förra 4-veckors. Kolla sömn, stress, värme — eller om du smyger upp pulsen i Z2.`;
+    band = 'bad';
+    title = `EF ner ${Math.abs(deltaPct).toFixed(1)} %`;
+    sub = `Mot förra 4-veckors. Kolla sömn, stress, värme — eller om du smyger upp pulsen i Z2 (${hrMin}–${hrMax} bpm).`;
   } else {
     band = 'neutral';
-    msg = `Stabil aerob profil (${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)} % EF mot förra 4-veckors).`;
+    title = `Stabil aerob profil (${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)} %)`;
+    sub = `EF mot förra 4-veckors. Z2-band ${hrMin}–${hrMax} bpm.`;
   }
-  statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(msg)}`;
+  _renderChartInsight('easy-hr-insight', {
+    band, title, sub,
+    headline: avgRecent.toFixed(2),
+    headlineLabel: 'EF · 4 V',
+  });
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -6453,9 +6523,7 @@ function _isVdotQualifyingPass(w, hrMax) {
 
 function renderVo2maxChart(workouts) {
   const canvas = document.getElementById('chart-vo2max');
-  const statusEl = document.getElementById('vo2max-status');
-  const subEl = document.getElementById('vo2max-subtitle');
-  if (!canvas || !statusEl || !subEl || typeof Chart === 'undefined') return;
+  if (!canvas || typeof Chart === 'undefined') return;
   if (window._chartVo2max) window._chartVo2max.destroy();
 
   const profileMaxHr = currentProfile && Number(currentProfile.user_max_hr);
@@ -6491,14 +6559,14 @@ function renderVo2maxChart(workouts) {
   // Empty / sparse states — be specific so the user knows whether they
   // need to log more passes, add HR data, or set their HRmax.
   if (points.length === 0) {
-    subEl.textContent = '';
-    let msg;
-    if (usingFallbackHrMax) {
-      msg = `Sätt din max-puls i profilen så vi kan filtrera kvalpass korrekt. Använder default ${EF_DEFAULT_MAX_HR} bpm tills vidare. Behöver pass med snittpuls ≥ ${Math.round(VO2MAX_QUAL_HR_PCT * 100)}% av HRmax.`;
-    } else {
-      msg = `Inga löppass med snittpuls ≥ ${Math.round(VO2MAX_QUAL_HR_PCT * 100)}% av HRmax (${Math.round(hrMax * VO2MAX_QUAL_HR_PCT)} bpm). Logga ett pass med pulsdata så ritar vi trenden.`;
-    }
-    statusEl.textContent = msg;
+    const sub = usingFallbackHrMax
+      ? `Sätt din max-puls i profilen så vi kan filtrera kvalpass korrekt. Använder default ${EF_DEFAULT_MAX_HR} bpm tills vidare. Behöver pass med snittpuls ≥ ${Math.round(VO2MAX_QUAL_HR_PCT * 100)}% av HRmax.`
+      : `Inga löppass med snittpuls ≥ ${Math.round(VO2MAX_QUAL_HR_PCT * 100)}% av HRmax (${Math.round(hrMax * VO2MAX_QUAL_HR_PCT)} bpm). Logga ett pass med pulsdata så ritar vi trenden.`;
+    _renderChartInsight('vo2max-insight', {
+      band: usingFallbackHrMax ? 'warn' : 'neutral',
+      title: 'Inga kvalpass än',
+      sub,
+    });
     return;
   }
 
@@ -6534,26 +6602,35 @@ function renderVo2maxChart(workouts) {
   const visiblePoints = points.filter((p) => p.x >= windowStartMs);
 
   if (visiblePoints.length === 0) {
-    subEl.textContent = '';
-    statusEl.textContent = `Inga kvalpass de senaste ${Math.round(VO2MAX_VISIBLE_DAYS / 7)} veckorna. Logga ett löppass med puls så ritar vi trenden.`;
+    _renderChartInsight('vo2max-insight', {
+      band: 'neutral',
+      title: 'Inga kvalpass i fönstret',
+      sub: `Inga kvalpass de senaste ${Math.round(VO2MAX_VISIBLE_DAYS / 7)} veckorna. Logga ett löppass med puls så ritar vi trenden.`,
+    });
     return;
   }
 
   if (visiblePoints.length === 1) {
-    subEl.textContent = `Senaste: VDOT ${visiblePoints[0].y.toFixed(1)} · 1 kvalpass`;
-    statusEl.textContent = 'Behöver ≥ 2 kvalpass i fönstret för att rita trend. Logga ett pass till.';
+    const v = visiblePoints[0].y;
+    _renderChartInsight('vo2max-insight', {
+      band: 'neutral',
+      title: 'Behöver ett kvalpass till',
+      sub: `Behöver ≥ 2 kvalpass i fönstret för att rita trend. Senaste: VDOT ${v.toFixed(1)} · 1 kvalpass.`,
+      headline: v.toFixed(1),
+      headlineLabel: 'VDOT',
+    });
     _drawVo2maxChart(canvas, visiblePoints, /* withTrend */ false, windowStartMs, windowEndMs);
     return;
   }
 
   _drawVo2maxChart(canvas, visiblePoints, /* withTrend */ true, windowStartMs, windowEndMs);
 
-  // Step 3: subtitle + Form upp/ner status copy. Both use the smoothed
-  // value (not raw per-pass) so a single hot tempo pass doesn't flip the
-  // narrative from "stabil" to "form upp" overnight.
+  // Step 3: insight uses the smoothed value (not raw per-pass) so a single
+  // hot tempo pass doesn't flip the narrative from "stabil" to "form upp"
+  // overnight.
   const last = visiblePoints[visiblePoints.length - 1];
   const latestSmoothed = last.smoothed;
-  subEl.textContent = `Senaste: VDOT ${latestSmoothed.toFixed(1)} (snittad ${VO2MAX_SMOOTH_DAYS}d) · ${visiblePoints.length} kvalpass senaste ${Math.round(VO2MAX_VISIBLE_DAYS / 7)} v`;
+  const passCountStr = `${visiblePoints.length} kvalpass · senaste ${Math.round(VO2MAX_VISIBLE_DAYS / 7)} v`;
 
   // Compare smoothed value now vs ~4 weeks earlier — pick the latest point
   // in the visible window whose date is <= (now - 28d). If we don't have
@@ -6565,23 +6642,36 @@ function renderVo2maxChart(workouts) {
     if (visiblePoints[i].x <= fourWeeksAgoMs) { priorIdx = i; break; }
   }
   if (priorIdx < 0) {
-    statusEl.textContent = `Bygg historik: behöver ~4 veckor med kvalpass för att jämföra trenden. Hittills snittad VDOT ${latestSmoothed.toFixed(1)} på ${visiblePoints.length} pass.`;
+    _renderChartInsight('vo2max-insight', {
+      band: 'neutral',
+      title: 'Bygg historik',
+      sub: `Behöver ~4 veckor med kvalpass för att jämföra trenden. ${passCountStr}.`,
+      headline: latestSmoothed.toFixed(1),
+      headlineLabel: 'VDOT',
+    });
     return;
   }
   const priorSmoothed = visiblePoints[priorIdx].smoothed;
   const delta = latestSmoothed - priorSmoothed;
-  let band, msg;
+  let band, title, sub;
   if (delta >= 0.8) {
-    band = 'fresh';
-    msg = `Form upp: snittad VDOT +${delta.toFixed(1)} mot för 4 veckor sen. Snabbare på samma puls.`;
+    band = 'ok';
+    title = `Form upp: VDOT +${delta.toFixed(1)} mot för 4 v sen`;
+    sub = `Snabbare på samma puls. ${passCountStr}.`;
   } else if (delta <= -0.8) {
-    band = 'risk';
-    msg = `Form ner: snittad VDOT ${delta.toFixed(1)} mot för 4 veckor sen. Kolla återhämtning, värme eller om kvalpassen tappat skärpa.`;
+    band = 'bad';
+    title = `Form ner: VDOT ${delta.toFixed(1)} mot för 4 v sen`;
+    sub = `Kolla återhämtning, värme eller om kvalpassen tappat skärpa. ${passCountStr}.`;
   } else {
     band = 'neutral';
-    msg = `Stabil snittad VDOT (${delta >= 0 ? '+' : ''}${delta.toFixed(1)} mot för 4 veckor sen).`;
+    title = `Stabil snittad VDOT (${delta >= 0 ? '+' : ''}${delta.toFixed(1)})`;
+    sub = `Mot för 4 veckor sen. ${passCountStr}.`;
   }
-  statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(msg)}`;
+  _renderChartInsight('vo2max-insight', {
+    band, title, sub,
+    headline: latestSmoothed.toFixed(1),
+    headlineLabel: 'VDOT',
+  });
 }
 
 function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
@@ -6907,6 +6997,34 @@ function renderGroupChart(allWorkouts, members) {
   });
 
   _renderChartWeekNav('chart-group-weekly', allWeekKeys.length, win, () => renderGroupChart(allWorkouts, members));
+
+  // Insight: who's most active in the most recent week of the FULL series
+  // (not the visible window) so the callout always describes "now".
+  const latestWeekKey = dataWeeks[dataWeeks.length - 1];
+  const latestEntry = weekData[latestWeekKey] || {};
+  let topId = null, topVal = 0;
+  for (const m of members) {
+    const raw = latestEntry[m.id] || 0;
+    const val = isGrpNorm ? effortRawToDisplay(raw) : raw / 60;
+    if (val > topVal) { topVal = val; topId = m.id; }
+  }
+  const topMember = members.find((m) => m.id === topId);
+  if (topMember && topVal > 0) {
+    const valStr = isGrpNorm ? `Effort ${topVal.toFixed(1)}` : `${topVal.toFixed(1)} h`;
+    _renderChartInsight('group-weekly-insight', {
+      band: 'ok',
+      title: `Mest aktiv: ${topMember.name.split(' ')[0]}`,
+      sub: `${valStr} denna vecka${isGrpNorm ? ' (skalad belastning)' : ''}.`,
+      headline: isGrpNorm ? topVal.toFixed(1) : topVal.toFixed(1) + 'h',
+      headlineLabel: isGrpNorm ? 'EFFORT' : 'TIMMAR',
+    });
+  } else {
+    _renderChartInsight('group-weekly-insight', {
+      band: 'neutral',
+      title: 'Tyst vecka i gruppen',
+      sub: 'Ingen har loggat något än denna vecka.',
+    });
+  }
 }
 
 function renderGroupEffortChart(allWorkouts, members) {
@@ -6969,6 +7087,46 @@ function renderGroupEffortChart(allWorkouts, members) {
   }
 
   _renderChartWeekNav('chart-group-effort', allWeekKeys.length, win, () => renderGroupEffortChart(allWorkouts, members));
+
+  // Insight: classify each member's most recent week against their own
+  // 3-week rolling band (same logic as the personal Effort chart) so the
+  // group rollup reads "X i bandet · Y över / Z under denna vecka".
+  let nOn = 0, nOver = 0, nUnder = 0, nUngraded = 0;
+  for (const m of members) {
+    const memberSeriesAll = allWeekKeys.map((k) =>
+      +effortRawToDisplay(weekMap[k]?.[m.id]?.effort || 0).toFixed(2)
+    );
+    const { classes } = _effortBandClassify(memberSeriesAll);
+    const last = classes[classes.length - 1];
+    if (last === 'on') nOn++;
+    else if (last === 'over') nOver++;
+    else if (last === 'under') nUnder++;
+    else nUngraded++;
+  }
+  const total = members.length;
+  let band, title, sub;
+  if (total === 0) {
+    band = 'neutral';
+    title = 'Inga medlemmar';
+    sub = 'Bjud in vänner så fylls grafen.';
+  } else if (nOver > nOn && nOver >= nUnder) {
+    band = 'warn';
+    title = `${nOver} av ${total} över bandet denna vecka`;
+    sub = `${nOn} i bandet · ${nUnder} under${nUngraded ? ` · ${nUngraded} utan band-historik` : ''}.`;
+  } else if (nUnder > nOn && nUnder >= nOver) {
+    band = 'neutral';
+    title = `${nUnder} av ${total} under bandet denna vecka`;
+    sub = `${nOn} i bandet · ${nOver} över${nUngraded ? ` · ${nUngraded} utan band-historik` : ''}.`;
+  } else if (nOn > 0) {
+    band = 'ok';
+    title = `${nOn} av ${total} i bandet denna vecka`;
+    sub = `${nOver} över · ${nUnder} under${nUngraded ? ` · ${nUngraded} utan band-historik` : ''}.`;
+  } else {
+    band = 'neutral';
+    title = 'Bygger band-historik';
+    sub = `Behöver ≥ ${EFFORT_BAND_LOOKBACK + 1} v per medlem för att gradera veckan.`;
+  }
+  _renderChartInsight('group-effort-insight', { band, title, sub });
 }
 
 async function createGroup() {
