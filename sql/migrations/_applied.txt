@@ -24,3 +24,4 @@
 20260424_plan_derived_goal.sql
 20260424_plan_milestones.sql
 20260424_workouts_plan_link.sql
+20260425_strava_daily_cron.sql
