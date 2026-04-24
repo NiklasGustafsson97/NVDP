@@ -18,3 +18,9 @@
 20260422_user_goals.sql
 20260423_fix_rls_periods_and_period_plans.sql
 20260424_strava_deep_sync_cursor.sql
+20260424_adaptive_replan_flag.sql
+20260424_assessment_phase.sql
+20260424_backfill_plan_milestones.sql
+20260424_plan_derived_goal.sql
+20260424_plan_milestones.sql
+20260424_workouts_plan_link.sql
