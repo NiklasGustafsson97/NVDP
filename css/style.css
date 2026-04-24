@@ -1295,6 +1295,37 @@ select option { background: #1a1a2e; color: var(--text); }
   line-height: 1.5; margin: 0 auto; max-width: 420px;
 }
 
+/* Schema view — empty state for users without an AI plan who aren't part of
+   the original training group (so the legacy period_plans fallback doesn't
+   apply). Mirrors .goal-empty-state but adds a primary CTA. */
+.schema-empty-state {
+  text-align: center;
+  padding: 36px 20px 28px;
+}
+.schema-empty-icon {
+  color: var(--accent); margin-bottom: 14px; opacity: 0.75;
+}
+.schema-empty-title {
+  font-size: 1.05rem; font-weight: 700;
+  margin: 0 0 8px; color: var(--text);
+}
+.schema-empty-body {
+  font-size: 0.85rem; color: var(--text-dim);
+  line-height: 1.5; margin: 0 auto 18px; max-width: 420px;
+}
+.schema-empty-cta {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, rgba(214,99,158,0.14), rgba(46,134,193,0.14));
+  border: 1px solid rgba(214,99,158,0.30); border-radius: 22px;
+  color: var(--accent); font-size: 0.86rem; font-weight: 600;
+  cursor: pointer; transition: all 0.2s; font-family: var(--font);
+}
+.schema-empty-cta:hover {
+  background: linear-gradient(135deg, rgba(214,99,158,0.22), rgba(46,134,193,0.22));
+  border-color: var(--accent);
+}
+
 /* ── Sprint 4: Dina mål (active state) ─────────────────────────────── */
 .goals-toolbar {
   display: flex; justify-content: flex-end;
