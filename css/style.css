@@ -5329,3 +5329,359 @@ body.chat-mode #view-coach { height: 100%; }
 .goal-question .gq-q { color: var(--text-muted); font-weight: 600; }
 .goal-question .gq-a { color: var(--text); }
 .goal-question .gq-fix { color: #2E86C1; font-style: italic; }
+
+/* ════════════════════════════════════════════════════════════════════
+   Mina mal: goal-card-v2 (plan-derived primary card)
+   Hero (ring + plan name) → stat tiles → roadmap → assessment cards
+   → compact coach panel. Race-only cards still use .goal-card--race.
+   ════════════════════════════════════════════════════════════════════ */
+
+.goal-card-v2 {
+  padding: 18px 18px 16px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.015) 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: relative;
+  overflow: hidden;
+}
+[data-theme="light"] .goal-card-v2 {
+  background: linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.005) 100%);
+}
+
+/* ── Hero: probability ring + plan name ─────────────────────────── */
+.goal-hero {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 18px;
+  align-items: center;
+}
+.goal-hero-ring {
+  width: 120px;
+  height: 120px;
+  flex: 0 0 120px;
+}
+.goal-hero-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.goal-hero-eyebrow {
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-muted);
+}
+.goal-hero-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text);
+  margin: 0;
+  word-break: break-word;
+}
+.goal-hero-meta {
+  font-size: 0.86rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* ── Probability ring SVG ───────────────────────────────────────── */
+.probability-ring { display: block; }
+.probability-ring-bg {
+  stroke: rgba(255,255,255,0.07);
+}
+[data-theme="light"] .probability-ring-bg {
+  stroke: rgba(0,0,0,0.07);
+}
+.probability-ring-fg {
+  transition: stroke-dasharray 0.6s ease-out;
+}
+.probability-ring--great .probability-ring-fg { stroke: #2ECC71; }
+.probability-ring--good  .probability-ring-fg { stroke: #58B9E0; }
+.probability-ring--warn  .probability-ring-fg { stroke: #F39C12; }
+.probability-ring--risk  .probability-ring-fg { stroke: #E74C3C; }
+.probability-ring--unknown .probability-ring-fg { stroke: var(--text-dim); }
+.probability-ring-num {
+  font-size: 28px;
+  font-weight: 800;
+  fill: var(--text);
+  font-family: var(--font);
+}
+.probability-ring-pct {
+  font-size: 12px;
+  font-weight: 600;
+  fill: var(--text-muted);
+  font-family: var(--font);
+}
+
+/* ── Stat tiles (3-up grid) ─────────────────────────────────────── */
+.goal-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.goal-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 12px 8px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+[data-theme="light"] .goal-stat {
+  background: rgba(0,0,0,0.025);
+}
+.goal-stat-value {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.1;
+}
+.goal-stat-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+}
+
+/* ── Section title (above roadmap & assessment cards) ───────────── */
+.goal-section-title {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-muted);
+  margin-bottom: -4px;
+}
+
+/* ── Roadmap: track + fill + assessment nodes + now-marker ──────── */
+.goal-roadmap {
+  position: relative;
+  height: 36px;
+  padding: 0 8px;
+}
+.goal-roadmap-track {
+  position: absolute;
+  top: 16px;
+  left: 8px;
+  right: 8px;
+  height: 4px;
+  background: rgba(255,255,255,0.07);
+  border-radius: 2px;
+  overflow: hidden;
+}
+[data-theme="light"] .goal-roadmap-track {
+  background: rgba(0,0,0,0.07);
+}
+.goal-roadmap-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2E86C1 0%, #1ABC9C 100%);
+  border-radius: 2px;
+  transition: width 0.4s ease-out;
+}
+.goal-roadmap-node {
+  position: absolute;
+  top: 4px;
+  transform: translateX(-50%);
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 14px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  border: 2px solid var(--text-dim);
+  color: var(--text-muted);
+  line-height: 1;
+  user-select: none;
+  cursor: default;
+  z-index: 2;
+}
+.goal-roadmap-node--done    { border-color: #2ECC71; color: #2ECC71; background: rgba(46,204,113,0.10); }
+.goal-roadmap-node--on      { border-color: #58B9E0; color: #58B9E0; background: rgba(88,185,224,0.10); }
+.goal-roadmap-node--off     { border-color: #F39C12; color: #F39C12; background: rgba(243,156,18,0.10); }
+.goal-roadmap-node--miss    { border-color: #E74C3C; color: #E74C3C; background: rgba(231,76,60,0.10); }
+.goal-roadmap-node--pending { border-color: var(--text-dim); color: var(--text-muted); }
+.goal-roadmap-now {
+  position: absolute;
+  top: 8px;
+  width: 4px;
+  height: 20px;
+  background: var(--accent);
+  transform: translateX(-50%);
+  border-radius: 2px;
+  box-shadow: 0 0 0 2px rgba(214,99,158,0.20);
+  z-index: 3;
+}
+
+/* ── Assessment-week cards (one per assessment, 3 chips inside) ─── */
+.goal-assessments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.goal-assessment-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.025);
+  border-left-width: 3px;
+}
+[data-theme="light"] .goal-assessment-card {
+  background: rgba(0,0,0,0.02);
+}
+.goal-assessment-card--done    { border-left-color: #2ECC71; }
+.goal-assessment-card--on      { border-left-color: #58B9E0; }
+.goal-assessment-card--off     { border-left-color: #F39C12; }
+.goal-assessment-card--miss    { border-left-color: #E74C3C; }
+.goal-assessment-card--pending { border-left-color: var(--text-dim); }
+
+.goal-assessment-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.86rem;
+}
+.goal-assessment-week {
+  font-weight: 800;
+  color: var(--text);
+  background: rgba(255,255,255,0.05);
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  letter-spacing: 0.4px;
+}
+[data-theme="light"] .goal-assessment-week {
+  background: rgba(0,0,0,0.05);
+}
+.goal-assessment-when {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+.goal-assessment-status {
+  margin-left: auto;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+.goal-assessment-card--done .goal-assessment-status { color: #2ECC71; }
+.goal-assessment-card--on   .goal-assessment-status { color: #58B9E0; }
+.goal-assessment-card--off  .goal-assessment-status { color: #F39C12; }
+.goal-assessment-card--miss .goal-assessment-status { color: #E74C3C; }
+
+/* Test chips inside assessment cards */
+.goal-assessment-tests {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ga-test {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+[data-theme="light"] .ga-test {
+  background: rgba(0,0,0,0.025);
+}
+.ga-test--empty {
+  color: var(--text-muted);
+  font-style: italic;
+  font-weight: 500;
+}
+.ga-test-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+}
+.ga-test-icon svg { display: block; }
+.goal-assessment-card--done .ga-test-icon { color: #2ECC71; }
+.goal-assessment-card--off  .ga-test-icon { color: #F39C12; }
+.goal-assessment-card--miss .ga-test-icon { color: #E74C3C; }
+
+/* ── Compact coach insights panel ───────────────────────────────── */
+.goal-coach {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.025);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+[data-theme="light"] .goal-coach {
+  background: rgba(0,0,0,0.02);
+}
+.goal-coach-eyebrow {
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 1.0px;
+  color: var(--accent);
+}
+.goal-coach-points {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.goal-coach-point {
+  font-size: 0.86rem;
+  line-height: 1.35;
+  color: var(--text);
+  padding-left: 14px;
+  position: relative;
+}
+.goal-coach-point::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+.goal-coach-point--great::before { background: #2ECC71; }
+.goal-coach-point--good::before  { background: #58B9E0; }
+.goal-coach-point--warn::before  { background: #F39C12; }
+.goal-coach-point--risk::before  { background: #E74C3C; }
+
+/* ── Mobile tightening ─────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .goal-hero {
+    grid-template-columns: 92px 1fr;
+    gap: 14px;
+  }
+  .goal-hero-ring { width: 92px; height: 92px; flex-basis: 92px; }
+  .goal-hero-ring .probability-ring { width: 92px; height: 92px; }
+  .goal-hero-title { font-size: 1.2rem; }
+  .goal-stat-value { font-size: 1rem; }
+  .goal-roadmap-node { min-width: 26px; height: 26px; font-size: 0.64rem; }
+}

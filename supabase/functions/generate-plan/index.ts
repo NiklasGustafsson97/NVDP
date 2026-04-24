@@ -610,39 +610,17 @@ Löpning, Cykel, Gym, Hyrox, Stakmaskin, Längdskidor, Annat, Vila
 ## INTENSITY ZONES
 Z1, Z2, Z3, Z4, Z5, mixed
 
-## MILESTONES (output array "milestones", 3-5 items)
-The plan MUST include 3-5 measurable milestones that the user can track on Mina mål.
-- One per training phase ideally (base / build / peak / taper) so progress is visible across the plan, not just at the end.
-- Each milestone is concrete and verifiable from logged workouts: pace at a distance, weekly volume, longest single session, or a specific quality session.
-- Use Swedish titles. Examples: "Vecka 4: tröskelpass 4×5 min Z4", "Vecka 8: långpass 21 km", "Vecka 12: 30 km i 5:45/km".
-- Allowed metric_type values:
-  - "pace_for_distance" (target_value = seconds, target_distance_km set)
-  - "distance_in_session" (target_value = km, target_unit = "km")
-  - "duration_in_zone" (target_value = minutes, target_unit = "min")
-  - "weekly_volume_km" (target_value = km, target_unit = "km")
-  - "weekly_volume_hours" (target_value = hours, target_unit = "h")
-  - "weekly_sessions" (target_value = count, target_unit = "pass")
-  - "qualitative" (only for goal_type = "fitness" / "weight_loss" / "custom" — use sparingly)
-- For race plans the LAST milestone must be the race itself (metric_type: "pace_for_distance", target_week_number = final week).
-- The server may add additional "assessment_baseline" milestones automatically for assessment weeks — do NOT generate those yourself.
+## MILESTONES
+Do NOT generate a "milestones" array. The server injects all milestones automatically:
+- One "assessment_baseline" milestone per scheduled assessment week (every ~6 weeks). The athlete's 3 testpass calibrate puls/tröskel/5km.
+- For race plans the server also injects the race itself as the final milestone.
+If you accidentally include a "milestones" field it will be ignored. Focus on producing correct weeks + workouts.
 
 ## OUTPUT SCHEMA
 
 {
   "plan_name": "string — short descriptive name in Swedish",
   "summary": "string — 1-2 sentence summary in Swedish",
-  "milestones": [
-    {
-      "sort_order": 1,
-      "target_week_number": 4,
-      "title": "Tröskelpass 4×5 min Z4",
-      "description": "Klara fyra tröskelintervaller på 5 min med ~95 % av tröskelpuls.",
-      "metric_type": "duration_in_zone",
-      "target_value": 20,
-      "target_unit": "min",
-      "target_distance_km": null
-    }
-  ],
   "weeks": [
     {
       "week_number": 1,
@@ -693,17 +671,6 @@ The plan MUST include 3-5 measurable milestones that the user can track on Mina 
 //  LLM CALL
 // ═══════════════════════════════════════════════════════════════════
 
-interface LLMMilestone {
-  sort_order: number;
-  target_week_number: number | null;
-  title: string;
-  description?: string | null;
-  metric_type: string;
-  target_value: number | null;
-  target_unit: string | null;
-  target_distance_km?: number | null;
-}
-
 interface LLMPlan {
   plan_name: string;
   summary: string;
@@ -724,7 +691,6 @@ interface LLMPlan {
       is_rest: boolean;
     }[];
   }[];
-  milestones?: LLMMilestone[];
 }
 
 // A user-message turn can be either a fresh prompt or a follow-up correction
@@ -1275,8 +1241,28 @@ Generate the complete plan as JSON. Each week's "phase" field MUST match the PHA
 //   16+ weeks  → 5w base, longer build, peak + taper at end if race
 // ─────────────────────────────────────────────────────────────────────
 interface PhasePlanOpts {
-  assessmentWeek1?: boolean;
-  midplanAssessment?: boolean;
+  // Deterministic schedule of assessment weeks (1-indexed). The caller
+  // supplies the full list — every entry replaces the planned phase at
+  // that week with 'assessment'. Week 1 is the user's "I am unsure of my
+  // baseline" opt-in; subsequent entries are auto-cadenced (every 6w).
+  assessmentSchedule?: number[];
+}
+
+// Deterministic cadence: anchor on week 6, then every 6 weeks, capped at
+// numWeeks - 1 so we never collide with a taper or the final week of a
+// race plan. Optionally prepend week 1 when the user opted in via the
+// "Osäker på dina värden?" wizard checkbox.
+//
+// Examples:
+//   12 wk, no opt-in → [6]              (1 mid-plan assessment)
+//   12 wk, opt-in    → [1, 6]           (preplan + 1 mid-plan)
+//   18 wk, no opt-in → [6, 12]          (~every 6 weeks)
+//   24 wk, opt-in    → [1, 6, 12, 18]   (4 assessments across the plan)
+function computeAssessmentSchedule(numWeeks: number, includeWeek1: boolean): number[] {
+  const out: number[] = [];
+  if (includeWeek1 && numWeeks >= 3) out.push(1);
+  for (let w = 6; w <= numWeeks - 1; w += 6) out.push(w);
+  return [...new Set(out)].sort((a, b) => a - b);
 }
 
 function buildPhasePlanSection(
@@ -1306,19 +1292,20 @@ function qualityForPhase(p: string, profile?: CapacityProfile): number {
   return expectedQualityForPhase(p, profile);
 }
 
-// Locate the deload week closest to the midpoint and convert it to
-// 'assessment'. If no deload sits within ±2 of the midpoint, replace the
-// regular week at the midpoint instead — but never overwrite peak/taper
-// (which would invalidate race tapering) or the very first/last weeks.
-function _convertNearestDeloadToAssessment(phases: string[]): void {
+// Convert the week closest to `targetWeek` into an assessment. Prefers a
+// nearby deload (within ±2 weeks) so we don't disturb base/build/peak
+// blocks. Falls back to the target week itself unless it carries
+// race-prep meaning (taper/peak/recovery/assessment). targetWeek is 1-
+// indexed; phases[] is 0-indexed.
+function _convertNearestDeloadToAssessment(phases: string[], targetWeek: number): void {
   const n = phases.length;
   if (n < 4) return;
-  const mid = Math.floor(n / 2);
+  const target = Math.max(0, Math.min(n - 1, targetWeek - 1));
   let bestIdx = -1;
   let bestDist = Infinity;
   for (let w = 1; w < n - 1; w++) {
     if (phases[w] === "deload") {
-      const dist = Math.abs(w - mid);
+      const dist = Math.abs(w - target);
       if (dist < bestDist) { bestDist = dist; bestIdx = w; }
     }
   }
@@ -1326,11 +1313,11 @@ function _convertNearestDeloadToAssessment(phases: string[]): void {
     phases[bestIdx] = "assessment";
     return;
   }
-  // No nearby deload — replace the midpoint week itself unless it is
+  // No nearby deload — replace the target week itself unless it is
   // taper/peak/assessment/recovery (those carry critical race-prep meaning).
   const protected_ = new Set(["taper", "peak", "assessment", "recovery"]);
-  if (!protected_.has(phases[mid])) {
-    phases[mid] = "assessment";
+  if (!protected_.has(phases[target])) {
+    phases[target] = "assessment";
   }
 }
 
@@ -1340,11 +1327,12 @@ function computePhasePlan(
   opts: PhasePlanOpts = {},
 ): string[] {
   const phases: string[] = new Array(numWeeks);
+  const schedule = (opts.assessmentSchedule || []).filter((w) => w >= 1 && w <= numWeeks);
 
   if (numWeeks < 6) {
     for (let i = 0; i < numWeeks; i++) phases[i] = "build";
     if (hasRaceDate && numWeeks >= 2) phases[numWeeks - 1] = "taper";
-    if (opts.assessmentWeek1 && numWeeks >= 3) phases[0] = "assessment";
+    if (schedule.includes(1) && numWeeks >= 3) phases[0] = "assessment";
     return phases;
   }
 
@@ -1379,16 +1367,15 @@ function computePhasePlan(
     }
   }
 
-  // Mid-plan assessment for long plans replaces the nearest deload (keeps
-  // total length unchanged). Run BEFORE assessmentWeek1 to allow both.
-  if (opts.midplanAssessment && numWeeks >= 12) {
-    _convertNearestDeloadToAssessment(phases);
-  }
-
-  // Assessment-as-week-1 is the user's "I am unsure of my baseline" opt-in.
-  // We replace whatever week 1 was (typically base) with an assessment block.
-  if (opts.assessmentWeek1) {
-    phases[0] = "assessment";
+  // Apply the assessment schedule. Each scheduled week swaps the nearest
+  // deload to 'assessment' (preserves total length). Week 1 is handled
+  // explicitly because there is no deload candidate that early.
+  for (const wk of schedule) {
+    if (wk === 1) {
+      phases[0] = "assessment";
+      continue;
+    }
+    _convertNearestDeloadToAssessment(phases, wk);
   }
 
   return phases;
@@ -1508,9 +1495,23 @@ function buildAssessmentWeek(
     ];
   }
 
-  // midplan
+  // midplan — same canonical structure as preplan: Z2 HR-drift +
+  // tempo/threshold + near-max intervals. Z2 HR-drift leads the week
+  // because it stresses aerobic decoupling without competing with the
+  // higher-intensity tests later in the week.
   return [
-    rest(0),
+    // Mon: Z2 HR-drift test (lightest of the three — fine to lead the week)
+    {
+      day_of_week: 0,
+      activity_type: "Löpning",
+      label: "Bedömning: Z2 HR-drift test",
+      description:
+        "45 min Z2 (pratstempo). Notera puls vid 10 min och vid 40 min — drifften visar aerob form. Jämför med första bedömningsveckan.",
+      target_duration_minutes: 45,
+      target_distance_km: 8,
+      intensity_zone: "Z2",
+      is_rest: false,
+    },
     // Tue: 5 km tempo @ ~90 %
     {
       day_of_week: 1,
@@ -1609,7 +1610,10 @@ function applyAssessmentOverwrites(plan: LLMPlan, profileBaseline?: PlanRequest[
 }
 
 // Build the assessment_baseline milestone rows the server adds for every
-// assessment week. Idempotent: if assessmentWeeks is empty, returns [].
+// assessment week. Each assessment week now has 3 testpass (Z2 HR-drift +
+// tempo/threshold + near-max), so target_value = 3. The description uses
+// '·' as a chip separator so the Mina mal UI can split and render each
+// test as its own chip. Idempotent: empty input → empty output.
 function buildAssessmentMilestoneRows(
   assessmentWeeks: number[],
   startSortOrder: number,
@@ -1620,18 +1624,21 @@ function buildAssessmentMilestoneRows(
   for (const wk of assessmentWeeks) {
     const target = new Date(startDate);
     target.setDate(target.getDate() + wk * 7 - 1);
+    // Kind matches applyAssessmentOverwrites(): week 1 → preplan, all
+    // others → midplan. The chip text mirrors the actual workouts in
+    // each template so the UI's chip rendering stays truthful.
+    const kind: AssessmentKind = wk === 1 ? "preplan" : "midplan";
+    const description = kind === "preplan"
+      ? "Z2 HR-drift · 20 min tröskel · 5 km TT"
+      : "Z2 HR-drift · 5 km tempo · 4×5 min Z4";
     out.push({
       sort_order: so++,
       target_week_number: wk,
       target_date: target.toISOString().split("T")[0],
-      title: wk === 1
-        ? "Genomför bedömningsvecka 1 — kalibrera puls och 5 km-tid"
-        : `Bekräfta form i bedömningsvecka ${wk}`,
-      description: wk === 1
-        ? "Logga alla tre testpassen (HR-drift, tröskel, 5 km TT) — resultaten blir nya baselines i planen."
-        : "Logga båda bekräftelsepassen (5 km tempo + 4×5 min Z4) så vi kan jämföra mot vecka 1.",
+      title: `Bedömningsvecka v${wk}`,
+      description,
       metric_type: "assessment_baseline",
-      target_value: 2,
+      target_value: 3,
       target_unit: "pass",
       target_distance_km: null,
       status: "pending",
@@ -1641,36 +1648,35 @@ function buildAssessmentMilestoneRows(
   return out;
 }
 
-// Convert LLM milestones into DB rows (with a target_date derived from
-// start_date + target_week_number, when present). Filters out malformed
-// entries and clamps sort_order monotonically.
-function llmMilestonesToRows(
-  llmMs: LLMMilestone[] | undefined,
+// Server-side race-final milestone for race plans. Replaces the
+// "the LAST milestone must be the race itself" instruction we previously
+// asked the LLM to honor (and which it routinely got wrong). Returns
+// null for non-race plans.
+function buildRaceFinalMilestoneRow(
+  body: { goal_type?: string; goal_text?: string; goal_date?: string | null;
+    constraints?: { race_distance_km?: number | null } },
+  numWeeks: number,
   startDate: string,
-): Array<Record<string, unknown>> {
-  if (!Array.isArray(llmMs) || llmMs.length === 0) return [];
-  const valid = llmMs.filter((m) => m && typeof m.title === "string" && m.title.trim().length > 0);
-  return valid.map((m, idx) => {
-    let target_date: string | null = null;
-    if (typeof m.target_week_number === "number" && m.target_week_number > 0) {
-      const d = new Date(startDate);
-      d.setDate(d.getDate() + m.target_week_number * 7 - 1);
-      target_date = d.toISOString().split("T")[0];
-    }
-    return {
-      sort_order: typeof m.sort_order === "number" ? m.sort_order : idx + 1,
-      target_week_number: m.target_week_number ?? null,
-      target_date,
-      title: m.title,
-      description: m.description ?? null,
-      metric_type: m.metric_type || "qualitative",
-      target_value: m.target_value ?? null,
-      target_unit: m.target_unit ?? null,
-      target_distance_km: m.target_distance_km ?? null,
-      status: "pending",
-      source: "ai",
-    };
-  });
+  sortOrder: number,
+): Record<string, unknown> | null {
+  if ((body.goal_type || "").toLowerCase() !== "race") return null;
+  const target = new Date(startDate);
+  target.setDate(target.getDate() + numWeeks * 7 - 1);
+  const targetDate = body.goal_date || target.toISOString().split("T")[0];
+  const distKm = body.constraints?.race_distance_km ?? null;
+  return {
+    sort_order: sortOrder,
+    target_week_number: numWeeks,
+    target_date: targetDate,
+    title: body.goal_text || "Racemål",
+    description: "Racedag — exekvera planen och avsluta starkt.",
+    metric_type: "pace_for_distance",
+    target_value: null,
+    target_unit: distKm ? "km" : null,
+    target_distance_km: distKm,
+    status: "pending",
+    source: "ai",
+  };
 }
 
 function buildFreeTextSection(prefs: any): string {
@@ -2232,9 +2238,17 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
       }
       return 12;
     })();
+    // Assessment cadence is deterministic by plan length (every ~6 weeks).
+    // The user only opts in/out of the optional pre-plan assessment as
+    // week 1; the rest are always inserted. adaptiveReplanEnabled stays a
+    // separate signal for future adaptive features but no longer gates the
+    // mid-plan assessments — those are part of the core plan now.
+    void adaptiveReplanEnabled;
     const phaseOpts: PhasePlanOpts = {
-      assessmentWeek1: !!body.preferences?.include_assessment_week_1,
-      midplanAssessment: adaptiveReplanEnabled && computedNumWeeks >= 20,
+      assessmentSchedule: computeAssessmentSchedule(
+        computedNumWeeks,
+        !!body.preferences?.include_assessment_week_1,
+      ),
     };
 
     const { prompt: userPrompt, profile, feasibility } = buildUserPrompt(body, historyStr, phaseOpts);
@@ -2350,18 +2364,28 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
       }
     }
 
-    // 8b. Insert plan_milestones rows: LLM-generated first, then any
-    //     assessment_baseline rows the server adds for assessment weeks.
-    //     Best-effort: failures are logged but do not fail the request --
-    //     the wizard can still proceed and milestones will be re-generated
-    //     later via the check-in backfill path.
-    const llmRows = llmMilestonesToRows(plan.milestones, startDate);
+    // 8b. Insert plan_milestones rows. Milestones are now 100 % server-
+    //     generated: one assessment_baseline row per scheduled assessment
+    //     week, and (for race plans) a final pace_for_distance row at the
+    //     race week. The LLM is told to omit the "milestones" array and any
+    //     stray output is discarded — this eliminates an entire class of
+    //     constraint violations from model drift. Best-effort insert: a
+    //     failure is logged but does not fail the request.
     const assessmentRows = buildAssessmentMilestoneRows(
       overwrittenAssessmentWeeks,
-      llmRows.length + 1,
+      1,
       startDate,
     );
-    const allMilestoneRows = [...llmRows, ...assessmentRows].map((r) => ({
+    const raceFinalRow = buildRaceFinalMilestoneRow(
+      body,
+      numWeeks,
+      startDate,
+      assessmentRows.length + 1,
+    );
+    const allMilestoneRows = [
+      ...assessmentRows,
+      ...(raceFinalRow ? [raceFinalRow] : []),
+    ].map((r) => ({
       ...r,
       plan_id: planId,
       profile_id,
