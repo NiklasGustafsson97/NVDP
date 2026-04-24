@@ -4417,7 +4417,7 @@ async function _loadTrends() {
   // Effort per week chart
   renderEffortChart(myWorkouts);
 
-  // CTL / ATL / TSB (performance management chart)
+  // Personal fitness score (CTL trend vs day-28 baseline)
   renderPmcChart(myWorkouts);
 
   // Polarization (senaste 4 v) + easy-pace HR trend
@@ -6052,25 +6052,6 @@ function _ewma(values, tau) {
   return out;
 }
 
-// ─────────────────────────────────────────────────────────────
-//  TSB → Formtopp 0-100 mapping
-//  Coggan's classic TSB bands span roughly -30 (overreached) up to +25
-//  (peaking/transitional). We map that range linearly to a 0-100 score so
-//  the user never has to know what TSB is. Anchors:
-//    TSB >= +25  → 100  ("toppform")
-//    TSB =    +5 →  64  (still "utvilad")
-//    TSB =     0 →  55  ("i balans")
-//    TSB =   -10 →  36  ("bygger fitness")
-//    TSB =   -30 →   0  ("hög trötthet")
-// ─────────────────────────────────────────────────────────────
-const FORMTOPP_TSB_FLOOR = -30;
-const FORMTOPP_TSB_CEIL = 25;
-function tsbToFormtoppScore(tsb) {
-  const span = FORMTOPP_TSB_CEIL - FORMTOPP_TSB_FLOOR;
-  const raw = ((tsb - FORMTOPP_TSB_FLOOR) / span) * 100;
-  return Math.max(0, Math.min(100, raw));
-}
-
 // Day-index used as the "where I started" anchor for the personal
 // fitness score. CTL is an EWMA with tau=42d, so we wait ~30 days for the
 // curve to settle into a meaningful baseline before we anchor to it. New
@@ -6080,10 +6061,8 @@ const FITNESS_BASELINE_DAY = 28;
 const FITNESS_BASELINE_MIN_CTL = 1.0;
 
 function renderPmcChart(workouts) {
-  const tsbCanvas = document.getElementById('chart-pmc');
   const ctlCanvas = document.getElementById('chart-pmc-ctl');
-  if (!tsbCanvas || typeof Chart === 'undefined') return;
-  if (window._chartPmc) window._chartPmc.destroy();
+  if (!ctlCanvas || typeof Chart === 'undefined') return;
   if (window._chartPmcCtl) window._chartPmcCtl.destroy();
 
   // Find earliest workout so we can build the FULL CTL history (needed for
@@ -6093,7 +6072,6 @@ function renderPmcChart(workouts) {
   const allDates = [];
   for (const w of workouts) if (w.workout_date) allDates.push(w.workout_date);
   if (allDates.length === 0) {
-    _renderChartInsight('pmc-insight', { band: 'neutral', title: 'För lite data', sub: 'Logga några pass så fylls formen i.' });
     _renderChartInsight('pmc-ctl-insight', { band: 'neutral', title: 'För lite data', sub: 'Logga några pass så fylls fitness-kurvan i.' });
     return;
   }
@@ -6105,19 +6083,16 @@ function renderPmcChart(workouts) {
 
   const fullSeries = _dailyLoadSeries(workouts, totalDays);
   if (fullSeries.every((s) => s.load === 0)) {
-    _renderChartInsight('pmc-insight', { band: 'neutral', title: 'För lite data', sub: 'Logga några pass så fylls formen i.' });
     _renderChartInsight('pmc-ctl-insight', { band: 'neutral', title: 'För lite data', sub: 'Logga några pass så fylls fitness-kurvan i.' });
     return;
   }
 
   // Scale raw effort to Effort display so the EWMA values align with the
-  // Effort chart. ATL is still computed internally because TSB = CTL - ATL,
-  // but TSB is now only used as input to the 0-100 Formtopp score.
+  // Effort chart. CTL (42d EWMA) is the only series we plot now — Formtopp
+  // (TSB-based 0–100 score) was retired because the line stayed flat near
+  // the middle of the 0–100 range for steady trainers.
   const fullLoads = fullSeries.map((s) => effortRawToDisplay(s.load));
   const fullCtl = _ewma(fullLoads, 42);
-  const fullAtl = _ewma(fullLoads, 7);
-  const fullTsb = fullCtl.map((c, i) => c - fullAtl[i]);
-  const fullScore = fullTsb.map(tsbToFormtoppScore);
 
   // Personal fitness baseline = CTL on day FITNESS_BASELINE_DAY of the
   // user's training history (or null if they don't have that much data
@@ -6132,13 +6107,11 @@ function renderPmcChart(workouts) {
     }
   }
 
-  // Slice the last 120 days for the actual charts.
+  // Slice the last 120 days for the actual chart.
   const VISIBLE_DAYS = 120;
   const sliceStart = Math.max(0, fullSeries.length - VISIBLE_DAYS);
   const series = fullSeries.slice(sliceStart);
   const ctl = fullCtl.slice(sliceStart);
-  const tsb = fullTsb.slice(sliceStart);
-  const score = fullScore.slice(sliceStart);
   const labels = series.map((s) => {
     const d = new Date(s.date + 'T00:00:00');
     return `${d.getDate()}/${d.getMonth() + 1}`;
@@ -6146,23 +6119,30 @@ function renderPmcChart(workouts) {
 
   const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
   const ctlColor = 'rgba(46, 134, 193, 0.9)';
-  const tsbColor = 'rgba(46, 204, 113, 0.95)';
 
-  // Chart 1 — Formtopp 0-100 score on #pmc-card. The underlying TSB is
-  // still available in tooltips for the curious, but the headline number
-  // is the friendly 0-100 score.
-  window._chartPmc = new Chart(tsbCanvas.getContext('2d'), {
+  // Personal fitness score on #pmc-ctl-card. Either ratio (if we have a
+  // baseline) or raw CTL fallback (if user is still building history).
+  // The ratio version starts at ~1.0 and drifts upward as fitness improves
+  // vs day 28 of training.
+  const useRatio = baselineCtl !== null;
+  const fitnessData = useRatio
+    ? ctl.map((c) => +(c / baselineCtl).toFixed(3))
+    : ctl.map((c) => +c.toFixed(2));
+  const yTitle = useRatio ? 'Fitness-score' : 'Belastning (bygger baseline)';
+  const yMin = useRatio ? Math.max(0, Math.min(...fitnessData) * 0.95) : 0;
+  window._chartPmcCtl = new Chart(ctlCanvas.getContext('2d'), {
     type: 'line',
     data: {
       labels,
       datasets: [
         {
-          label: 'Formtopp',
-          data: score.map((v) => +v.toFixed(1)),
-          borderColor: tsbColor,
-          borderWidth: 2.5,
+          label: 'Fitness-score',
+          data: fitnessData,
+          borderColor: ctlColor,
+          backgroundColor: 'rgba(46,134,193,0.15)',
+          borderWidth: 2,
           pointRadius: 0,
-          fill: false,
+          fill: true,
           tension: 0.25,
         },
       ],
@@ -6175,17 +6155,19 @@ function renderPmcChart(workouts) {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (c) => `Formtopp: ${Math.round(c.parsed.y)} / 100`,
+            label: (c) => useRatio
+              ? `Fitness-score: ${c.parsed.y.toFixed(2)} (${(c.parsed.y * 100 - 100 >= 0 ? '+' : '') + (c.parsed.y * 100 - 100).toFixed(0)} % vs start)`
+              : `Belastning: ${c.parsed.y.toFixed(1)}`,
           },
         },
       },
       scales: {
         y: {
-          min: 0,
-          max: 100,
+          min: useRatio ? yMin : 0,
+          beginAtZero: !useRatio,
           grid: { color: 'rgba(255,255,255,0.05)' },
-          ticks: { color: textColor, stepSize: 20, callback: (v) => v },
-          title: { display: true, text: 'Formtopp (0–100)', color: textColor },
+          ticks: { color: textColor, callback: (v) => useRatio ? Number(v).toFixed(2) : Number(v).toFixed(1) },
+          title: { display: true, text: yTitle, color: textColor },
         },
         x: {
           grid: { display: false },
@@ -6195,97 +6177,7 @@ function renderPmcChart(workouts) {
     },
   });
 
-  // Chart 2 — Personal fitness score on #pmc-ctl-card. Either ratio (if
-  // we have a baseline) or raw CTL fallback (if user is still building
-  // history). The ratio version starts at ~1.0 and drifts upward as
-  // fitness improves vs day 28 of training.
-  if (ctlCanvas) {
-    const useRatio = baselineCtl !== null;
-    const fitnessData = useRatio
-      ? ctl.map((c) => +(c / baselineCtl).toFixed(3))
-      : ctl.map((c) => +c.toFixed(2));
-    const yTitle = useRatio ? 'Fitness-score' : 'Belastning (bygger baseline)';
-    const yMin = useRatio ? Math.max(0, Math.min(...fitnessData) * 0.95) : 0;
-    window._chartPmcCtl = new Chart(ctlCanvas.getContext('2d'), {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [
-          {
-            label: 'Fitness-score',
-            data: fitnessData,
-            borderColor: ctlColor,
-            backgroundColor: 'rgba(46,134,193,0.15)',
-            borderWidth: 2,
-            pointRadius: 0,
-            fill: true,
-            tension: 0.25,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (c) => useRatio
-                ? `Fitness-score: ${c.parsed.y.toFixed(2)} (${(c.parsed.y * 100 - 100 >= 0 ? '+' : '') + (c.parsed.y * 100 - 100).toFixed(0)} % vs start)`
-                : `Belastning: ${c.parsed.y.toFixed(1)}`,
-          },
-        },
-        },
-        scales: {
-          y: {
-            min: useRatio ? yMin : 0,
-            beginAtZero: !useRatio,
-            grid: { color: 'rgba(255,255,255,0.05)' },
-            ticks: { color: textColor, callback: (v) => useRatio ? Number(v).toFixed(2) : Number(v).toFixed(1) },
-            title: { display: true, text: yTitle, color: textColor },
-          },
-          x: {
-            grid: { display: false },
-            ticks: { color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
-          },
-        },
-      },
-    });
-  }
-
   const lastCtl = ctl[ctl.length - 1];
-  const lastTsb = tsb[tsb.length - 1];
-  const lastScore = score[score.length - 1];
-
-  // Formtopp insight — the one number most people actually look at.
-  // Bands derived from TSB so they map onto the established physiological
-  // thresholds, but the user-facing number is the friendly 0-100 score.
-  let insightBand, title, sub2;
-  if (lastTsb > 5) {
-    insightBand = 'ok';
-    title = 'Utvilad';
-    sub2 = 'Bra tajming för ett nyckelpass eller tävling.';
-  } else if (lastTsb > -10) {
-    insightBand = 'neutral';
-    title = 'I balans';
-    sub2 = 'Form och trötthet i balans — kör enligt plan.';
-  } else if (lastTsb > -30) {
-    insightBand = 'warn';
-    title = 'Bygger fitness';
-    sub2 = 'Produktiv belastning. Planera in en deload snart.';
-  } else {
-    insightBand = 'bad';
-    title = 'Hög trötthet';
-    sub2 = 'Dra ner — risk för överträning.';
-  }
-  _renderChartInsight('pmc-insight', {
-    band: insightBand,
-    title,
-    sub: sub2,
-    headline: `${Math.round(lastScore)} / 100`,
-    headlineLabel: 'FORMTOPP',
-  });
 
   // Fitness insight — show the ratio if we have a baseline, otherwise
   // explain that we're still building one.
@@ -6317,9 +6209,7 @@ function renderPmcChart(workouts) {
 
 // ─────────────────────────────────────────────────────────────
 //  Card UX helpers — generic info popover.
-//  Used by Formtopp, Effort per vecka, and Group Effort per vecka.
-//  togglePmcInfo() is kept as a thin alias so existing HTML and any
-//  external callers keep working.
+//  Used by Effort per vecka, Personal fitness score, and Group Effort.
 // ─────────────────────────────────────────────────────────────
 function togglePopover(popoverId, btnId) {
   const pop = document.getElementById(popoverId);
@@ -6329,11 +6219,8 @@ function togglePopover(popoverId, btnId) {
   if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 
-function togglePmcInfo() { togglePopover('pmc-info-popover', 'pmc-info-btn'); }
-
 if (typeof window !== 'undefined') {
   window.togglePopover = togglePopover;
-  window.togglePmcInfo = togglePmcInfo;
 }
 
 // ─────────────────────────────────────────────────────────────
