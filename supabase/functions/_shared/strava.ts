@@ -91,12 +91,17 @@ export function guessIntensity(avgHr: number | null): string | null {
   return avgHr < 145 ? "Z2" : "Kvalitet";
 }
 
-export async function refreshTokenIfNeeded(
-  conn: { id: string; access_token: string; refresh_token: string; expires_at: number }
-): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
-  if (conn.expires_at > now + 60) return conn.access_token;
+export interface StravaConnRow {
+  id: string;
+  access_token: string;
+  refresh_token: string;
+  expires_at: number;
+}
 
+// Internal: always hit Strava's /oauth/token endpoint regardless of how
+// fresh expires_at looks. Used by both the lazy refresh path and the
+// "force-refresh after 401" path.
+async function _doRefresh(conn: StravaConnRow): Promise<{ access_token: string; status: number; ok: boolean; bodyText: string }> {
   const res = await fetch("https://www.strava.com/oauth/token", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -107,18 +112,55 @@ export async function refreshTokenIfNeeded(
       grant_type: "refresh_token",
     }),
   });
-
-  if (!res.ok) throw new Error(`Token refresh failed: ${res.status}`);
-  const data = await res.json();
-
+  const bodyText = await res.text();
+  if (!res.ok) {
+    return { access_token: "", status: res.status, ok: false, bodyText };
+  }
+  const data = JSON.parse(bodyText);
   const db = supabaseAdmin();
   await db.from("strava_connections").update({
     access_token: data.access_token,
     refresh_token: data.refresh_token,
     expires_at: data.expires_at,
   }).eq("id", conn.id);
+  // Mutate caller's view of the row so subsequent /athlete or activity
+  // calls in the same invocation use the fresh token without another DB
+  // round-trip.
+  conn.access_token = data.access_token;
+  conn.refresh_token = data.refresh_token;
+  conn.expires_at = data.expires_at;
+  return { access_token: data.access_token, status: res.status, ok: true, bodyText };
+}
 
-  return data.access_token;
+export async function refreshTokenIfNeeded(conn: StravaConnRow): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  if (conn.expires_at > now + 60) return conn.access_token;
+  const out = await _doRefresh(conn);
+  if (!out.ok) {
+    // Strava returns 400 with {"errors":[{"resource":"RefreshToken","field":"refresh_token","code":"invalid"}]}
+    // when the user has revoked the app from their Strava settings, OR
+    // when an older refresh_token gets used after a successful rotation.
+    // Either way the connection is dead — surface a structured error so
+    // the caller can map it to a clear "reconnect Strava" UX instead of
+    // a generic 500.
+    const err = new Error(`Token refresh failed: ${out.status} ${out.bodyText.slice(0, 200)}`);
+    (err as Error & { code?: string; stravaStatus?: number }).code =
+      out.status === 400 || out.status === 401 ? "strava_auth_revoked" : "strava_token_refresh_failed";
+    (err as Error & { code?: string; stravaStatus?: number }).stravaStatus = out.status;
+    throw err;
+  }
+  return out.access_token;
+}
+
+// Force a token refresh even if expires_at still looks fresh. Use this
+// when Strava starts returning 401 on requests despite our stored token
+// claiming it's not yet expired — usually because Strava force-rotated
+// the token (e.g. user changed password) or our `expires_at` was wrong.
+// Returns the new token on success, or null if Strava refuses the
+// refresh (i.e. the user has actually revoked the app).
+export async function forceRefreshStravaToken(conn: StravaConnRow): Promise<string | null> {
+  const out = await _doRefresh(conn);
+  return out.ok ? out.access_token : null;
 }
 
 export interface StravaActivity {

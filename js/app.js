@@ -8959,6 +8959,15 @@ async function _stravaSyncRequest(sinceDate) {
 //     failure (boot, timeout, capacity) so the user (and we) know it's a
 //     platform issue, not a Strava issue.
 function _formatStravaSyncError({ status, result, bodyText, parseError }) {
+  if (result?.error === 'strava_auth_revoked') {
+    return 'Strava-anslutningen har återkallats eller löpt ut. Klicka "Koppla från" och anslut Strava igen.';
+  }
+  if (result?.error === 'strava_api_error') {
+    // Server now forwards the upstream Strava status + a short message.
+    const ss = result.strava_status ? ` ${result.strava_status}` : '';
+    const sm = result.strava_message ? `: ${result.strava_message}` : '';
+    return `Strava API-fel${ss}${sm}`;
+  }
   if (result?.error) return result.error;
   const text = (bodyText || '').trim();
   if (!text) {
@@ -9025,11 +9034,14 @@ async function syncStravaAll() {
 
       if (!req.res.ok || !req.result) {
         const status = req.res.status;
-        const detail = req.result?.error
-          || (req.bodyText && req.bodyText.length < 200 ? req.bodyText : '')
-          || (req.parseError ? 'svaret kunde inte tolkas' : '');
-        const msg = `Tekniskt fel (HTTP ${status}). ${detail || 'Försök igen om en stund.'}`;
-        console.error('Strava deep sync request failed:', status, req.bodyText?.slice(0, 500), req.parseError);
+        const detail = _formatStravaSyncError({
+          status,
+          result: req.result,
+          bodyText: req.bodyText,
+          parseError: req.parseError,
+        });
+        const msg = `Tekniskt fel (HTTP ${status}). ${detail}`;
+        console.error('Strava deep sync request failed:', status, req.bodyText?.slice(0, 1000), req.parseError);
         await showAlertModal('Synk-fel', msg);
         break;
       }

@@ -4,6 +4,7 @@ import {
   SUPABASE_URL,
   supabaseAdmin,
   refreshTokenIfNeeded,
+  forceRefreshStravaToken,
   activityToWorkout,
   shouldImportActivity,
   fetchHRZoneSeconds,
@@ -147,7 +148,22 @@ serve(async (req) => {
       );
     }
 
-    const accessToken = await refreshTokenIfNeeded(conn);
+    let accessToken: string;
+    try {
+      accessToken = await refreshTokenIfNeeded(conn);
+    } catch (e) {
+      const errCode = (e as Error & { code?: string }).code;
+      if (errCode === "strava_auth_revoked") {
+        // The stored refresh_token no longer works — user revoked the app
+        // or Strava rotated the token without us catching it. Fail fast
+        // with 401 so the UI can prompt re-auth.
+        return new Response(
+          JSON.stringify({ error: "strava_auth_revoked" }),
+          { status: 401, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
+        );
+      }
+      throw e;
+    }
 
     // --- Mode + cursor ------------------------------------------------
     // Deep sync: client passes a `since` calendar date (e.g. 2025-01-01).
@@ -192,15 +208,50 @@ serve(async (req) => {
       incrementalAfter = Math.min(lastSyncTs || sixtyDaysAgo, fourteenDaysAgo);
     }
 
-    // First verify the token works by checking athlete profile.
-    const athleteRes = await fetch("https://www.strava.com/api/v3/athlete", {
+    // First verify the token works by checking athlete profile. If Strava
+    // returns 401, our stored access_token has been server-side
+    // invalidated even though `expires_at` says it should still be valid
+    // (e.g. force-rotated, or the user changed Strava password). Force a
+    // refresh and retry once before giving up — and only then surface
+    // strava_auth_revoked so the UI can prompt re-auth.
+    let athleteRes = await fetch("https://www.strava.com/api/v3/athlete", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
+    if (athleteRes.status === 401) {
+      const errBody = await athleteRes.text();
+      console.warn("strava-sync: /athlete returned 401, force-refreshing token", errBody.slice(0, 300));
+      const fresh = await forceRefreshStravaToken(conn);
+      if (!fresh) {
+        return new Response(
+          JSON.stringify({ error: "strava_auth_revoked" }),
+          { status: 401, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
+        );
+      }
+      accessToken = fresh;
+      athleteRes = await fetch("https://www.strava.com/api/v3/athlete", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (athleteRes.status === 401) {
+        // Refresh succeeded but the new token still gets rejected — that
+        // shouldn't happen unless the user revoked the app between the
+        // refresh and this call. Treat as revoked.
+        return new Response(
+          JSON.stringify({ error: "strava_auth_revoked" }),
+          { status: 401, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
+        );
+      }
+    }
     if (!athleteRes.ok) {
       const errBody = await athleteRes.text();
       console.error("strava-sync: athlete endpoint error", athleteRes.status, errBody.slice(0, 500));
       return new Response(
-        JSON.stringify({ error: "strava_api_error" }),
+        JSON.stringify({
+          error: "strava_api_error",
+          strava_status: athleteRes.status,
+          // Surface a short snippet so the client alert isn't a black box.
+          // Strava errors don't carry user data; safe to forward.
+          strava_message: errBody.slice(0, 200),
+        }),
         { status: 502, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
       );
     }
