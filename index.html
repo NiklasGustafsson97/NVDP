@@ -54,7 +54,7 @@
   -->
   <link rel="icon" type="image/svg+xml"
     href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Crect%20width='100'%20height='100'%20rx='20'%20fill='%233498DB'/%3E%3Ctext%20x='50'%20y='70'%20font-family='Arial,sans-serif'%20font-size='62'%20font-weight='bold'%20text-anchor='middle'%20fill='white'%3EN%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/style.css?v=5da99e6">
+  <link rel="stylesheet" href="css/style.css?v=belastning-v1">
   <!--
     PERF (Improvement #4): all script tags below now use `defer` so they
     download in parallel with HTML parsing and execute, in document order,
@@ -564,7 +564,7 @@
 
       <div class="card" id="effort-card">
         <div class="card-header">
-          <span class="card-title">Effort per vecka</span>
+          <span class="card-title">Belastning per vecka</span>
           <button type="button" class="pmc-info-btn" id="effort-info-btn"
                   onclick="togglePopover('effort-info-popover','effort-info-btn')"
                   aria-label="Visa förklaring" aria-expanded="false">
@@ -573,7 +573,7 @@
         </div>
         <div class="chart-container chart-container--skeleton" id="chart-effort-wrap"><div class="chart-skeleton" id="chart-skeleton-effort"></div><canvas id="chart-effort"></canvas></div>
         <div class="chart-insight" id="effort-insight"></div>
-        <div class="pmc-info-popover hidden" id="effort-info-popover" role="region" aria-label="Effort-förklaring">
+        <div class="pmc-info-popover hidden" id="effort-info-popover" role="region" aria-label="Belastning-förklaring">
           <div class="effort-legend" id="effort-legend"></div>
         </div>
       </div>
@@ -618,7 +618,7 @@
 
         <div class="pmc-info-popover hidden" id="pmc-ctl-info-popover" role="region" aria-label="Förklaring">
           <p><strong>Personal fitness score</strong> visar hur du tränat över tid jämfört med när du började mäta. <strong>1.00 = startnivå.</strong> Värden över 1 = du är mer vältränad nu än då (1.50 = +50 %). Värden under 1 = du har tappat fitness sen start.</p>
-          <p class="pmc-info-meta">Tekniskt är detta din <strong>CTL</strong> (Chronic Training Load — 42-dagars exponentiellt glidande snitt av effort, samma siffra som Garmin och TrainingPeaks använder) dividerad med din CTL efter 28 dagars trä­nings­data. Vi väntar 28 dagar så att EWMA-kurvan hinner stabilisera sig innan vi ankarpunkten — annars skulle nya användare få vilda hopp i ratio från små denominators.</p>
+          <p class="pmc-info-meta">Tekniskt är detta din <strong>CTL</strong> (Chronic Training Load — 42-dagars exponentiellt glidande snitt av belastning, samma siffra som Garmin och TrainingPeaks använder) dividerad med din CTL efter 28 dagars trä­nings­data. Vi väntar 28 dagar så att EWMA-kurvan hinner stabilisera sig innan vi ankarpunkten — annars skulle nya användare få vilda hopp i ratio från små denominators.</p>
           <p class="pmc-info-meta"><strong>Hur den rör sig:</strong> stiger när du tränar konsekvent över tid, faller när du vilar för länge eller backar i volym. En 0.05–0.10 svängning över ett par veckor är normalt — fokusera på trenden över månader, inte enskilda dagar.</p>
         </div>
 
@@ -633,6 +633,11 @@
       <div class="card" id="polarization-card">
         <div class="card-header">
           <span class="card-title">Intensitetsmix (senaste 4 v)</span>
+          <button type="button" class="card-warn-btn hidden" id="polarization-proxy-warn"
+                  onclick="togglePopover('polarization-proxy-popover','polarization-proxy-warn')"
+                  aria-label="Pulsdata saknas — visa förklaring" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </button>
         </div>
         <div class="polarization-bar" id="polarization-bar">
           <div class="polarization-seg polarization-seg--easy" id="pol-seg-easy"></div>
@@ -640,6 +645,11 @@
         </div>
         <div class="polarization-legend" id="polarization-legend"></div>
         <div class="chart-insight" id="polarization-insight"></div>
+        <div class="pmc-info-popover hidden" id="polarization-proxy-popover" role="region" aria-label="Förklaring av pace-proxy">
+          <p><strong>Pulsdata saknas för en del pass.</strong></p>
+          <p>För dessa pass uppskattar vi intensiteten utifrån farten jämfört med din egen snabbaste uthålliga fart de senaste 12 veckorna. Det är en proxy och inte lika exakt som riktiga pulsdata — koppla en pulsmätare för bättre precision.</p>
+          <p class="pmc-info-meta" id="polarization-proxy-share-line"></p>
+        </div>
       </div>
 
       <div class="card" id="easy-hr-card">
@@ -886,7 +896,7 @@
 
           <div class="card" id="group-effort-card">
             <div class="card-header">
-              <span class="card-title">Effort per vecka</span>
+              <span class="card-title">Belastning per vecka</span>
               <button type="button" class="pmc-info-btn" id="group-effort-info-btn"
                       onclick="togglePopover('group-effort-info-popover','group-effort-info-btn')"
                       aria-label="Visa förklaring" aria-expanded="false">
@@ -895,7 +905,7 @@
             </div>
             <div class="chart-container"><canvas id="chart-group-effort"></canvas></div>
             <div class="chart-insight" id="group-effort-insight"></div>
-            <div class="pmc-info-popover hidden" id="group-effort-info-popover" role="region" aria-label="Effort-förklaring">
+            <div class="pmc-info-popover hidden" id="group-effort-info-popover" role="region" aria-label="Belastning-förklaring">
               <div class="effort-legend" id="group-effort-legend"></div>
             </div>
           </div>
@@ -1804,8 +1814,8 @@
   </div>
 </div>
 
-<script defer src="js/config.js?v=5da99e6"></script>
-<script defer src="js/app.js?v=5da99e6"></script>
+<script defer src="js/config.js?v=belastning-v1"></script>
+<script defer src="js/app.js?v=belastning-v1"></script>
 <!--
   Beta-gate logic. Loaded after app.js because it depends on `gateOpen`,
   `NVDP_resumeAfterGate` and `registerAction` defined there. Previously this

@@ -24,7 +24,7 @@
 //   index.html, which naturally produces fresh requests; precache just keeps
 //   the latest known-good copy around for offline.
 
-const CACHE_VERSION = "v1-2026-04-23";
+const CACHE_VERSION = "v1-2026-04-24";
 const SHELL_CACHE = `nvdp-shell-${CACHE_VERSION}`;
 const ASSETS_CACHE = `nvdp-assets-${CACHE_VERSION}`;
 

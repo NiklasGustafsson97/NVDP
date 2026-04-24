@@ -2363,7 +2363,7 @@ async function openWorkoutModal(w) {
   if (w.avg_hr) stats.push({ label: 'Snittpuls', value: Math.round(w.avg_hr), unit: 'bpm' });
   if (w.max_hr) stats.push({ label: 'Maxpuls', value: Math.round(w.max_hr), unit: 'bpm' });
   if (w.elevation_gain_m) stats.push({ label: 'Höjdmeter', value: Math.round(w.elevation_gain_m), unit: 'm' });
-  if (w.effort != null) stats.push({ label: 'Effort', value: (+w.effort).toFixed(1), unit: '' });
+  if (w.effort != null) stats.push({ label: 'Belastning', value: (+w.effort).toFixed(1), unit: '' });
   if (w.calories) stats.push({ label: 'Kalorier', value: w.calories, unit: 'kcal' });
   if (w.avg_cadence) stats.push({ label: 'Kadens', value: Math.round(w.avg_cadence), unit: 'spm' });
 
@@ -3580,8 +3580,8 @@ function workoutScoreChip(w) {
     else if (score >= 1.0) band = 'high';
     else if (score >= 0.5) band = 'med';
     const im = _intensityMultiplier(w);
-    const title = `Belastning: Effort ${score.toFixed(2)} (IM ${im.toFixed(2)})`;
-    return `<span class="score-chip score-chip--${band}" title="${title}">Effort ${score.toFixed(1)}</span>`;
+    const title = `Belastning: ${score.toFixed(2)} (IM ${im.toFixed(2)})`;
+    return `<span class="score-chip score-chip--${band}" title="${title}">Belastning ${score.toFixed(1)}</span>`;
   } catch (_) {
     return '';
   }
@@ -4316,7 +4316,7 @@ async function loadTrends() {
   // Older weekly bars will look slightly different — let the user know once.
   try {
     if (!localStorage.getItem('nvdp_im_recalib_v1')) {
-      showToast('Vi har kalibrerat effort-skalan — äldre veckor kan se lite annorlunda ut.');
+      showToast('Vi har kalibrerat belastnings­skalan — äldre veckor kan se lite annorlunda ut.');
       localStorage.setItem('nvdp_im_recalib_v1', '1');
     }
   } catch (_) { /* ignore */ }
@@ -4340,7 +4340,7 @@ async function _loadTrends() {
   const isNorm = effortMode === 'normalized';
   const weeklyTitleEl = document.getElementById('trends-weekly-title');
   if (weeklyTitleEl) {
-    weeklyTitleEl.textContent = isNorm ? 'Belastning per vecka (Effort)' : 'Timmar per vecka';
+    weeklyTitleEl.textContent = isNorm ? 'Belastning per vecka' : 'Timmar per vecka';
   }
   // mix title is set later when chart renders (respects _mixUnit toggle)
 
@@ -4653,27 +4653,57 @@ function renderProgressWeekSummary(workouts) {
   const passesPrev = prevWeek.length;
   const distNow = thisWeek.reduce((s, w) => s + (w.distance_km || 0), 0);
   const distPrev = prevWeek.reduce((s, w) => s + (w.distance_km || 0), 0);
-  const longestNow = thisWeek.reduce((m, w) => Math.max(m, w.distance_km || 0), 0);
-  const longestPrev = prevWeek.reduce((m, w) => Math.max(m, w.distance_km || 0), 0);
+  // Längsta löppass = furthest single run by distance (km). Hyrox is
+  // intentionally excluded — those are mixed-modality and the distance
+  // number isn't comparable to a regular long run.
+  const isRun = (w) => w.activity_type === 'Löpning';
+  const longestRunNow = thisWeek.filter(isRun).reduce((m, w) => Math.max(m, w.distance_km || 0), 0);
+  const longestRunPrev = prevWeek.filter(isRun).reduce((m, w) => Math.max(m, w.distance_km || 0), 0);
+  // Längsta pass (cross-discipline) = longest single session by duration
+  // across ALL activity types so a heavy gym day or a long ski tour can win.
+  const longestSessionMinNow = thisWeek.reduce((m, w) => Math.max(m, w.duration_minutes || 0), 0);
+  const longestSessionMinPrev = prevWeek.reduce((m, w) => Math.max(m, w.duration_minutes || 0), 0);
 
   // SVG arrows inherit color via currentColor → .pws-stat-delta.up/down/flat.
   const arrowUp = '<svg class="pws-stat-delta-ico" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
   const arrowDown = '<svg class="pws-stat-delta-ico" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>';
   const arrowFlat = '<svg class="pws-stat-delta-ico" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>';
 
+  // Format a minute count as "1h 25m" / "45m" so the duration stat reads
+  // naturally for both short gym sessions and long ski tours.
+  function fmtMin(min) {
+    const m = Math.max(0, Math.round(min));
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    const rem = m % 60;
+    return rem === 0 ? `${h}h` : `${h}h ${rem}m`;
+  }
+
   function delta(cur, prev, unit) {
     if (prev === 0 && cur === 0) {
       return `<span class="pws-stat-delta flat">${arrowFlat}<span>—</span></span>`;
     }
     if (prev === 0) {
-      const valStr = unit === 'count' ? `+${cur.toFixed(0)}` : `+${cur.toFixed(1)} ${unit}`;
+      let valStr;
+      if (unit === 'count') valStr = `+${cur.toFixed(0)}`;
+      else if (unit === 'min') valStr = `+${fmtMin(cur)}`;
+      else valStr = `+${cur.toFixed(1)} ${unit}`;
       return `<span class="pws-stat-delta up">${arrowUp}<span>${valStr}</span></span>`;
     }
     const diff = cur - prev;
     const cls = diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
     const icon = diff > 0 ? arrowUp : diff < 0 ? arrowDown : arrowFlat;
     const sign = diff > 0 ? '+' : '';
-    const valStr = unit === 'count' ? `${sign}${diff}` : `${sign}${diff.toFixed(1)} ${unit}`;
+    let valStr;
+    if (unit === 'count') valStr = `${sign}${diff}`;
+    else if (unit === 'min') valStr = `${sign}${fmtMin(Math.abs(diff))}`.replace('+−', '−'); // sign already prepended
+    else valStr = `${sign}${diff.toFixed(1)} ${unit}`;
+    // For minutes we re-attach the sign manually because fmtMin always
+    // returns a positive token; collapse the redundant '+' on negative diffs.
+    if (unit === 'min') {
+      const signTok = diff > 0 ? '+' : diff < 0 ? '−' : '';
+      valStr = `${signTok}${fmtMin(Math.abs(diff))}`;
+    }
     return `<span class="pws-stat-delta ${cls}">${icon}<span>${valStr}</span></span>`;
   }
 
@@ -4694,9 +4724,14 @@ function renderProgressWeekSummary(workouts) {
       ${delta(distNow, distPrev, 'km')}
     </div>
     <div class="pws-stat">
-      <span class="pws-stat-val">${longestNow.toFixed(1)} km</span>
+      <span class="pws-stat-val">${longestRunNow.toFixed(1)} km</span>
+      <span class="pws-stat-label">Längsta löppass</span>
+      ${delta(longestRunNow, longestRunPrev, 'km')}
+    </div>
+    <div class="pws-stat">
+      <span class="pws-stat-val">${longestSessionMinNow > 0 ? fmtMin(longestSessionMinNow) : '—'}</span>
       <span class="pws-stat-label">Längsta pass</span>
-      ${delta(longestNow, longestPrev, 'km')}
+      ${delta(longestSessionMinNow, longestSessionMinPrev, 'min')}
     </div>
   </div>`;
 }
@@ -5580,11 +5615,11 @@ function renderMixChart(workouts) {
   if (chartMixPersonal) chartMixPersonal.destroy();
 
   const isNorm = effortMode === 'normalized';
-  const yUnit = isNorm ? ' Effort' : 'h';
+  const yUnit = isNorm ? ' belastning' : 'h';
   const mixIsKm = _mixUnit === 'km';
   const mixYUnit = mixIsKm ? ' km' : yUnit;
   const mixTitleEl = document.getElementById('trends-mix-title');
-  if (mixTitleEl) mixTitleEl.textContent = mixIsKm ? 'Aktivitetsmix (km)' : (isNorm ? 'Aktivitetsmix (Effort)' : 'Aktivitetsmix (timmar)');
+  if (mixTitleEl) mixTitleEl.textContent = mixIsKm ? 'Aktivitetsmix (km)' : (isNorm ? 'Aktivitetsmix (belastning)' : 'Aktivitetsmix (timmar)');
 
   const weekWorkouts = {};
   workouts.forEach(w => {
@@ -5660,13 +5695,19 @@ function renderEffortChart(workouts) {
   if (window._chartEffort) window._chartEffort.destroy();
 
   const weekMap = {};
+  // Group raw workouts per ISO-Monday week so the diagnostic below can list
+  // which sessions actually contributed to each bar (or didn't, when a week
+  // shows zero in the chart).
+  const weekRaw = {};
   workouts.forEach(w => {
     const d = new Date(w.workout_date);
     const mon = mondayOfWeek(d);
     const key = isoDate(mon);
     if (!weekMap[key]) weekMap[key] = { effort: 0, hours: 0 };
     weekMap[key].effort += calcWorkoutEffort(w);
-    weekMap[key].hours += w.duration_minutes / 60;
+    weekMap[key].hours += (w.duration_minutes || 0) / 60;
+    if (!weekRaw[key]) weekRaw[key] = [];
+    weekRaw[key].push(w);
   });
 
   const dataWeeks = Object.keys(weekMap).sort();
@@ -5715,7 +5756,7 @@ function renderEffortChart(workouts) {
         // Bars come first so legend ordering stays familiar; draw order is
         // controlled with `order:` so the band still renders behind them.
         {
-          label: 'Belastning (Effort)',
+          label: 'Belastning (staplar)',
           data: effortData,
           backgroundColor: barFills,
           borderColor: barBorders,
@@ -5754,7 +5795,7 @@ function renderEffortChart(workouts) {
           order: 4,
         },
         {
-          label: 'Timmar (rå)',
+          label: 'Timmar',
           data: hoursData,
           type: 'line',
           borderColor: 'rgba(46,134,193,0.7)',
@@ -5782,10 +5823,10 @@ function renderEffortChart(workouts) {
         tooltip: {
           callbacks: {
             label: (c) => {
-              if (c.dataset.label === 'Belastning (Effort)') {
-                return `Belastning: Effort ${c.parsed.y.toFixed(1)}`;
+              if (c.dataset.label === 'Belastning (staplar)') {
+                return `Belastning: ${c.parsed.y.toFixed(1)}`;
               }
-              if (c.dataset.label === 'Timmar (rå)') {
+              if (c.dataset.label === 'Timmar') {
                 return `Timmar: ${c.parsed.y.toFixed(1)} h`;
               }
               if (c.dataset.label === '_band-lower') return null;
@@ -5793,7 +5834,7 @@ function renderEffortChart(workouts) {
               const lo = targetLower[c.dataIndex];
               const hi = c.parsed.y;
               if (lo === null || hi === null) return null;
-              return `Mål-band: Effort ${lo.toFixed(1)}–${hi.toFixed(1)}`;
+              return `Mål-band: Belastning ${lo.toFixed(1)}–${hi.toFixed(1)}`;
             },
             afterBody: (items) => {
               if (!items.length) return [];
@@ -5814,39 +5855,41 @@ function renderEffortChart(workouts) {
         }
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor }, title: { display: true, text: 'Effort (skalad)', color: textColor } },
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor }, title: { display: true, text: 'Belastning (skalad)', color: textColor } },
         y1: { beginAtZero: true, position: 'right', grid: { display: false }, ticks: { color: textColor, callback: v => v + 'h' }, title: { display: true, text: 'Timmar', color: textColor } },
         x: { grid: { display: false }, ticks: { color: textColor, maxRotation: 45, minRotation: 0 } }
       }
     }
   });
 
-  // Insight: count how many of the last N graded (non-deload) weeks landed
-  // inside the band. Deload weeks are skipped because they're planned dips,
-  // not signal. We look at the last 8 graded weeks for the rolling stat —
-  // long enough to be meaningful, short enough that a fix this week shows
-  // up in the number. Insight always reports on the most recent calendar
-  // weeks across the FULL series — it's a snapshot of "now", not of
-  // whatever 12-week window the user happens to be browsing.
-  const gradedRecent = [];
-  for (let i = effortDataAll.length - 1; i >= 0 && gradedRecent.length < 8; i--) {
-    if (classesAll[i] === 'neutral') continue;
-    if (isDeloadAll[i]) continue;
-    gradedRecent.push(classesAll[i]);
+  // Insight: count classifications strictly within the visible 12 w window so
+  // the subtitle ("X över / Y under") always matches the colored bars the
+  // user can actually see. Earlier behaviour walked the FULL series back-
+  // wards and produced "3 över / 4 under" while the chart on screen showed
+  // 5 över / 1 under — confusing because the counter was sourced from older
+  // weeks scrolled off the visible window. Deload weeks are still skipped
+  // from the count because they're planned dips, not signal — but they
+  // remain visible as bars.
+  const gradedVisible = [];
+  for (let i = 0; i < classes.length; i++) {
+    if (classes[i] === 'neutral') continue;
+    if (isDeload[i]) continue;
+    gradedVisible.push(classes[i]);
   }
-  if (gradedRecent.length === 0) {
+  if (gradedVisible.length === 0) {
     _renderChartInsight('effort-insight', {
       band: 'neutral',
       title: 'Inte graderad än',
       sub: `Bygg ≥ ${EFFORT_BAND_LOOKBACK + 1} v historik så ritar vi mål-bandet.`,
     });
   } else {
-    const onCnt = gradedRecent.filter((c) => c === 'on').length;
-    const overCnt = gradedRecent.filter((c) => c === 'over').length;
-    const underCnt = gradedRecent.filter((c) => c === 'under').length;
-    const total = gradedRecent.length;
-    const lastCls = classesAll[classesAll.length - 1];
-    const lastDeload = isDeloadAll[isDeloadAll.length - 1];
+    const onCnt = gradedVisible.filter((c) => c === 'on').length;
+    const overCnt = gradedVisible.filter((c) => c === 'over').length;
+    const underCnt = gradedVisible.filter((c) => c === 'under').length;
+    const total = gradedVisible.length;
+    // Headline title still reflects "this week" so it stays actionable.
+    const lastCls = classes[classes.length - 1];
+    const lastDeload = isDeload[isDeload.length - 1];
     let title, band;
     if (lastDeload) { title = 'Planerad deload'; band = 'neutral'; }
     else if (lastCls === 'on') { title = 'I bandet denna vecka'; band = 'ok'; }
@@ -5856,7 +5899,7 @@ function renderEffortChart(workouts) {
     _renderChartInsight('effort-insight', {
       band,
       title,
-      sub: `${onCnt} av ${total} senaste i bandet · ${overCnt} över / ${underCnt} under`,
+      sub: `${onCnt} i bandet · ${overCnt} över · ${underCnt} under (av ${total} graderade veckor i fönstret)`,
     });
   }
 
@@ -5867,11 +5910,64 @@ function renderEffortChart(workouts) {
       <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.over.border}"></span> Över bandet (>+${Math.round(EFFORT_BAND_PCT * 100)} %) — kolla återhämtning innan nästa hårda pass.</div>
       <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.under.border}"></span> Under bandet (&lt;−${Math.round(EFFORT_BAND_PCT * 100)} %) — låg vecka. OK om planerad deload.</div>
       <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.neutral.border}"></span> Inte graderad än — färre än ${EFFORT_BAND_LOOKBACK} v historik.</div>
-      <div class="effort-legend-item effort-legend-meta">Effort = normaliserad belastning (rå score ÷ ${EFFORT_DISPLAY_DIVISOR} ≈ 1 h @ MET 10). Bandet = ±${Math.round(EFFORT_BAND_PCT * 100)} % runt rullande ${EFFORT_BAND_LOOKBACK}-veckorssnitt av föregående veckor.</div>
+      <div class="effort-legend-item effort-legend-meta">Belastning = normaliserad träningsbelastning (rå score ÷ ${EFFORT_DISPLAY_DIVISOR} ≈ 1 h @ MET 10). Bandet = ±${Math.round(EFFORT_BAND_PCT * 100)} % runt rullande ${EFFORT_BAND_LOOKBACK}-veckorssnitt av föregående veckor.</div>
     `;
   }
 
   _renderChartWeekNav('chart-effort', allWeekKeys.length, win, () => renderEffortChart(workouts));
+
+  // Diagnostic: when the user reports "this week was 0 in the chart but I
+  // logged passes", flip on window.__DIAG_EFFORT in DevTools and reload to
+  // dump every workout the chart saw per visible week, plus the values it
+  // computed. Tells us instantly whether the cause is "no workouts in
+  // myWorkouts" vs "workouts present but duration_minutes is 0/null" vs
+  // "calcWorkoutEffort returned 0 because of activity_type / IM".
+  if (window.__DIAG_EFFORT) {
+    try {
+      // eslint-disable-next-line no-console
+      console.groupCollapsed('[effort-chart diag] visible window per-week dump');
+      visibleWeeks.forEach((wk, i) => {
+        const mon = parseISOWeekKeyLocal(wk);
+        const wn = weekNumber(mon);
+        const sessions = weekRaw[wk] || [];
+        const rawEff = (weekMap[wk]?.effort) || 0;
+        const hrs = (weekMap[wk]?.hours) || 0;
+        // eslint-disable-next-line no-console
+        console.groupCollapsed(`V${wn} (${wk}) — ${sessions.length} pass · effort=${effortData[i]} · timmar=${hoursData[i]} · klass=${classes[i]}`);
+        sessions.forEach((w) => {
+          // eslint-disable-next-line no-console
+          console.log({
+            id: w.id,
+            date: w.workout_date,
+            type: w.activity_type,
+            source: w.source,
+            durationMin: w.duration_minutes,
+            distanceKm: w.distance_km,
+            intensity: w.intensity,
+            avgHr: w.avg_hr,
+            rpe: w.perceived_exertion,
+            calcEffortRaw: calcWorkoutEffort(w),
+          });
+        });
+        if (sessions.length === 0) {
+          // eslint-disable-next-line no-console
+          console.log('— inga pass i denna vecka enligt myWorkouts —');
+        }
+        // eslint-disable-next-line no-console
+        console.log({ weeklyEffortRaw: rawEff, weeklyHoursRaw: hrs });
+        // eslint-disable-next-line no-console
+        console.groupEnd();
+      });
+      // eslint-disable-next-line no-console
+      console.groupEnd();
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[effort-chart diag] dump failed', e);
+    }
+  } else {
+    // eslint-disable-next-line no-console
+    console.info('[effort-chart] sätt window.__DIAG_EFFORT = true och kör loadTrends() för att dumpa V6–V9-detaljer i konsolen.');
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -6203,20 +6299,89 @@ const _POLARIZATION_BANDS = {
   hard: new Set(['Z4', 'Z5', 'Kvalitet']),
 };
 
-function _classifyWorkoutIntensity(w) {
+// Activities where avg_speed_kmh is a meaningful intensity proxy when HR
+// data is missing. Indoor / strength / Hyrox don't get pace-based
+// classification — they keep the existing "intensity tag → easy default"
+// fallback.
+const _PACE_PROXY_TYPES = new Set(['Löpning', 'Cykel', 'Vandring', 'Promenad']);
+
+// Speed-ratio bands used by _classifyByPace. r = avg_speed_kmh / vT, where
+// vT is the user's own threshold-speed proxy (95th percentile of recent
+// sustained sessions for that activity type). Cycling is given a slightly
+// wider window because terrain has a much bigger effect on average cycling
+// speed than on running pace.
+const _PACE_BANDS = {
+  default: { easy: 0.76, hard: 0.88 },
+  Cykel: { easy: 0.78, hard: 0.90 },
+};
+
+const _MIN_PACE_PROXY_SESSIONS = 3;
+const _PACE_PROXY_MIN_DURATION_MIN = 12;
+const _PACE_PROXY_LOOKBACK_DAYS = 84; // ~12 weeks
+const _PACE_PROXY_PERCENTILE = 0.95;
+
+// Auto-derive a per-user, per-activity-type threshold speed (km/h) from
+// recent history. Returns null when there isn't enough qualifying data —
+// callers must then skip the pace fallback for that activity type.
+function _estimateThresholdSpeedKmh(workouts, activityType) {
+  if (!Array.isArray(workouts)) return null;
+  const today = new Date();
+  const cutoffIso = isoDate(addDays(today, -_PACE_PROXY_LOOKBACK_DAYS));
+  const speeds = [];
+  for (const w of workouts) {
+    if (w.activity_type !== activityType) continue;
+    if (!w.workout_date || w.workout_date < cutoffIso) continue;
+    if (!(w.duration_minutes >= _PACE_PROXY_MIN_DURATION_MIN)) continue;
+    const sp = Number(w.avg_speed_kmh);
+    if (!(sp > 0)) continue;
+    speeds.push(sp);
+  }
+  if (speeds.length < _MIN_PACE_PROXY_SESSIONS) return null;
+  speeds.sort((a, b) => a - b);
+  const idx = Math.min(speeds.length - 1, Math.floor(_PACE_PROXY_PERCENTILE * (speeds.length - 1)));
+  return speeds[idx] || null;
+}
+
+// Classify a single workout into easy/mod/hard seconds using its average
+// speed compared to the per-user threshold proxy. Returns null when the
+// workout doesn't have usable speed data.
+function _classifyByPace(w, vT) {
+  const sp = Number(w.avg_speed_kmh);
+  const mins = w.duration_minutes || 0;
+  if (!(sp > 0) || !(vT > 0) || mins <= 0) return null;
+  const seconds = mins * 60;
+  const bands = _PACE_BANDS[w.activity_type] || _PACE_BANDS.default;
+  const r = sp / vT;
+  if (r < bands.easy) return { easy: seconds, mod: 0, hard: 0 };
+  if (r > bands.hard) return { easy: 0, mod: 0, hard: seconds };
+  return { easy: 0, mod: seconds, hard: 0 };
+}
+
+function _classifyWorkoutIntensity(w, ctx) {
   if (w.activity_type === 'Vila') return null;
   if (w.hr_zone_seconds && Array.isArray(w.hr_zone_seconds) && w.hr_zone_seconds.length >= 5) {
     const [z1, z2, z3, z4, z5] = w.hr_zone_seconds;
-    return { easy: (z1 || 0) + (z2 || 0), mod: z3 || 0, hard: (z4 || 0) + (z5 || 0) };
+    return { easy: (z1 || 0) + (z2 || 0), mod: z3 || 0, hard: (z4 || 0) + (z5 || 0), proxy: false };
   }
   const mins = w.duration_minutes || 0;
   if (mins <= 0) return null;
   const seconds = mins * 60;
-  if (w.intensity && _POLARIZATION_BANDS.easy.has(w.intensity)) return { easy: seconds, mod: 0, hard: 0 };
-  if (w.intensity && _POLARIZATION_BANDS.mod.has(w.intensity)) return { easy: 0, mod: seconds, hard: 0 };
-  if (w.intensity && _POLARIZATION_BANDS.hard.has(w.intensity)) return { easy: 0, mod: 0, hard: seconds };
+
+  // Pace-based proxy when HR is missing but we have a per-user threshold
+  // speed for this activity type. Slots in BEFORE the logged-intensity
+  // tag so users without HR data get something meaningful even if they
+  // didn't bother tagging the session manually.
+  const vT = ctx && ctx.vTByType ? ctx.vTByType[w.activity_type] : null;
+  if (vT && _PACE_PROXY_TYPES.has(w.activity_type)) {
+    const cls = _classifyByPace(w, vT);
+    if (cls) return { ...cls, proxy: true };
+  }
+
+  if (w.intensity && _POLARIZATION_BANDS.easy.has(w.intensity)) return { easy: seconds, mod: 0, hard: 0, proxy: false };
+  if (w.intensity && _POLARIZATION_BANDS.mod.has(w.intensity)) return { easy: 0, mod: seconds, hard: 0, proxy: false };
+  if (w.intensity && _POLARIZATION_BANDS.hard.has(w.intensity)) return { easy: 0, mod: 0, hard: seconds, proxy: false };
   // Default: treat unspecified as easy (common for low-intensity endurance).
-  return { easy: seconds, mod: 0, hard: 0 };
+  return { easy: seconds, mod: 0, hard: 0, proxy: false };
 }
 
 function renderPolarizationCard(workouts) {
@@ -6225,24 +6390,53 @@ function renderPolarizationCard(workouts) {
   const segHard = document.getElementById('pol-seg-hard');
   if (!legendEl || !segEasy || !segHard) return;
 
+  const warnBtn = document.getElementById('polarization-proxy-warn');
+  const proxyPopover = document.getElementById('polarization-proxy-popover');
+  const proxyShareLine = document.getElementById('polarization-proxy-share-line');
+
   const today = new Date();
   const cutoff = addDays(today, -28);
   const cutoffIso = isoDate(cutoff);
   const recent = workouts.filter((w) => w.workout_date && w.workout_date >= cutoffIso);
 
+  // Build per-activity threshold-speed proxies from the FULL history we
+  // have on hand (not just the last 28 days). A wider window gives a
+  // more stable "fastest sustained" reference and avoids the proxy
+  // collapsing during a deload week.
+  const vTByType = {};
+  for (const at of _PACE_PROXY_TYPES) {
+    const vT = _estimateThresholdSpeedKmh(workouts, at);
+    if (vT) vTByType[at] = vT;
+  }
+  const ctx = { vTByType };
+
   // Polarized model: only two buckets — easy (Z1-Z2) vs hard (Z3-Z5).
   // Z3 ("gråzonen") is folded into hard on purpose so time spent there
   // counts against the easy share, in line with the principle "Ingen
   // gråzon — antingen lugnt eller tydligt kvalitet".
-  let easy = 0, hard = 0, modSeconds = 0;
+  let easy = 0, hard = 0, modSeconds = 0, proxySeconds = 0;
   for (const w of recent) {
-    const cls = _classifyWorkoutIntensity(w);
+    const cls = _classifyWorkoutIntensity(w, ctx);
     if (!cls) continue;
     easy += cls.easy;
     hard += cls.hard + cls.mod;
     modSeconds += cls.mod;
+    if (cls.proxy) proxySeconds += cls.easy + cls.mod + cls.hard;
   }
   const total = easy + hard;
+  const proxyShare = total > 0 ? proxySeconds / total : 0;
+
+  // Toggle the "proxy data" warning icon + popover line. We hide the
+  // icon entirely below 5% so a single HR-less session in an otherwise
+  // HR-rich window doesn't shout at the user.
+  if (warnBtn) warnBtn.classList.toggle('hidden', proxyShare < 0.05);
+  if (proxyPopover && proxyShare < 0.05) proxyPopover.classList.add('hidden');
+  if (proxyShareLine) {
+    proxyShareLine.textContent = proxyShare > 0
+      ? `Cirka ${Math.round(proxyShare * 100)}% av tiden i mätaren är pace-uppskattad.`
+      : '';
+  }
+
   if (total === 0) {
     segEasy.style.width = '100%'; segHard.style.width = '0%';
     segEasy.style.background = 'var(--bg-card-hover)';
@@ -6296,6 +6490,13 @@ function renderPolarizationCard(workouts) {
     band = 'warn';
     title = `${Math.round(pMod)}% i Z3 ("gråzonen")`;
     sub = 'Styr mer mot Z2 (lugnt) eller Z4 (tydligt hårt) istället.';
+  } else if (proxyShare >= 0.5) {
+    // When most of the displayed time was classified via the pace
+    // proxy, soften the headline so users understand the mix is an
+    // estimate rather than measured HR-zone time.
+    band = 'neutral';
+    title = `Mix: ${Math.round(pEasy)}/${Math.round(pHard)} (uppskattad)`;
+    sub = 'Mest pace-baserad — koppla en pulsmätare för exakt mix.';
   } else {
     band = 'neutral';
     title = `Mix: ${Math.round(pEasy)}/${Math.round(pHard)}`;
@@ -7017,7 +7218,7 @@ function setGrpEffortMode(mode) {
 function renderGroupChart(allWorkouts, members) {
   const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
   const isGrpNorm = grpEffortMode === 'normalized';
-  const gUnit = isGrpNorm ? ' Effort' : 'h';
+  const gUnit = isGrpNorm ? ' belastning' : 'h';
   const weekData = {};
   allWorkouts.forEach(w => {
     const mon = mondayOfWeek(new Date(w.workout_date));
@@ -7046,7 +7247,7 @@ function renderGroupChart(allWorkouts, members) {
   });
 
   const titleEl = document.getElementById('grp-chart-title');
-  if (titleEl) titleEl.textContent = isGrpNorm ? 'Belastning per vecka (Effort)' : 'Timmar per vecka';
+  if (titleEl) titleEl.textContent = isGrpNorm ? 'Belastning per vecka' : 'Timmar per vecka';
 
   const datasets = members.map((m, i) => ({
     label: m.name.split(' ')[0],
@@ -7087,13 +7288,13 @@ function renderGroupChart(allWorkouts, members) {
   }
   const topMember = members.find((m) => m.id === topId);
   if (topMember && topVal > 0) {
-    const valStr = isGrpNorm ? `Effort ${topVal.toFixed(1)}` : `${topVal.toFixed(1)} h`;
+    const valStr = isGrpNorm ? `Belastning ${topVal.toFixed(1)}` : `${topVal.toFixed(1)} h`;
     _renderChartInsight('group-weekly-insight', {
       band: 'ok',
       title: `Mest aktiv: ${topMember.name.split(' ')[0]}`,
-      sub: `${valStr} denna vecka${isGrpNorm ? ' (skalad belastning)' : ''}.`,
+      sub: `${valStr} denna vecka${isGrpNorm ? ' (skalad)' : ''}.`,
       headline: isGrpNorm ? topVal.toFixed(1) : topVal.toFixed(1) + 'h',
-      headlineLabel: isGrpNorm ? 'EFFORT' : 'TIMMAR',
+      headlineLabel: isGrpNorm ? 'BELASTNING' : 'TIMMAR',
     });
   } else {
     _renderChartInsight('group-weekly-insight', {
@@ -7149,10 +7350,10 @@ function renderGroupEffortChart(allWorkouts, members) {
       interaction: { intersect: false, mode: 'index' },
       plugins: {
         legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, padding: 16 } },
-        tooltip: { callbacks: { label: c => `${c.dataset.label}: Effort ${c.parsed.y.toFixed(1)}` } }
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: Belastning ${c.parsed.y.toFixed(1)}` } }
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor, callback: v => v.toFixed(1) }, title: { display: true, text: 'Effort', color: textColor } },
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor, callback: v => v.toFixed(1) }, title: { display: true, text: 'Belastning', color: textColor } },
         x: { grid: { display: false }, ticks: { color: textColor } }
       }
     }
@@ -7160,7 +7361,7 @@ function renderGroupEffortChart(allWorkouts, members) {
 
   const legendEl = document.getElementById('group-effort-legend');
   if (legendEl) {
-    legendEl.innerHTML = `<div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> Effort = skalad belastning (rå score ÷ ${EFFORT_DISPLAY_DIVISOR}), samma som på Din progress.</div>`;
+    legendEl.innerHTML = `<div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> Belastning = skalad träningsbelastning (rå score ÷ ${EFFORT_DISPLAY_DIVISOR}), samma som på Din progress.</div>`;
   }
 
   _renderChartWeekNav('chart-group-effort', allWeekKeys.length, win, () => renderGroupEffortChart(allWorkouts, members));
@@ -7659,7 +7860,7 @@ function _kpiGridHtml(w) {
   }
   // Strength-style sessions: surface effort + RPE-like cues since pace/distance are noise.
   if (!isEndurance && w.effort != null) {
-    tiles.push({ label: 'Effort', value: (+w.effort).toFixed(1) });
+    tiles.push({ label: 'Belastning', value: (+w.effort).toFixed(1) });
   }
   return tiles.slice(0, 4).map(t =>
     `<div class="feed-kpi"><div class="feed-kpi-value">${escapeHTML(t.value)}</div><div class="feed-kpi-label">${escapeHTML(t.label)}</div></div>`
