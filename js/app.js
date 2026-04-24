@@ -2209,7 +2209,11 @@ async function renderWeeklySummary(weekWorkouts, plans, monday, profile) {
   const prevLongestMin = prevLongest?.duration_minutes || 0;
 
   let items = [];
-  items.push(`<div class="ws-stat"><span class="ws-val">${totalHours}h</span><span class="ws-label">total tid</span>${deltaHTML(totalMins, prevMins, 'h')}</div>`);
+  // BUGFIX: deltaHTML formats a numeric diff with a unit suffix without doing
+  // any unit conversion, so passing minutes with unit='h' rendered "-277h"
+  // when the actual delta was ~-4.6 h. Convert to hours BEFORE handing the
+  // value to deltaHTML so the rendered "+/-Xh" matches reality.
+  items.push(`<div class="ws-stat"><span class="ws-val">${totalHours}h</span><span class="ws-label">total tid</span>${deltaHTML(totalMins / 60, prevMins / 60, 'h')}</div>`);
   items.push(`<div class="ws-stat"><span class="ws-val">${sessionCount}</span><span class="ws-label">pass</span>${deltaHTML(sessionCount, prevSessions, '')}</div>`);
   items.push(`<div class="ws-stat"><span class="ws-val">${totalDist > 0 ? totalDist.toFixed(1) : '0'}km</span><span class="ws-label">distans</span>${deltaHTML(totalDist, prevDist, 'km')}</div>`);
   items.push(`<div class="ws-stat"><span class="ws-val">${longest ? longest.duration_minutes + "'" : '—'}</span><span class="ws-label">längsta</span>${deltaHTML(longestMin, prevLongestMin, "'")}</div>`);
@@ -4909,7 +4913,8 @@ function _computeRaceIndicators(workouts) {
   const recent = workouts.filter((w) => inWin(w, start28, now));
   const earlier = workouts.filter((w) => inWin(w, start56, start28));
 
-  // VDOT: qualifying runs only (HR ≥ 85 % HRmax). Average over the window.
+  // VDOT: qualifying runs only (HR >= VO2MAX_QUAL_HR_PCT of HRmax, currently
+  // 70 %). Average over the window.
   const maxHr = (currentProfile && Number(currentProfile.user_max_hr)) || EF_DEFAULT_MAX_HR;
   function avgVdot(arr) {
     const vs = arr
@@ -5176,7 +5181,7 @@ function renderRaceGoalCard(goal, workouts) {
         <div class="gp-pct">—</div>
         <div class="gp-text">
           <div class="gp-label">För lite data för sannolikhet</div>
-          <div class="gp-detail">Logga några löppass med puls (≥ 85 % HRmax) så projicerar vi racetiden.</div>
+          <div class="gp-detail">Logga några löppass med puls (≥ ${Math.round(VO2MAX_QUAL_HR_PCT * 100)} % HRmax) så projicerar vi racetiden.</div>
         </div>
       </div>`;
     }
@@ -6391,14 +6396,25 @@ function _vdotFromWorkout(w) {
   return vdot;
 }
 
-// Minimum % of HRmax for a run to count as a "quality" effort that gives a
-// meaningful VDOT estimate. Below this threshold the runner is so far below
-// race pace that Daniels' formula produces a misleadingly low number.
-const VO2MAX_QUAL_HR_PCT = 0.85;
+// Minimum % of HRmax for a run to count toward the VDOT trend. Lowered from
+// 0.85 -> 0.70 so we get a Garmin-like density of data points instead of
+// only 3 per ~year (85% gated nearly everything except tempo/threshold/
+// race). The 28-day rolling mean (VO2MAX_SMOOTH_DAYS) absorbs the per-pass
+// noise from easier sessions, so the trend stays meaningful even though
+// raw dots scatter wider. Anything below 70% is still likely a recovery
+// jog where Daniels' formula meaningfully underestimates fitness, so we
+// keep some floor rather than removing the gate entirely.
+const VO2MAX_QUAL_HR_PCT = 0.70;
 // Window length for the smoothed trend curve. Garmin uses a similar
 // long-running average; 28 days is long enough to dampen single-pass noise
 // without lagging the trend by months.
 const VO2MAX_SMOOTH_DAYS = 28;
+// Visible window for the VO2max chart. We clip both data and x-axis to
+// "last 12 weeks" so the chart matches the cadence of every other chart
+// in Din progress, instead of letting Chart.js auto-fit ~12 months of
+// sparse history (which produced a confusing V29 -> V49 -> V1 -> V13
+// wrap-around when the user only had a handful of qualifying passes).
+const VO2MAX_VISIBLE_DAYS = 84;
 const _MS_PER_DAY = 86400000;
 
 function _isVdotQualifyingPass(w, hrMax) {
@@ -6420,9 +6436,11 @@ function renderVo2maxChart(workouts) {
   const hrMax = profileMaxHr || EF_DEFAULT_MAX_HR;
   const usingFallbackHrMax = !profileMaxHr;
 
-  // Step 1: collect qualifying runs only — pass with avg_hr ≥ 85% of HRmax.
-  // Sub-quality jogs would drag VDOT down because Daniels' formula assumes
-  // race-effort pace, so they're filtered out here rather than bucketed.
+  // Step 1: collect qualifying runs only — pass with avg_hr above the
+  // VO2MAX_QUAL_HR_PCT * HRmax floor (currently 70 %, see constant for
+  // rationale). Recovery jogs below that floor would drag the raw dots
+  // down further than Daniels' formula intends, but the 28 d rolling
+  // mean smooths out individual noise so the trend stays useful.
   const points = [];
   for (const w of workouts) {
     if (!_isVdotQualifyingPass(w, hrMax)) continue;
@@ -6452,7 +6470,7 @@ function renderVo2maxChart(workouts) {
     if (usingFallbackHrMax) {
       msg = `Sätt din max-puls i profilen så vi kan filtrera kvalpass korrekt. Använder default ${EF_DEFAULT_MAX_HR} bpm tills vidare. Behöver pass med snittpuls ≥ ${Math.round(VO2MAX_QUAL_HR_PCT * 100)}% av HRmax.`;
     } else {
-      msg = `Inga löppass med snittpuls ≥ ${Math.round(VO2MAX_QUAL_HR_PCT * 100)}% av HRmax (${Math.round(hrMax * VO2MAX_QUAL_HR_PCT)} bpm). VDOT-skattning kräver tempo/tröskel/race — easy joggar hamnar för lågt på Daniels-skalan.`;
+      msg = `Inga löppass med snittpuls ≥ ${Math.round(VO2MAX_QUAL_HR_PCT * 100)}% av HRmax (${Math.round(hrMax * VO2MAX_QUAL_HR_PCT)} bpm). Logga ett pass med pulsdata så ritar vi trenden.`;
     }
     statusEl.textContent = msg;
     return;
@@ -6463,7 +6481,9 @@ function renderVo2maxChart(workouts) {
   // Step 2: per-pass 28-day rolling mean. We use a two-pointer sliding
   // window because points is already date-sorted; this keeps the smoothing
   // O(n) and means each smoothed value at date D averages every qualifying
-  // VDOT in [D − 28d, D].
+  // VDOT in [D − 28d, D]. Note we run this over the FULL history so that
+  // the leftmost dot in the visible 12 w window still has a real 28 d
+  // lookback behind it, even though we'll clip the display below.
   let lo = 0;
   let runningSum = 0;
   for (let i = 0; i < points.length; i++) {
@@ -6478,40 +6498,51 @@ function renderVo2maxChart(workouts) {
     points[i].windowCount = winSize;
   }
 
-  if (points.length === 1) {
-    subEl.textContent = `Senaste: VDOT ${points[0].y.toFixed(1)} · 1 kvalpass`;
-    statusEl.textContent = 'Behöver ≥ 2 kvalpass för att rita trend. Logga ett tempo/tröskelpass till.';
-    // Render a single dot without a trend line so the user still sees their
-    // one data point on the canvas.
-    _drawVo2maxChart(canvas, points, /* withTrend */ false);
+  // Step 2b: clip to the visible 12 w window AFTER smoothing so the chart
+  // matches the cadence of every other Din progress chart. Without this
+  // clip Chart.js auto-fitted ~12 months of sparse history, which produced
+  // the V29 -> V49 -> V1 -> V13 wrap-around the user reported.
+  const nowMs = Date.now();
+  const windowStartMs = nowMs - VO2MAX_VISIBLE_DAYS * _MS_PER_DAY;
+  const windowEndMs = nowMs;
+  const visiblePoints = points.filter((p) => p.x >= windowStartMs);
+
+  if (visiblePoints.length === 0) {
+    subEl.textContent = '';
+    statusEl.textContent = `Inga kvalpass de senaste ${Math.round(VO2MAX_VISIBLE_DAYS / 7)} veckorna. Logga ett löppass med puls så ritar vi trenden.`;
     return;
   }
 
-  _drawVo2maxChart(canvas, points, /* withTrend */ true);
+  if (visiblePoints.length === 1) {
+    subEl.textContent = `Senaste: VDOT ${visiblePoints[0].y.toFixed(1)} · 1 kvalpass`;
+    statusEl.textContent = 'Behöver ≥ 2 kvalpass i fönstret för att rita trend. Logga ett pass till.';
+    _drawVo2maxChart(canvas, visiblePoints, /* withTrend */ false, windowStartMs, windowEndMs);
+    return;
+  }
+
+  _drawVo2maxChart(canvas, visiblePoints, /* withTrend */ true, windowStartMs, windowEndMs);
 
   // Step 3: subtitle + Form upp/ner status copy. Both use the smoothed
   // value (not raw per-pass) so a single hot tempo pass doesn't flip the
   // narrative from "stabil" to "form upp" overnight.
-  const last = points[points.length - 1];
+  const last = visiblePoints[visiblePoints.length - 1];
   const latestSmoothed = last.smoothed;
-  const firstDate = new Date(points[0].x);
-  const lastDate = new Date(last.x);
-  const spanWeeks = Math.max(1, Math.round((last.x - points[0].x) / (7 * _MS_PER_DAY)) + 1);
-  subEl.textContent = `Senaste: VDOT ${latestSmoothed.toFixed(1)} (snittad ${VO2MAX_SMOOTH_DAYS}d) · ${points.length} kvalpass över ${spanWeeks} v`;
+  subEl.textContent = `Senaste: VDOT ${latestSmoothed.toFixed(1)} (snittad ${VO2MAX_SMOOTH_DAYS}d) · ${visiblePoints.length} kvalpass senaste ${Math.round(VO2MAX_VISIBLE_DAYS / 7)} v`;
 
   // Compare smoothed value now vs ~4 weeks earlier — pick the latest point
-  // whose date is ≤ (now − 28d). If we don't have 4 weeks of history yet,
-  // we fall back to the earliest available smoothed value.
+  // in the visible window whose date is <= (now - 28d). If we don't have
+  // 4 weeks of qualifying passes inside the window yet, fall back to a
+  // softer "build history" message.
   const fourWeeksAgoMs = last.x - 28 * _MS_PER_DAY;
   let priorIdx = -1;
-  for (let i = points.length - 2; i >= 0; i--) {
-    if (points[i].x <= fourWeeksAgoMs) { priorIdx = i; break; }
+  for (let i = visiblePoints.length - 2; i >= 0; i--) {
+    if (visiblePoints[i].x <= fourWeeksAgoMs) { priorIdx = i; break; }
   }
   if (priorIdx < 0) {
-    statusEl.textContent = `Bygg historik: behöver ~4 veckor med kvalpass för att jämföra trenden. Hittills snittad VDOT ${latestSmoothed.toFixed(1)} på ${points.length} pass.`;
+    statusEl.textContent = `Bygg historik: behöver ~4 veckor med kvalpass för att jämföra trenden. Hittills snittad VDOT ${latestSmoothed.toFixed(1)} på ${visiblePoints.length} pass.`;
     return;
   }
-  const priorSmoothed = points[priorIdx].smoothed;
+  const priorSmoothed = visiblePoints[priorIdx].smoothed;
   const delta = latestSmoothed - priorSmoothed;
   let band, msg;
   if (delta >= 0.8) {
@@ -6527,7 +6558,7 @@ function renderVo2maxChart(workouts) {
   statusEl.innerHTML = `<span class="pmc-badge pmc-badge--${band}"></span>${escapeHTML(msg)}`;
 }
 
-function _drawVo2maxChart(canvas, points, withTrend) {
+function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
   const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
   const yValues = points.map((p) => p.y);
   if (withTrend) {
@@ -6629,6 +6660,11 @@ function _drawVo2maxChart(canvas, points, withTrend) {
         },
         x: {
           type: 'time',
+          // Hard-pin the visible range so Chart.js can't auto-fit a year of
+          // sparse history and produce the V29 -> V49 -> V1 -> V13 wrap-
+          // around. Bounds come from renderVo2maxChart's 12 w window.
+          min: xMinMs,
+          max: xMaxMs,
           time: { unit: 'week', isoWeekday: 1 },
           grid: { display: false },
           ticks: {
