@@ -912,11 +912,18 @@ select option { background: #1a1a2e; color: var(--text); }
   .sr-drag-handle { opacity: 0.7; width: 32px; height: 32px; }
 }
 
-/* ── Plan / Actual zones inside each day card ── */
+/* ── Plan / Actual zones inside each day card ──
+ * Side-by-side: 3/4 plan + 1/4 actual on desktop, with a slim divider
+ * between them. When a day has no actuals we collapse the right column
+ * (sr-actual-zone--empty) so the plan can use the full row width — that's
+ * the common case for upcoming days and avoids leaving an awkward empty
+ * card. On narrow screens we stack vertically so the 1/4 column doesn't
+ * get squeezed unreadable. */
 .sr-zones {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 3fr 1fr;
+  gap: 12px;
+  align-items: start;
   width: 100%;
 }
 .sr-plan-zone,
@@ -925,6 +932,26 @@ select option { background: #1a1a2e; color: var(--text); }
   flex-direction: column;
   gap: 6px;
   min-height: 40px;
+}
+.sr-actual-zone {
+  border-left: 1px solid var(--border, rgba(255,255,255,0.08));
+  padding-left: 12px;
+}
+.sr-actual-zone--empty { display: none; }
+.sr-zones:has(.sr-actual-zone--empty) { grid-template-columns: 1fr; }
+
+@media (max-width: 600px) {
+  .sr-zones,
+  .sr-zones:has(.sr-actual-zone--empty) {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .sr-actual-zone {
+    border-left: none;
+    border-top: 1px solid var(--border, rgba(255,255,255,0.08));
+    padding-left: 0;
+    padding-top: 8px;
+  }
 }
 .sr-zone-label {
   font-size: 0.6rem;

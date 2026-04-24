@@ -1444,17 +1444,100 @@ async function fetchCommentsBulk(workoutIds) {
   return data || [];
 }
 
-async function toggleReaction(workoutId, reactionType) {
-  const existing = await fetchReactions(workoutId);
-  const myReaction = existing.find(r => r.profile_id === currentProfile.id);
+// PERF: Optimistic-like infrastructure.
+// _myReactionMap caches my current reaction per workout so click handlers can
+// compute the next state synchronously (no SELECT needed). It's populated by
+// every feed/modal renderer that knows my state, and mutated on optimistic
+// click. Used both to skip the read in toggleReaction and as the source of
+// truth for _applyOptimisticLike's old/new state diff.
+window._myReactionMap = window._myReactionMap || new Map();
 
-  if (myReaction && myReaction.reaction === reactionType) {
-    await sb.from('workout_reactions').delete().eq('id', myReaction.id);
-  } else if (myReaction) {
-    await sb.from('workout_reactions').update({ reaction: reactionType }).eq('id', myReaction.id);
-  } else {
-    await sb.from('workout_reactions').insert({ workout_id: workoutId, profile_id: currentProfile.id, reaction: reactionType });
+function _setMyReactionFromList(workoutId, reactions) {
+  if (!currentProfile || !workoutId || !reactions) return;
+  const mine = reactions.find(r => r.workout_id === workoutId && r.profile_id === currentProfile.id);
+  window._myReactionMap.set(workoutId, mine ? mine.reaction : null);
+}
+
+function _bulkSyncMyReactions(reactions) {
+  if (!currentProfile || !Array.isArray(reactions)) return;
+  for (const r of reactions) {
+    if (r.profile_id !== currentProfile.id) continue;
+    window._myReactionMap.set(r.workout_id, r.reaction);
   }
+}
+
+// _applyOptimisticLike toggles the active class, SVG fill, and count text on
+// every visible reaction button matching this workout id (group + social +
+// personal recent + open modal), without rebuilding any feed. Returns the
+// previous + new state so the caller can roll back on a DB error.
+function _applyOptimisticLike(workoutId, type) {
+  const prev = window._myReactionMap.has(workoutId)
+    ? window._myReactionMap.get(workoutId)
+    : null;
+  // Same button pressed twice → clear; otherwise switch/set.
+  const next = (prev === type) ? null : type;
+  window._myReactionMap.set(workoutId, next);
+
+  const safeId = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(workoutId) : workoutId;
+  const containers = document.querySelectorAll(`[data-workout-id="${safeId}"]`);
+
+  containers.forEach(scope => {
+    ['like', 'dislike'].forEach(t => {
+      const btn = scope.querySelector(`[data-react-btn="${t}"]`);
+      if (!btn) return;
+      const isActiveNow = (next === t);
+      btn.classList.toggle('active', isActiveNow);
+
+      const svg = btn.querySelector('svg');
+      if (svg) svg.setAttribute('fill', isActiveNow ? 'currentColor' : 'none');
+
+      const countEl = btn.querySelector('[data-react-count]');
+      if (countEl) {
+        const cur = parseInt(countEl.getAttribute('data-count') || '0', 10) || 0;
+        let delta = 0;
+        if (prev === t && next !== t) delta -= 1;
+        if (prev !== t && next === t) delta += 1;
+        const nextCount = Math.max(0, cur + delta);
+        countEl.setAttribute('data-count', String(nextCount));
+        countEl.textContent = nextCount > 0 ? String(nextCount) : '';
+      }
+    });
+  });
+
+  return { prev, next };
+}
+
+// toggleReaction now optionally accepts the previous reaction so the click
+// handler can skip the round-trip SELECT. When omitted (legacy callers) we
+// still fetch to stay safe. Always returns the new reaction state.
+async function toggleReaction(workoutId, reactionType, knownPrev) {
+  let prev = knownPrev;
+  let prevId = null;
+  if (prev === undefined) {
+    const existing = await fetchReactions(workoutId);
+    const mine = existing.find(r => r.profile_id === currentProfile.id);
+    prev = mine ? mine.reaction : null;
+    prevId = mine ? mine.id : null;
+  }
+  const next = (prev === reactionType) ? null : reactionType;
+
+  if (prev && next === null) {
+    if (prevId) {
+      await sb.from('workout_reactions').delete().eq('id', prevId);
+    } else {
+      await sb.from('workout_reactions').delete().eq('workout_id', workoutId).eq('profile_id', currentProfile.id);
+    }
+  } else if (prev && next && prev !== next) {
+    if (prevId) {
+      await sb.from('workout_reactions').update({ reaction: next }).eq('id', prevId);
+    } else {
+      await sb.from('workout_reactions').update({ reaction: next }).eq('workout_id', workoutId).eq('profile_id', currentProfile.id);
+    }
+  } else if (!prev && next) {
+    await sb.from('workout_reactions').insert({ workout_id: workoutId, profile_id: currentProfile.id, reaction: next });
+  }
+  window._myReactionMap.set(workoutId, next);
+  return next;
 }
 
 async function addComment(workoutId, text) {
@@ -2026,7 +2109,7 @@ function showMoreRecent() {
       ownerColor,
       ownerAvatar,
       cardClickAttr: '',
-      cardDataAttrs: `data-recent-wid="${escapeHTML(w.id)}"`,
+      cardDataAttrs: `data-recent-wid="${escapeHTML(w.id)}" data-workout-id="${escapeHTML(w.id)}"`,
     });
   }).join('');
   _recentShown += batch.length;
@@ -2391,6 +2474,11 @@ async function loadModalSocial(workoutId, isOwn) {
     const likeTooltip = likeNames.length ? likeNames.join(', ') : '';
     const dislikeTooltip = dislikeNames.length ? dislikeNames.join(', ') : '';
 
+    // Tag the reactions container with the workout id so the optimistic
+    // helper can find + toggle these buttons via the shared selector
+    // (same as feed cards). data-react-btn + data-react-count make the
+    // markup match the feed-card structure.
+    reactEl.setAttribute('data-workout-id', workoutId);
     if (isOwn) {
       const summary = [];
       if (likes.length) summary.push(`👍 ${likes.length}`);
@@ -2399,16 +2487,23 @@ async function loadModalSocial(workoutId, isOwn) {
         ? `<div class="reaction-bar"><span class="reaction-summary" title="${likeTooltip}">${summary.join('  ')}</span></div>`
         : '';
     } else {
+      const likeActive = myReaction?.reaction === 'like';
+      const dislikeActive = myReaction?.reaction === 'dislike';
       reactEl.innerHTML = `
         <div class="reaction-bar">
-          <button class="react-btn${myReaction?.reaction === 'like' ? ' active' : ''}" onclick="handleReaction('${workoutId}', 'like')" title="${likeTooltip}">
-            <span class="react-icon">👍</span><span class="react-count">${likes.length || ''}</span>
+          <button class="react-btn${likeActive ? ' active' : ''}" data-react-btn="like" onclick="handleReaction('${workoutId}', 'like')" title="${likeTooltip}">
+            <span class="react-icon">👍</span><span class="react-count" data-react-count data-count="${likes.length}">${likes.length || ''}</span>
           </button>
-          <button class="react-btn${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="handleReaction('${workoutId}', 'dislike')" title="${dislikeTooltip}">
-            <span class="react-icon">👎</span><span class="react-count">${dislikes.length || ''}</span>
+          <button class="react-btn${dislikeActive ? ' active' : ''}" data-react-btn="dislike" onclick="handleReaction('${workoutId}', 'dislike')" title="${dislikeTooltip}">
+            <span class="react-icon">👎</span><span class="react-count" data-react-count data-count="${dislikes.length}">${dislikes.length || ''}</span>
           </button>
         </div>`;
     }
+  }
+  // Seed _myReactionMap so the next click has accurate "previous state"
+  // even if the user opened the modal directly (no feed render preceded it).
+  if (currentProfile) {
+    window._myReactionMap.set(workoutId, myReaction ? myReaction.reaction : null);
   }
 
   const commEl = document.getElementById('wm-comments');
@@ -2490,10 +2585,33 @@ function timeAgo(isoStr) {
   return days + 'd';
 }
 
-async function handleReaction(workoutId, type) {
-  await toggleReaction(workoutId, type);
-  await loadModalSocial(workoutId);
-  if (_feedReactionsCache) refreshFeedReactions();
+function handleReaction(workoutId, type) {
+  // Modal click → optimistic toggle. Because the modal's reactions div was
+  // tagged with data-workout-id (loadModalSocial), and every visible feed
+  // card carries the same attribute, _applyOptimisticLike updates the
+  // modal AND every feed in one synchronous pass. The DB write fires in
+  // the background; on error we roll back + toast.
+  const { prev, next } = _applyOptimisticLike(workoutId, type);
+  toggleReaction(workoutId, type, prev)
+    .then(() => {
+      // Mirror the change into the group-feed reactions cache so that
+      // pagination (showMoreFeed) reflects the new state without a refetch.
+      if (_feedReactionsCache && Array.isArray(_feedReactionsCache.reactions) && currentProfile) {
+        const arr = _feedReactionsCache.reactions;
+        for (let i = arr.length - 1; i >= 0; i--) {
+          const r = arr[i];
+          if (r.workout_id === workoutId && r.profile_id === currentProfile.id) arr.splice(i, 1);
+        }
+        if (next) {
+          arr.push({ workout_id: workoutId, profile_id: currentProfile.id, reaction: next });
+        }
+      }
+    })
+    .catch(err => {
+      console.warn('toggleReaction failed, rolling back', err);
+      _applyOptimisticLike(workoutId, prev || type);
+      if (typeof showToast === 'function') showToast('Kunde inte spara reaktion');
+    });
 }
 
 async function handleAddComment(workoutId) {
@@ -3679,10 +3797,10 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
           <div class="sr-plan-zone" data-day-of-week="${i}">
             ${planCardsHtml}
           </div>
-          ${actualCardsHtml ? `<div class="sr-actual-zone">
+          <div class="sr-actual-zone${actualCardsHtml ? '' : ' sr-actual-zone--empty'}">
             <div class="sr-zone-label">Gjort</div>
             ${actualCardsHtml}
-          </div>` : ''}
+          </div>
           ${inviteBadge ? `<div class="sr-invite-row">${inviteBadge}</div>` : ''}
         </div>
       </div>
@@ -5237,11 +5355,6 @@ function renderSeasonTotals(workouts) {
   const sumKm = (arr) => arr.reduce((s, w) => s + (w.distance_km || 0), 0);
   const sumElev = (arr) => arr.reduce((s, w) => s + (w.elevation_gain_m || 0), 0);
 
-  const totalSessions = workouts.length;
-  const totalHours = (workouts.reduce((s, w) => s + (w.duration_minutes || 0), 0) / 60).toFixed(1);
-  const totalDist = workouts.reduce((s, w) => s + (w.distance_km || 0), 0);
-  const totalElev = sumElev(workouts);
-
   const ytdSessionsNow = ytdNow.length;
   const ytdSessionsPrev = ytdPrev.length;
   const ytdHoursNow = sumHours(ytdNow);
@@ -5251,37 +5364,48 @@ function renderSeasonTotals(workouts) {
   const ytdElevNow = sumElev(ytdNow);
   const ytdElevPrev = sumElev(ytdPrev);
 
-  // Format the YoY delta as a small pill under each stat. We hide the pill
-  // entirely if there's no history a year back (`prev === 0`) instead of
-  // showing a misleading "+∞%" or a noisy "—".
+  // Format the YoY delta as a small pill under each stat. We compare YTD
+  // up to today vs the same calendar window last year so the pill is
+  // apples-to-apples (not "this year so far vs full last year"). Hide the
+  // pill entirely if there's no history a year back to avoid misleading
+  // "+∞%" or noisy "—" labels.
   function yoyPill(cur, prev) {
     if (!prev || prev === 0) return '';
     const pct = Math.round(((cur - prev) / prev) * 100);
     const sign = pct > 0 ? '+' : '';
     const cls = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
-    return `<span class="season-stat-yoy ${cls}">${sign}${pct}% vs ${curYear - 1}</span>`;
+    return `<span class="season-stat-yoy ${cls}" title="Hittills i år vs samma datum ${curYear - 1}">${sign}${pct}% vs samma datum ${curYear - 1}</span>`;
+  }
+
+  // Update the card title to make the YTD scope explicit. Previously the
+  // big numbers showed lifetime totals while the pill compared YTD — now
+  // both numbers and pills are YTD, so the heading reflects that.
+  const titleEl = document.querySelector('#season-totals-card .card-title, #season-totals-card h3, [data-season-totals-title]');
+  if (titleEl && !titleEl.dataset.ytdLabeled) {
+    titleEl.textContent = `Säsongstotaler (${curYear})`;
+    titleEl.dataset.ytdLabeled = '1';
   }
 
   const summaryEl = document.getElementById('season-totals-summary');
   if (summaryEl) {
     summaryEl.innerHTML = `<div class="season-totals-grid">
       <div class="season-stat">
-        <span class="season-stat-val">${totalSessions}</span>
+        <span class="season-stat-val">${ytdSessionsNow}</span>
         <span class="season-stat-label">Pass</span>
         ${yoyPill(ytdSessionsNow, ytdSessionsPrev)}
       </div>
       <div class="season-stat">
-        <span class="season-stat-val">${totalHours}h</span>
+        <span class="season-stat-val">${ytdHoursNow.toFixed(1)}h</span>
         <span class="season-stat-label">Timmar</span>
         ${yoyPill(ytdHoursNow, ytdHoursPrev)}
       </div>
       <div class="season-stat">
-        <span class="season-stat-val">${totalDist.toFixed(0)}km</span>
+        <span class="season-stat-val">${ytdKmNow.toFixed(0)}km</span>
         <span class="season-stat-label">Distans</span>
         ${yoyPill(ytdKmNow, ytdKmPrev)}
       </div>
       <div class="season-stat">
-        <span class="season-stat-val">${Math.round(totalElev).toLocaleString('sv-SE')}m</span>
+        <span class="season-stat-val">${Math.round(ytdElevNow).toLocaleString('sv-SE')}m</span>
         <span class="season-stat-label">Höjdmeter</span>
         ${yoyPill(ytdElevNow, ytdElevPrev)}
       </div>
@@ -7315,21 +7439,31 @@ function renderFeedItems(items, members, reactions, comments) {
       lastCommentHtml = `<div class="feed-last-comment"><span class="feed-comment-author">${escapeHTML(commenterName)}</span> ${escapeHTML(truncated)}</div>`;
     }
 
+    const likeActive = myReaction?.reaction === 'like';
+    const dislikeActive = myReaction?.reaction === 'dislike';
     const actionsHtml = `<div class="feed-reactions" onclick="event.stopPropagation()">
-      <button class="react-btn-sm${myReaction?.reaction === 'like' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','like')" aria-label="Gilla">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg> ${likes.length || ''}
+      <button class="react-btn-sm${likeActive ? ' active' : ''}" data-react-btn="like" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','like')" aria-label="Gilla">
+        <svg viewBox="0 0 24 24" fill="${likeActive ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+        <span class="react-count" data-react-count data-count="${likes.length}">${likes.length || ''}</span>
       </button>
-      <button class="react-btn-sm${myReaction?.reaction === 'dislike' ? ' active' : ''}" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','dislike')" aria-label="Ogilla">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg> ${dislikes.length || ''}
+      <button class="react-btn-sm${dislikeActive ? ' active' : ''}" data-react-btn="dislike" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','dislike')" aria-label="Ogilla">
+        <svg viewBox="0 0 24 24" fill="${dislikeActive ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
+        <span class="react-count" data-react-count data-count="${dislikes.length}">${dislikes.length || ''}</span>
       </button>
       <span class="feed-comment-count" aria-label="Kommentarer">💬 ${commentCount || ''}</span>
     </div>`;
+
+    // Seed _myReactionMap from this render so optimistic clicks have a
+    // truthful "previous state" without needing a fresh fetch.
+    if (myReaction) window._myReactionMap.set(w.id, myReaction.reaction);
+    else if (!window._myReactionMap.has(w.id)) window._myReactionMap.set(w.id, null);
 
     return _buildFeedCardHtml(w, {
       ownerName: member.name || '?',
       ownerColor: color,
       ownerAvatar: (member.name || '?')[0].toUpperCase(),
       cardClickAttr: `onclick="openFeedWorkout(${globalIdx})"`,
+      cardDataAttrs: `data-workout-id="${escapeHTML(w.id)}"`,
       actionsHtml,
       lastCommentHtml,
     });
@@ -7345,11 +7479,32 @@ function openFeedWorkout(idx) {
   if (w) openWorkoutModal(w);
 }
 
-async function handleFeedReaction(workoutId, type) {
-  await toggleReaction(workoutId, type);
-  if (_cachedGroupWorkouts.length && _cachedGroupMembers.length) {
-    await renderGroupFeed(_cachedGroupWorkouts, _cachedGroupMembers);
-  }
+function handleFeedReaction(workoutId, type) {
+  // Optimistic: update DOM on the same frame as the click. We compute prev
+  // from the in-memory map (seeded by the last render) and pass it to
+  // toggleReaction so the DB write skips the SELECT.
+  const { prev, next } = _applyOptimisticLike(workoutId, type);
+  toggleReaction(workoutId, type, prev)
+    .then(() => {
+      // Mutate the cached reaction list in place so a subsequent showMoreFeed
+      // (which appends rows from the cache) reflects the new state without a
+      // refetch. Avoids the visible DOM rebuild that used to flash here.
+      if (_feedReactionsCache && Array.isArray(_feedReactionsCache.reactions) && currentProfile) {
+        const arr = _feedReactionsCache.reactions;
+        for (let i = arr.length - 1; i >= 0; i--) {
+          const r = arr[i];
+          if (r.workout_id === workoutId && r.profile_id === currentProfile.id) arr.splice(i, 1);
+        }
+        if (next) {
+          arr.push({ workout_id: workoutId, profile_id: currentProfile.id, reaction: next });
+        }
+      }
+    })
+    .catch(err => {
+      console.warn('toggleReaction failed, rolling back', err);
+      _applyOptimisticLike(workoutId, prev || type);
+      if (typeof showToast === 'function') showToast('Kunde inte spara reaktion');
+    });
 }
 
 async function refreshFeedReactions() {
@@ -10668,13 +10823,13 @@ async function renderSocialFeed(append) {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
           ${wDislikes.length > 0 ? wDislikes.length : ''}
         </span>`
-      : `<button class="react-btn-sm${likeActive}" onclick="event.stopPropagation();toggleSocialReaction('${escapeHTML(w.id)}','like')" title="Bra pass">
+      : `<button class="react-btn-sm${likeActive}" data-react-btn="like" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','like')" title="Bra pass">
           <svg viewBox="0 0 24 24" fill="${myReaction?.reaction === 'like' ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
-          ${wLikes.length > 0 ? wLikes.length : ''}
+          <span class="react-count" data-react-count data-count="${wLikes.length}">${wLikes.length > 0 ? wLikes.length : ''}</span>
         </button>
-        <button class="react-btn-sm${dislikeActive}" onclick="event.stopPropagation();toggleSocialReaction('${escapeHTML(w.id)}','dislike')" title="Hmm \u2026">
+        <button class="react-btn-sm${dislikeActive}" data-react-btn="dislike" onclick="event.stopPropagation();handleFeedReaction('${escapeHTML(w.id)}','dislike')" title="Hmm \u2026">
           <svg viewBox="0 0 24 24" fill="${myReaction?.reaction === 'dislike' ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.5" width="14" height="14"><path d="M10 15V19a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>
-          ${wDislikes.length > 0 ? wDislikes.length : ''}
+          <span class="react-count" data-react-count data-count="${wDislikes.length}">${wDislikes.length > 0 ? wDislikes.length : ''}</span>
         </button>`;
 
     const actionsHtml = `<div class="feed-reactions" onclick="event.stopPropagation()">
@@ -10741,13 +10896,10 @@ async function loadMoreSocialFeed() {
   await renderSocialFeed(true);
 }
 
-async function toggleSocialReaction(workoutId, reactionType) {
-  try {
-    await toggleReaction(workoutId, reactionType);
-    await refreshSocialFeedReactionButtons(workoutId);
-  } catch (e) {
-    console.error('Toggle reaction error:', e);
-  }
+// Kept as a thin wrapper so legacy callers still work; routes through the
+// optimistic handler so the like is reflected on the same frame.
+function toggleSocialReaction(workoutId, reactionType) {
+  handleFeedReaction(workoutId, reactionType);
 }
 
 async function refreshSocialFeedReactionButtons(workoutId) {
@@ -12307,7 +12459,6 @@ function _coachShowResumePrompt() {
         </div>
       </div>
       ${preview ? `<blockquote class="coach-resume-preview">${escapeHTML(preview)}</blockquote>` : ''}
-      <p class="coach-resume-intro">Vill du fortsätta där ni slutade, eller börja en ny avstämning med din coach?</p>
       <div class="coach-resume-actions">
         <button type="button" class="btn btn-ghost" id="coach-resume-new">Starta ny avstämning</button>
         <button type="button" class="btn btn-primary" id="coach-resume-continue">Fortsätt dialogen</button>
