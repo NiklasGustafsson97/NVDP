@@ -17,3 +17,4 @@
 20260421_search_profiles_by_name.sql
 20260422_user_goals.sql
 20260423_fix_rls_periods_and_period_plans.sql
+20260424_strava_deep_sync_cursor.sql
