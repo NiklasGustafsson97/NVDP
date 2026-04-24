@@ -2067,14 +2067,22 @@ async function _renderDashDayCard(dateStr) {
 
   const plan = planWorkout || legacyPlan;
   const isPast = date < now && !isToday;
+  const dayPhase = useAiPlan ? _getPhaseForDate(dateStr) : null;
+  const isAssessmentWeek = dayPhase === 'assessment';
 
   let html = `<div class="ddc-header"><span class="ddc-day-label">${dayLabel}</span>`;
 
-  if (plan && !plan.is_rest) {
-    const phase = useAiPlan ? _getPhaseForDate(dateStr) : null;
-    if (phase) html += `<span class="ddc-phase">${PHASE_LABELS[phase] || phase}</span>`;
+  if (plan && !plan.is_rest && dayPhase) {
+    html += `<span class="ddc-phase phase-${dayPhase}">${PHASE_LABELS[dayPhase] || dayPhase}</span>`;
   }
   html += '</div>';
+
+  if (isAssessmentWeek) {
+    html += `<div class="assessment-banner ddc-assessment-banner">
+      <span class="ab-icon" aria-hidden="true">⚑</span>
+      <span class="ab-text"><strong>Bedömningsvecka.</strong> Vi kalibrerar puls och tempo — kör testpassen så friska som möjligt och logga puls/tempo.</span>
+    </div>`;
+  }
 
   if (plan && plan.is_rest) {
     html += `<div class="ddc-rest">
@@ -2087,10 +2095,12 @@ async function _renderDashDayCard(dateStr) {
     const zone = (useAiPlan && plan.intensity_zone) ? plan.intensity_zone : null;
     const actType = plan.activity_type || '';
 
-    html += '<div class="ddc-plan">';
+    const isAssessmentWorkout = isAssessmentWeek && typeof label === 'string' && /^Bedömning/i.test(label);
+    html += `<div class="ddc-plan${isAssessmentWorkout ? ' ddc-plan--assessment' : ''}">`;
     html += `<div class="ddc-plan-title">`;
     if (actType) html += `<span class="ddc-activity-icon">${activityEmoji(actType)}</span>`;
     html += `<span>${label}</span>`;
+    if (isAssessmentWorkout) html += `<span class="day-badge--test">TEST</span>`;
     if (zone) html += `<span class="zone-badge zone-${zone.toLowerCase()}">${zone}</span>`;
     html += '</div>';
 
@@ -3855,6 +3865,8 @@ function _renderPlanCard(planWo, opts) {
         ? ` onclick="openPlanModal('${dayStr}', ${JSON.stringify({ label: planWo.label, description: planWo.description, is_rest: planWo.is_rest, day_of_week: planWo.day_of_week, plan_workout_id: planWo.id }).replace(/"/g, '&quot;')}, '${DAY_NAMES_FULL[dayOfWeek]}')" style="cursor:pointer;"`
         : '');
 
+  const isAssessmentWorkout = !planWo.is_rest && typeof planWo.label === 'string' && /^Bedömning/i.test(planWo.label);
+
   let body;
   if (planWo.is_rest) {
     body = '<div class="sr-plan-label sr-rest-label">Vila</div>';
@@ -3862,6 +3874,7 @@ function _renderPlanCard(planWo, opts) {
     const zoneBadge = planWo.intensity_zone
       ? ` <span class="zone-badge zone-${planWo.intensity_zone.toLowerCase()}">${planWo.intensity_zone}</span>`
       : '';
+    const testBadge = isAssessmentWorkout ? ` <span class="day-badge--test">TEST</span>` : '';
     const lbl = planWo.label || planWo.activity_type || 'Pass';
     const desc = stripProgressionText(planWo.description || '');
     const estMin = estimateDurationFromDescription(planWo.description, planWo.target_duration_minutes);
@@ -3869,7 +3882,7 @@ function _renderPlanCard(planWo, opts) {
     const meta = (estMin > 0 || planWo.target_distance_km)
       ? `<span class="sr-target">${durStr}${planWo.target_distance_km ? (durStr ? ' · ' : '') + planWo.target_distance_km + ' km' : ''}</span>`
       : '';
-    body = `<div class="sr-plan-label">${lbl}${zoneBadge} ${meta}</div>`;
+    body = `<div class="sr-plan-label">${lbl}${zoneBadge}${testBadge} ${meta}</div>`;
     if (desc) body += `<div class="sr-plan-desc">${desc}</div>`;
   }
 
@@ -3877,7 +3890,7 @@ function _renderPlanCard(planWo, opts) {
     ? ` data-day-of-week="${dayOfWeek}" data-plan-workout-id="${planWo.id}" data-sort-order="${planWo.sort_order ?? 0}"`
     : ` data-day-of-week="${dayOfWeek}" data-sort-order="${planWo.sort_order ?? 0}"`;
 
-  return `<div class="sr-pass-card sr-pass-plan${canDrag ? ' sr-draggable' : ''}${planWo.is_rest ? ' sr-pass-rest' : ''}"${dndAttrs}${clickAttr}>
+  return `<div class="sr-pass-card sr-pass-plan${canDrag ? ' sr-draggable' : ''}${planWo.is_rest ? ' sr-pass-rest' : ''}${isAssessmentWorkout ? ' sr-pass-assessment' : ''}"${dndAttrs}${clickAttr}>
     <div class="sr-pass-body">${body}${statusPill || ''}</div>
     ${dragHandle}
   </div>`;
@@ -3888,8 +3901,15 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
   const container = document.getElementById('schema-content');
   const todayStr = isoDate(new Date());
   const profileId = profile?.id || currentProfile?.id;
+  const isAssessmentWeek = phase === 'assessment';
 
   let html = '';
+  if (isAssessmentWeek) {
+    html += `<div class="assessment-banner schema-assessment-banner">
+      <span class="ab-icon" aria-hidden="true">⚑</span>
+      <span class="ab-text"><strong>Bedömningsvecka.</strong> Tre testpass kalibrerar puls, tröskel och 5&nbsp;km — resterande veckor anpassas efter resultaten.</span>
+    </div>`;
+  }
   for (let i = 0; i < 7; i++) {
     const dayDate = addDays(monday, i);
     const dayStr = isoDate(dayDate);
@@ -4862,43 +4882,57 @@ async function fetchUserGoals(profileId) {
   }
 }
 
-// Keep a 1:1 plan_derived_race goal in sync with the current active plan.
+// Keep a 1:1 plan-derived goal in sync with the current active plan.
 // Runs best-effort: failures are logged but don't block goals render.
-async function _ensurePlanDerivedRaceGoal(plan, profileId) {
+//
+// Race plans get goal_type='plan_derived_race' (with target_value=sec on
+// the race time, target_distance_km set, target_date = race date). Every
+// other plan (fitness / weight_loss / sport_specific / custom) gets
+// goal_type='plan_derived' with sentinel target values (the frontend
+// ignores them — milestones + capacity profile drive the UI). The new
+// generate-plan/confirm_plan path already creates these rows; this
+// helper fills the gap for legacy plans created before that change
+// shipped.
+async function _ensurePlanDerivedGoal(plan, profileId) {
   if (!plan || !profileId) return;
-  if (plan.goal_type !== 'race') return;
-  if (!plan.goal_date) return;
+  const isRace = plan.goal_type === 'race';
+  if (isRace && !plan.goal_date) return; // race plans need a target date
+
   try {
+    const goalType = isRace ? 'plan_derived_race' : 'plan_derived';
     const existing = _userGoals.find(
-      (g) => g.goal_type === 'plan_derived_race' && g.plan_id === plan.id,
+      (g) => (g.goal_type === goalType || g.goal_type === 'plan_derived' || g.goal_type === 'plan_derived_race')
+        && g.plan_id === plan.id,
     );
-    const title = plan.goal_text ? plan.goal_text : 'Racemål från plan';
-    // TWEAK-3: pull the race distance off the plan's constraints JSON when the
-    // wizard captured one. Falls back to whatever parseGoalText derived from
-    // free text on older plans.
+    const title = plan.goal_text || plan.name || (isRace ? 'Racemål från plan' : 'Mål från plan');
     const raceDistanceKm = (() => {
       const v = plan?.constraints?.race_distance_km;
       const n = typeof v === 'number' ? v : parseFloat(v);
       return (Number.isFinite(n) && n > 0) ? n : null;
     })();
+
     if (!existing) {
       const payload = {
         profile_id: profileId,
         plan_id: plan.id,
-        goal_type: 'plan_derived_race',
+        goal_type: goalType,
         title,
-        target_value: 0,
-        target_unit: 'race',
-        target_date: plan.goal_date,
+        target_value: isRace ? 0 : 1,
+        target_unit: isRace ? 'race' : 'plan',
+        target_date: isRace ? plan.goal_date : (plan.end_date || null),
         baseline_date: plan.start_date || null,
+        notes: plan.goal_text || null,
         ...(raceDistanceKm ? { target_distance_km: raceDistanceKm } : {}),
       };
       const { data, error } = await sb.from('user_goals').insert(payload).select().single();
       if (!error && data) _userGoals.unshift(data);
+      else if (error) console.warn('plan-derived goal insert failed:', error);
     } else {
       const patch = {};
-      if (existing.target_date !== plan.goal_date) patch.target_date = plan.goal_date;
+      if (existing.goal_type !== goalType) patch.goal_type = goalType;
       if (existing.title !== title) patch.title = title;
+      const targetDate = isRace ? plan.goal_date : (plan.end_date || null);
+      if (existing.target_date !== targetDate) patch.target_date = targetDate;
       if (raceDistanceKm && existing.target_distance_km !== raceDistanceKm) {
         patch.target_distance_km = raceDistanceKm;
       }
@@ -4908,13 +4942,39 @@ async function _ensurePlanDerivedRaceGoal(plan, profileId) {
           .eq('id', existing.id)
           .select()
           .single();
-        if (!error && data) {
-          Object.assign(existing, data);
-        }
+        if (!error && data) Object.assign(existing, data);
       }
     }
   } catch (e) {
-    console.warn('Plan-derived race goal sync failed (non-fatal):', e);
+    console.warn('Plan-derived goal sync failed (non-fatal):', e);
+  }
+}
+
+// Back-compat alias for the previous race-only helper.
+const _ensurePlanDerivedRaceGoal = _ensurePlanDerivedGoal;
+
+// Cache of plan_milestones keyed by plan_id. Loaded lazily from
+// loadGoals() and re-fetched whenever the active plan changes.
+let _planMilestones = {};
+
+async function _fetchPlanMilestones(planId) {
+  if (!planId) return [];
+  try {
+    const { data, error } = await sb.from('plan_milestones')
+      .select('*')
+      .eq('plan_id', planId)
+      .order('sort_order', { ascending: true })
+      .order('target_week_number', { ascending: true });
+    if (error) throw error;
+    return data || [];
+  } catch (e) {
+    // plan_milestones is a new table — older deployments may not have it
+    // yet. Fail silently and let the rest of the goals tab render.
+    if (e?.code === 'PGRST205' || /plan_milestones/i.test(e?.message || '')) {
+      return [];
+    }
+    console.warn('fetch plan_milestones failed:', e);
+    return [];
   }
 }
 
@@ -4922,7 +4982,8 @@ async function loadGoals(workouts) {
   if (!currentProfile) return;
   _userGoals = await fetchUserGoals(currentProfile.id);
   if (_activePlan) {
-    await _ensurePlanDerivedRaceGoal(_activePlan, currentProfile.id);
+    await _ensurePlanDerivedGoal(_activePlan, currentProfile.id);
+    _planMilestones[_activePlan.id] = await _fetchPlanMilestones(_activePlan.id);
   }
   renderGoals(workouts || window._lastSeasonWorkouts || []);
 }
@@ -4935,26 +4996,50 @@ function renderGoals(workouts) {
   const customLabel = document.getElementById('goals-custom-label');
   if (!raceSection || !raceCards || !customSection || !customCards) return;
 
-  const races = _userGoals.filter((g) => g.goal_type === 'race_time' || g.goal_type === 'plan_derived_race');
+  // Primary goal: prefer the active plan's plan-derived row. This is the
+  // goal the user set when they created the plan, so it always takes the
+  // top slot regardless of type (race / fitness / weight loss / etc.).
+  const primary = _activePlan
+    ? _userGoals.find(
+        (g) => g.plan_id === _activePlan.id
+          && (g.goal_type === 'plan_derived_race' || g.goal_type === 'plan_derived'),
+      )
+    : null;
+
+  // The primary card and any standalone race_time entries live in the
+  // "race" section. Plan-derived non-race goals don't otherwise belong
+  // anywhere — they only ever render via the primary card.
+  const standaloneRaces = _userGoals.filter(
+    (g) => g.goal_type === 'race_time' && (!primary || g.id !== primary.id),
+  );
   const custom = _userGoals.filter((g) => g.goal_type === 'distance_per_period' || g.goal_type === 'count_per_period');
 
-  if (races.length === 0) {
+  let raceHtml = '';
+  if (primary) {
+    raceHtml += renderPlanDerivedGoalCard(primary, workouts, _activePlan);
+  }
+  if (standaloneRaces.length > 0) {
+    raceHtml += standaloneRaces.map((g) => renderRaceGoalCard(g, workouts)).join('');
+  }
+
+  if (!raceHtml) {
     raceSection.hidden = true;
     raceCards.innerHTML = '';
   } else {
     raceSection.hidden = false;
-    raceCards.innerHTML = races.map((g) => renderRaceGoalCard(g, workouts)).join('');
+    raceCards.innerHTML = raceHtml;
   }
 
-  if (custom.length === 0 && races.length === 0) {
-    // First-run: show one friendly empty state, tell the user what they can do.
+  if (custom.length === 0 && !raceHtml) {
+    // No primary goal AND no custom goals — i.e. user has never created a
+    // plan and hasn't added any custom goals. Nudge them toward both.
     customCards.innerHTML = `
       <div class="card goal-empty-state">
         <div class="goal-empty-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="32" height="32"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
         </div>
-        <h3 class="goal-empty-title">Inga mål än</h3>
-        <p class="goal-empty-body">Lägg till ett eget mål (km per månad, antal pass per år eller tidsmål på en distans) så följer vi upp veckovis. Har du en aktiv AI-plan med racemål dyker det upp automatiskt här.</p>
+        <h3 class="goal-empty-title">Inget mål än</h3>
+        <p class="goal-empty-body">När du skapar en träningsplan dyker dess huvudmål upp här automatiskt — med en uppskattning av om du är på rätt väg och din sannolikhet att nå det. Du kan också lägga till egna mål (km per månad, antal pass per år eller en tidsmål på en distans).</p>
       </div>`;
     customLabel.hidden = true;
   } else if (custom.length === 0) {
@@ -5271,6 +5356,286 @@ function _computeRaceProbability(goal, workouts, indicators) {
   else { label = 'Tufft'; cls = 'risk'; }
 
   return { pct: pctRounded, label, cls, projection_sec: projectedSec };
+}
+
+// ── Plan-form probability for non-race plans (fitness / weight loss / etc.)
+// Race plans get a sharp pace-projection (above). Everything else gets a
+// "form" score combining: milestone hit-rate, ACWR / volume trend, and
+// consistency (sessions per week vs. plan target). The output shape is
+// identical to _computeRaceProbability so the render code can be reused.
+function _computePlanFormProbability(plan, workouts, milestones, indicators) {
+  if (!plan) return { pct: null, label: 'Ingen plan', cls: 'unknown', projection_sec: null };
+
+  // Base score: how many milestones we've hit so far vs. how many should
+  // already be evaluated by today (target_week_number passed). A user who
+  // is mid-plan with no completed milestones is at neutral 50 %.
+  const today = new Date();
+  let hit = 0, due = 0;
+  if (Array.isArray(milestones) && plan.start_date) {
+    const startMs = new Date(plan.start_date + 'T00:00:00').getTime();
+    for (const m of milestones) {
+      if (m.metric_type === 'assessment_baseline') continue; // baseline-only
+      const wk = Number(m.target_week_number);
+      if (!Number.isFinite(wk)) continue;
+      const milestoneDate = new Date(startMs + (wk - 1) * 7 * 86400000);
+      if (milestoneDate > today) continue;
+      due++;
+      if (m.status === 'on_track' || m.status === 'completed' || m.status === 'hit') hit++;
+    }
+  }
+  let score = due > 0 ? hit / due : 0.55;
+
+  // Indicators trim the score toward the truth: lagging volume or
+  // consistency drops it; positive trend lifts it.
+  if (indicators) {
+    if (indicators.volume?.status?.cls === 'lagging') score *= 0.85;
+    else if (indicators.volume?.status?.cls === 'ahead') score = Math.min(0.95, score * 1.05);
+    if (indicators.consistency?.status?.cls === 'lagging') score *= 0.85;
+    if (indicators.vdot?.status?.cls === 'lagging') score *= 0.92;
+  }
+
+  score = Math.max(0.05, Math.min(0.95, score));
+  const pctRounded = Math.round(score * 100);
+  let label, cls;
+  if (pctRounded >= 75) { label = 'På rätt väg'; cls = 'great'; }
+  else if (pctRounded >= 50) { label = 'Troligt om du håller i'; cls = 'good'; }
+  else if (pctRounded >= 30) { label = 'Tufft just nu'; cls = 'warn'; }
+  else { label = 'Långt efter'; cls = 'risk'; }
+  return { pct: pctRounded, label, cls, projection_sec: null };
+}
+
+// Evaluate a single milestone against logged workouts.
+// Returns 'hit' | 'on_track' | 'off_track' | 'missed' | 'pending'.
+// Pending = target week is in the future. We deliberately keep this
+// simple — the canonical evaluator lives in the goals_eval edge function
+// (see plan), but the frontend version is enough to drive the UI when
+// the server hasn't computed the status yet.
+function _evaluateMilestone(milestone, plan, workouts) {
+  if (!milestone || !plan) return 'pending';
+  if (milestone.status && milestone.status !== 'pending') return milestone.status;
+  if (milestone.metric_type === 'assessment_baseline') {
+    return milestone.evaluated_at ? 'hit' : 'pending';
+  }
+  const wk = Number(milestone.target_week_number);
+  if (!Number.isFinite(wk) || !plan.start_date) return 'pending';
+  const target = new Date(plan.start_date + 'T00:00:00');
+  target.setDate(target.getDate() + (wk - 1) * 7);
+  if (target > new Date()) return 'pending';
+  // Past-due milestones with no evaluation get a neutral "off_track"
+  // until the server supplies real data.
+  return 'off_track';
+}
+
+// Roll a list of milestones up into a single status the primary card
+// can display alongside the headline. Hit-rate ≥ 80 % → on track,
+// ≥ 50 % → mixed, < 50 % → behind.
+function _rollupPlanStatus(plan, workouts, milestones) {
+  if (!plan) return { cls: 'unknown', label: 'Ingen plan' };
+  const considered = (milestones || []).filter((m) => m.metric_type !== 'assessment_baseline');
+  if (considered.length === 0) {
+    return { cls: 'unknown', label: 'Ingen utvärdering ännu' };
+  }
+  let hit = 0, due = 0;
+  for (const m of considered) {
+    const status = _evaluateMilestone(m, plan, workouts);
+    if (status === 'pending') continue;
+    due++;
+    if (status === 'hit' || status === 'on_track' || status === 'completed') hit++;
+  }
+  if (due === 0) return { cls: 'pending', label: 'Inga milstolpar förfallna än' };
+  const ratio = hit / due;
+  if (ratio >= 0.8) return { cls: 'på-väg', label: 'På väg mot målet' };
+  if (ratio >= 0.5) return { cls: 'tufft', label: 'Tufft, men möjligt' };
+  return { cls: 'efter', label: 'Efter — coachen justerar' };
+}
+
+// "Frågor om ditt mål" panel: 2-3 short Q&A items the user might be
+// wondering about, derived from the plan + indicators. Each item has a
+// question, a short answer, and an optional "Justera" CTA that opens
+// the plan-edit modal.
+function _buildGoalQuestions(plan, indicators, milestones, prob) {
+  const items = [];
+  // Q1: am I on pace?
+  if (prob && prob.pct !== null) {
+    items.push({
+      icon: '🎯',
+      q: 'Är jag på pace mot målet?',
+      a: `${prob.label} — ${prob.pct}% sannolikhet baserat på senaste 4 veckorna.`,
+    });
+  }
+  // Q2: any indicator lagging?
+  if (indicators?.volume?.status?.cls === 'lagging') {
+    items.push({
+      icon: '📉',
+      q: 'Varför ser min volym tråkig ut?',
+      a: 'Du har loggat mindre volym än de föregående 4 veckorna. Lägg några pratspass på lediga dagar — det räcker långt.',
+      cta: { label: 'Justera schemat', onclick: 'openPlanEditModal()' },
+    });
+  } else if (indicators?.consistency?.status?.cls === 'lagging') {
+    items.push({
+      icon: '📅',
+      q: 'Varför sjunker min konsekvens?',
+      a: 'Du missar fler pass än vanligt. Säg till coachen vad som hindrar — så flyttar vi pass eller drar ner.',
+      cta: { label: 'Vecko-avstämning', onclick: 'openCoachCheckin()' },
+    });
+  }
+  // Q3: next milestone
+  const upcoming = (milestones || [])
+    .filter((m) => m.metric_type !== 'assessment_baseline' && m.target_week_number != null)
+    .sort((a, b) => a.target_week_number - b.target_week_number)
+    .find((m) => {
+      if (!plan?.start_date) return true;
+      const t = new Date(plan.start_date + 'T00:00:00');
+      t.setDate(t.getDate() + (m.target_week_number - 1) * 7);
+      return t > new Date();
+    });
+  if (upcoming) {
+    const t = upcoming.title || 'Nästa milstolpe';
+    const wk = upcoming.target_week_number ? `v${upcoming.target_week_number}` : '';
+    items.push({
+      icon: '📍',
+      q: 'Vad är nästa milstolpe?',
+      a: `${t}${wk ? ` (${wk})` : ''}${upcoming.description ? ' — ' + upcoming.description : ''}`,
+    });
+  }
+  return items.slice(0, 3);
+}
+
+function renderPlanDerivedGoalCard(goal, workouts, plan) {
+  const isRace = goal.goal_type === 'plan_derived_race';
+  const milestones = plan ? (_planMilestones[plan.id] || []) : [];
+  const indicators = _computeRaceIndicators(workouts);
+  const headline = _rollupPlanStatus(plan, workouts, milestones);
+
+  // Probability — race plans get the pace projection, everything else gets
+  // the form-based estimate.
+  const probability = isRace
+    ? _computeRaceProbability(goal, workouts, indicators)
+    : _computePlanFormProbability(plan, workouts, milestones, indicators);
+
+  const targetDate = goal.target_date
+    ? new Date(goal.target_date + 'T00:00:00')
+    : (plan?.end_date ? new Date(plan.end_date + 'T00:00:00') : null);
+  const startDate = goal.baseline_date
+    ? new Date(goal.baseline_date + 'T00:00:00')
+    : (plan?.start_date ? new Date(plan.start_date + 'T00:00:00') : new Date(goal.created_at));
+
+  const now = new Date();
+  let timelineHtml = '';
+  if (targetDate) {
+    const totalDays = Math.max(1, _daysBetween(startDate, targetDate));
+    const elapsedDays = Math.max(0, Math.min(totalDays, _daysBetween(startDate, now)));
+    const pctTime = Math.round((elapsedDays / totalDays) * 100);
+    const daysLeft = Math.max(0, _daysBetween(now, targetDate));
+    const daysLeftTxt = daysLeft === 0 ? 'Idag!' : daysLeft === 1 ? 'Imorgon' : `${daysLeft} dagar kvar`;
+    timelineHtml = `
+      <div class="goal-timeline">
+        <div class="goal-timeline-track">
+          <div class="goal-timeline-fill" style="width:${pctTime}%"></div>
+          <div class="goal-timeline-dot goal-timeline-dot--now" style="left:${pctTime}%" title="Idag"></div>
+        </div>
+        <div class="goal-timeline-labels">
+          <span class="goal-timeline-label">${startDate.toISOString().slice(0, 10)}</span>
+          <span class="goal-timeline-label goal-timeline-label--now">${daysLeftTxt}</span>
+          <span class="goal-timeline-label">${targetDate.toISOString().slice(0, 10)}</span>
+        </div>
+      </div>`;
+  }
+
+  const milestoneTimelineHtml = milestones.length === 0 ? '' : `
+    <div class="milestone-timeline">
+      <div class="milestone-timeline-title">Milstolpar</div>
+      ${milestones.map((m) => {
+        const status = _evaluateMilestone(m, plan, workouts);
+        const isAssess = m.metric_type === 'assessment_baseline';
+        const wk = m.target_week_number != null ? `V${m.target_week_number}` : '—';
+        const cssStatus = ({
+          hit: 'hit',
+          completed: 'hit',
+          on_track: 'on',
+          off_track: 'lag',
+          missed: 'miss',
+          pending: 'pending',
+        })[status] || 'pending';
+        const pillCls = `milestone-status-pill--${cssStatus}`;
+        const pillLabel = ({
+          hit: 'Klart',
+          on_track: 'På väg',
+          off_track: 'Efter',
+          completed: 'Klart',
+          missed: 'Missat',
+          pending: 'Kommande',
+        })[status] || 'Kommande';
+        return `<div class="milestone-row${isAssess ? ' milestone-row--assessment' : ''}">
+          <div class="milestone-week">${wk}</div>
+          <div class="milestone-body">
+            <div class="milestone-title">${_escapeHtml(m.title || 'Milstolpe')}</div>
+            ${m.description ? `<div class="milestone-evidence">${_escapeHtml(m.description)}</div>` : ''}
+          </div>
+          <span class="milestone-status-pill ${pillCls}">${pillLabel}</span>
+        </div>`;
+      }).join('')}
+    </div>`;
+
+  // Probability block (re-used from race card — same shape).
+  let probabilityHtml = '';
+  if (probability && probability.pct !== null) {
+    const targetTxt = isRace && goal.target_value
+      ? `Mål: ${_formatSecondsAsPace(Number(goal.target_value))}`
+      : (plan?.goal_text || goal.title || 'Målet');
+    const projTxt = isRace && probability.projection_sec
+      ? `Projicerad tid på racedagen: ${_formatSecondsAsPace(probability.projection_sec)}`
+      : '';
+    probabilityHtml = `<div class="goal-probability goal-probability--${probability.cls}">
+      <div class="gp-pct">${probability.pct}%</div>
+      <div class="gp-text">
+        <div class="gp-label">${probability.label}</div>
+        <div class="gp-detail">${_escapeHtml(targetTxt)}${projTxt ? ` · ${_escapeHtml(projTxt)}` : ''}</div>
+      </div>
+    </div>`;
+  } else if (probability) {
+    probabilityHtml = `<div class="goal-probability goal-probability--unknown">
+      <div class="gp-pct">—</div>
+      <div class="gp-text">
+        <div class="gp-label">${probability.label || 'För lite data'}</div>
+        <div class="gp-detail">Logga några pass så uppdaterar vi sannolikheten.</div>
+      </div>
+    </div>`;
+  }
+
+  const questions = _buildGoalQuestions(plan, indicators, milestones, probability);
+  const questionsHtml = questions.length === 0 ? '' : `
+    <div class="goal-questions">
+      <div class="goal-questions-title">Frågor om ditt mål</div>
+      ${questions.map((q) => `
+        <div class="goal-question">
+          <span class="gq-icon" aria-hidden="true">${q.icon}</span>
+          <div>
+            <div class="gq-q">${_escapeHtml(q.q)}</div>
+            <div class="gq-a">${_escapeHtml(q.a)}</div>
+            ${q.cta ? `<button type="button" class="gq-fix btn btn-ghost btn-sm" onclick="${q.cta.onclick}">${_escapeHtml(q.cta.label)}</button>` : ''}
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
+
+  // Headline class drives the colored chip + accent on the card edge.
+  const headlineCls = `goal-headline--${headline.cls}`;
+  const planName = plan?.name || plan?.goal_text || goal.title || 'Ditt mål';
+
+  return `<div class="card goal-card goal-card--race goal-card--primary" data-goal-id="${goal.id}">
+    <div class="goal-card-header">
+      <div class="goal-card-title-wrap">
+        <span class="goal-chip-primary">Huvudmål från din plan</span>
+        <div class="goal-card-title">${_escapeHtml(planName)}</div>
+        <div class="goal-headline ${headlineCls}">${_escapeHtml(headline.label)}</div>
+      </div>
+    </div>
+    ${probabilityHtml}
+    ${timelineHtml}
+    ${milestoneTimelineHtml}
+    ${questionsHtml}
+  </div>`;
 }
 
 function renderRaceGoalCard(goal, workouts) {
@@ -9027,6 +9392,10 @@ let _wizardGoalType = null;
 // from "Generera schema" to "Generera ändå" depending on risk).
 let _wizardRealism = null;
 let _wizardRealismCTA = 'Generera schema';
+// Step 5 (milestone review) state. After /generate-plan returns the draft
+// plan_id + milestones, we hold the response here and only call
+// /generate-plan?mode=confirm_plan when the user clicks "Aktivera schema".
+let _wizardDraftPlan = null;
 
 // ── Fetch active plan ──
 
@@ -9247,6 +9616,7 @@ function openPlanWizard() {
   _wizardGoalType = null;
   _wizardRealism = null;
   _wizardRealismCTA = 'Generera schema';
+  _wizardDraftPlan = null;
 
   const grid = document.getElementById('wizard-goal-grid');
   grid.innerHTML = GOAL_TYPES.map(g =>
@@ -9300,6 +9670,7 @@ function openPlanWizard() {
 
 function closePlanWizard() {
   document.getElementById('plan-wizard').classList.add('hidden');
+  _wizardDraftPlan = null;
 }
 
 // TWEAK-2: prefill the wizard's physiology fields (resting HR, max HR, 5k/10k
@@ -9425,6 +9796,12 @@ function updateWizardUI() {
   }
   const realismEl = document.getElementById('wizard-step-realism');
   if (realismEl) realismEl.classList.toggle('active', _wizardStep === 4);
+  const milestonesEl = document.getElementById('wizard-step-milestones');
+  if (milestonesEl) {
+    const isOn = _wizardStep === 5;
+    milestonesEl.classList.toggle('active', isOn);
+    milestonesEl.style.display = isOn ? 'block' : 'none';
+  }
 
   // Progress dots: current step is active; earlier steps are done. On intro,
   // the current step has not been completed yet, so use the same rule.
@@ -9454,12 +9831,14 @@ function updateWizardUI() {
     nextBtn.textContent = 'Analysera mål';
   } else if (_wizardStep === 4) {
     nextBtn.textContent = _wizardRealismCTA || 'Generera schema';
+  } else if (_wizardStep === 5) {
+    nextBtn.textContent = 'Aktivera schema';
   } else {
     nextBtn.textContent = 'Nästa';
   }
 
   const stepBanner = document.getElementById('wizard-step-banner');
-  if (stepBanner) stepBanner.textContent = `Steg ${_wizardStep + 1} av 5`;
+  if (stepBanner) stepBanner.textContent = `Steg ${_wizardStep + 1} av 6`;
 
   document.querySelectorAll('.wiz-day-btn').forEach(btn => {
     btn.onclick = () => btn.classList.toggle('active');
@@ -9477,6 +9856,11 @@ function wizardPrev() {
   // Flow backwards through: intro 0 → form 0 → intro 1 → form 1 → intro 2 →
   // form 2 → intro 3 → form 3 → realism (step 4, no intro). From the realism
   // step, "back" returns to form 3 so the user can adjust preferences.
+  // Step 5 (milestone review) is post-draft-creation: there's no "back" to
+  // pre-generate state; the user must either activate or close the wizard.
+  if (_wizardStep === 5) {
+    return;
+  }
   if (_wizardStep === 4) {
     _wizardStep = 3;
     _wizardShowIntro = false;
@@ -9532,6 +9916,11 @@ async function wizardNext() {
 
   if (_wizardStep === 4) {
     await submitPlanWizard();
+    return;
+  }
+
+  if (_wizardStep === 5) {
+    await confirmDraftPlan();
     return;
   }
 }
@@ -9620,6 +10009,7 @@ function collectWizardPayload() {
       activity_types: activityTypes,
       include_gym: activityTypes.includes('Gym'),
       preferred_rest_days: restDays,
+      include_assessment_week_1: !!document.getElementById('wiz-assessment-week-1')?.checked,
       free_text: document.getElementById('wiz-free-text')?.value?.trim() || null,
       training_philosophy: {
         preset: document.getElementById('wiz-philosophy-vdp')?.checked ? 'van_der_poel' : null,
@@ -9723,12 +10113,42 @@ function renderRealism(result) {
 
   const adjEl = document.getElementById('wiz-realism-adjustments');
   const adjustments = Array.isArray(f.recommendedAdjustments) ? f.recommendedAdjustments : [];
-  if (adjustments.length === 0) {
+  // Append assessment-week notices so the user knows what's about to be
+  // baked into their plan. Two independent triggers:
+  //   1. the user opted in to the week-1 assessment via the checkbox
+  //   2. the plan is going to be >= 20 weeks long (auto mid-plan)
+  const assessmentMsgs = [];
+  try {
+    if (document.getElementById('wiz-assessment-week-1')?.checked) {
+      assessmentMsgs.push(
+        'Vecka 1 blir en bedömningsvecka — hård puls och tempo dialas in innan planen rampar.',
+      );
+    }
+    const startStr = document.getElementById('wiz-start-date')?.value;
+    const goalStr = document.getElementById('wiz-goal-date')?.value;
+    if (startStr && goalStr) {
+      const diffMs = new Date(goalStr).getTime() - new Date(startStr).getTime();
+      const numW = Math.max(4, Math.min(24, Math.ceil(diffMs / (7 * 86400000))));
+      if (numW >= 20) {
+        assessmentMsgs.push(
+          'Vi lägger automatiskt en bedömningsvecka i mitten (ersätter en deload) för att kalibrera om puls och tempo — planen blir lika lång som planerat.',
+        );
+      }
+    }
+  } catch (_e) { /* fall through */ }
+
+  if (adjustments.length === 0 && assessmentMsgs.length === 0) {
     adjEl.innerHTML = '';
   } else {
-    adjEl.innerHTML =
-      `<div class="wiz-realism-adjustments-title">Förslag på justeringar</div>` +
-      `<ul>${adjustments.map(a => `<li>${escapeHTML(a)}</li>`).join('')}</ul>`;
+    const adjHtml = adjustments.length > 0
+      ? `<div class="wiz-realism-adjustments-title">Förslag på justeringar</div>` +
+        `<ul>${adjustments.map(a => `<li>${escapeHTML(a)}</li>`).join('')}</ul>`
+      : '';
+    const asHtml = assessmentMsgs.length > 0
+      ? `<div class="wiz-realism-adjustments-title" style="margin-top:8px;">Bedömningsveckor i din plan</div>` +
+        `<ul>${assessmentMsgs.map(m => `<li>${escapeHTML(m)}</li>`).join('')}</ul>`
+      : '';
+    adjEl.innerHTML = adjHtml + asHtml;
   }
 
   const hint = document.getElementById('wiz-realism-cta-hint');
@@ -9772,12 +10192,24 @@ async function submitPlanWizard() {
     }
 
     stopWizRunLoader();
-    closePlanWizard();
     document.getElementById('wizard-step-loading').style.display = 'none';
     document.getElementById('wizard-nav').style.display = '';
 
-    // Surface the coaching note from the feasibility assessment in the
-    // success modal so the user sees it before the alert is dismissed.
+    // generate-plan now returns a *draft* plan and a list of suggested
+    // milestones. Advance to the milestone-review step instead of jumping
+    // straight to the dashboard. The plan is only activated once the user
+    // confirms via /generate-plan?mode=confirm_plan.
+    if (result.requires_confirmation) {
+      _wizardDraftPlan = result;
+      _wizardStep = 5;
+      _wizardShowIntro = false;
+      updateWizardUI();
+      renderWizardMilestones(result);
+      return;
+    }
+
+    // Legacy fallback: server didn't return a draft (older edge function).
+    closePlanWizard();
     const coachingNote = result.feasibility?.coachingNote
       ? `\n\nCoach: ${result.feasibility.coachingNote}`
       : '';
@@ -9803,6 +10235,126 @@ async function submitPlanWizard() {
     updateWizardUI();
     if (_wizardRealism) renderRealism(_wizardRealism);
     await showAlertModal('Fel', 'Kunde inte generera schema: ' + e.message);
+  }
+}
+
+// Renders the milestone-review step (#5) using the response from a draft
+// plan creation. Surfaces server-injected assessment-baseline checkpoints
+// distinctly from milestones the LLM proposed so the user can tell what's
+// hard-coded vs. heuristic.
+function renderWizardMilestones(result) {
+  const summaryEl = document.getElementById('wiz-milestones-summary');
+  const listEl = document.getElementById('wiz-milestones-list');
+  if (!summaryEl || !listEl) return;
+
+  const milestones = Array.isArray(result?.milestones) ? result.milestones : [];
+  const assessmentWeeks = Array.isArray(result?.assessment_weeks) ? result.assessment_weeks : [];
+  const planName = escapeHTML(result?.plan_name || 'Ditt schema');
+  const weeks = result?.weeks ?? '?';
+
+  const assessmentLine = assessmentWeeks.length > 0
+    ? `Vi har lagt in <strong>bedömningsvecka${assessmentWeeks.length === 1 ? '' : 'or'}</strong> i v${assessmentWeeks.join(', v')} för att kalibrera puls och tempo.`
+    : '';
+  summaryEl.innerHTML = `
+    <div class="wiz-milestones-plan-name">${planName}</div>
+    <div class="wiz-milestones-plan-meta">${weeks} veckor · ${milestones.length} milstolpe${milestones.length === 1 ? '' : 'r'}</div>
+    ${assessmentLine ? `<div class="wiz-milestones-assess-note">${assessmentLine}</div>` : ''}
+  `;
+
+  if (milestones.length === 0) {
+    listEl.innerHTML = `<div class="wiz-milestones-empty">Inga milstolpar genererades — du kan lägga till dem manuellt under <strong>Dina mål</strong>.</div>`;
+    return;
+  }
+
+  const sorted = [...milestones].sort((a, b) => {
+    const wa = a.target_week_number ?? 999;
+    const wb = b.target_week_number ?? 999;
+    if (wa !== wb) return wa - wb;
+    return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+  });
+
+  listEl.innerHTML = sorted.map(m => {
+    const isAssess = m.metric_type === 'assessment_baseline' || m.source === 'server_assessment';
+    const wk = m.target_week_number != null ? `V${m.target_week_number}` : '—';
+    const title = escapeHTML(m.title || 'Milstolpe');
+    const desc = m.description ? `<div class="wiz-milestone-desc">${escapeHTML(m.description)}</div>` : '';
+    const target = (m.target_value != null && m.target_unit)
+      ? `<div class="wiz-milestone-target">Mål: ${escapeHTML(String(m.target_value))} ${escapeHTML(m.target_unit)}</div>`
+      : '';
+    const tag = isAssess
+      ? `<span class="wiz-milestone-tag wiz-milestone-tag--assess">Bedömning</span>`
+      : `<span class="wiz-milestone-tag">Mål</span>`;
+    return `
+      <div class="wiz-milestone-row${isAssess ? ' wiz-milestone-row--assess' : ''}">
+        <div class="wiz-milestone-week">${wk}</div>
+        <div class="wiz-milestone-body">
+          <div class="wiz-milestone-head">
+            <div class="wiz-milestone-title">${title}</div>
+            ${tag}
+          </div>
+          ${desc}
+          ${target}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// Activates the draft plan via /generate-plan?mode=confirm_plan, passing
+// any (potentially edited) milestones back to the server so they end up
+// in plan_milestones. Currently milestones are non-editable in the
+// review step, but the round-trip is in place for future editing.
+async function confirmDraftPlan() {
+  if (!_wizardDraftPlan?.plan_id) {
+    await showAlertModal('Fel', 'Inget utkast att aktivera.');
+    return;
+  }
+
+  const nextBtn = document.getElementById('wiz-next');
+  const prevBtn = document.getElementById('wiz-prev');
+  const origNext = nextBtn ? nextBtn.textContent : '';
+  if (nextBtn) { nextBtn.disabled = true; nextBtn.textContent = 'Aktiverar…'; }
+  if (prevBtn) prevBtn.disabled = true;
+
+  try {
+    const session = (await sb.auth.getSession()).data.session;
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/generate-plan', {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        mode: 'confirm_plan',
+        plan_id: _wizardDraftPlan.plan_id,
+        milestones: Array.isArray(_wizardDraftPlan.milestones) ? _wizardDraftPlan.milestones : [],
+      }),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Confirm failed');
+
+    closePlanWizard();
+    const draft = _wizardDraftPlan;
+    _wizardDraftPlan = null;
+
+    const coachingNote = draft.feasibility?.coachingNote
+      ? `\n\nCoach: ${draft.feasibility.coachingNote}`
+      : '';
+    await showAlertModal(
+      'Schema aktiverat!',
+      `${draft.plan_name}\n${draft.weeks} veckor: ${draft.start_date} till ${draft.end_date}${coachingNote}`,
+    );
+
+    _activePlan = null;
+    _activePlanWeeks = [];
+    _activePlanWorkouts = [];
+    navigate('dashboard');
+  } catch (e) {
+    console.error('Plan confirm error:', e);
+    await showAlertModal('Fel', 'Kunde inte aktivera schema: ' + e.message);
+    if (nextBtn) { nextBtn.disabled = false; nextBtn.textContent = origNext || 'Aktivera schema'; }
+    if (prevBtn) prevBtn.disabled = false;
   }
 }
 
@@ -9914,15 +10466,19 @@ function buildPlanPreviewHTML(plan, preview, weekIdx) {
   const week = weeks[clampedIdx];
   const weekWo = preview.workouts.filter(wo => wo.plan_week_id === week.id);
 
+  const isAssessmentWeek = week.phase === 'assessment';
+
   let grid = '';
   for (let d = 0; d < 7; d++) {
     const wo = weekWo.find(w => w.day_of_week === d);
     if (wo?.is_rest) {
       grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-rest">Vila</span></div>`;
     } else if (wo) {
+      const isAssessmentWorkout = typeof wo.label === 'string' && /^Bedömning/i.test(wo.label);
       const zone = wo.intensity_zone ? `<span class="zone-badge zone-${escapeHTML(wo.intensity_zone.toLowerCase())}" style="font-size:0.6rem;padding:1px 4px;">${escapeHTML(wo.intensity_zone)}</span>` : '';
       const dur = wo.target_duration_minutes ? `${wo.target_duration_minutes}m` : '';
-      grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-label">${escapeHTML(wo.label || wo.activity_type)}</span><span class="pm-prev-meta">${zone} ${dur}</span></div>`;
+      const testBadge = isAssessmentWorkout ? `<span class="day-badge--test">TEST</span>` : '';
+      grid += `<div class="pm-prev-day${isAssessmentWorkout ? ' pm-prev-day--assess' : ''}"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-label">${escapeHTML(wo.label || wo.activity_type)}${testBadge}</span><span class="pm-prev-meta">${zone} ${dur}</span></div>`;
     } else {
       grid += `<div class="pm-prev-day"><span class="pm-prev-day-name">${DAY[d]}</span><span class="pm-prev-rest">—</span></div>`;
     }
@@ -9939,6 +10495,13 @@ function buildPlanPreviewHTML(plan, preview, weekIdx) {
     ? `<div class="plan-coaching-callout"><div class="plan-coaching-icon">💡</div><div class="plan-coaching-text">${escapeHTML(summaryText)}</div></div>`
     : '';
 
+  const assessmentBanner = isAssessmentWeek
+    ? `<div class="assessment-banner pm-assessment-banner">
+        <span class="ab-icon" aria-hidden="true">⚑</span>
+        <span class="ab-text"><strong>Bedömningsvecka.</strong> Tre testpass kalibrerar puls och tempo.</span>
+      </div>`
+    : '';
+
   return `
     ${summaryCallout}
     <div class="pm-preview-summary">
@@ -9947,9 +10510,10 @@ function buildPlanPreviewHTML(plan, preview, weekIdx) {
     </div>
     <div class="pm-preview-week-nav">
       <button class="pm-prev-arrow" onclick="event.stopPropagation();pmPreviewWeek('${plan.id}',-1)" ${clampedIdx === 0 ? 'disabled' : ''}>‹</button>
-      <span class="pm-prev-week-label">Vecka ${week.week_number}${phaseLabel ? ' · ' + phaseLabel : ''}</span>
+      <span class="pm-prev-week-label${isAssessmentWeek ? ' pm-prev-week-label--assess' : ''}">Vecka ${week.week_number}${phaseLabel ? ' · ' + phaseLabel : ''}</span>
       <button class="pm-prev-arrow" onclick="event.stopPropagation();pmPreviewWeek('${plan.id}',1)" ${clampedIdx >= weeks.length - 1 ? 'disabled' : ''}>›</button>
     </div>
+    ${assessmentBanner}
     <div class="pm-prev-grid">${grid}</div>
     <div class="pm-preview-actions">
       ${isActive ? '' : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();activatePlan('${plan.id}')">Aktivera</button>`}
@@ -10738,28 +11302,32 @@ function renderProposalPreview() {
   const changedWeeks = _countChangedWeeks(_planEditCurrentPlan, _planEditProposal);
   const changedTotal = _countChangedWorkouts(_planEditCurrentPlan, _planEditProposal);
 
+  const isAssessmentWeek = newWeek?.phase === 'assessment';
+
   let cards = '';
   for (let d = 0; d < 7; d++) {
     const oldWo = _findWorkout(oldWeek, d);
     const newWo = _findWorkout(newWeek, d);
     const changed = _workoutsDiffer(oldWo, newWo);
     if (_planEditChangedOnly && !changed) continue;
+    const isAssessmentWorkout = !!newWo && !newWo.is_rest && typeof newWo.label === 'string' && /^Bedömning/i.test(newWo.label);
     const zoneBadge = newWo?.intensity_zone
       ? `<span class="zone-badge zone-${escapeHTML(newWo.intensity_zone.toLowerCase())}" style="font-size:0.55rem;padding:1px 4px;">${escapeHTML(newWo.intensity_zone)}</span>`
       : '';
+    const testBadge = isAssessmentWorkout ? `<span class="day-badge--test">TEST</span>` : '';
     const dur = newWo?.target_duration_minutes ? `${newWo.target_duration_minutes}m` : '';
     const body = !newWo
       ? `<span class="pe-card-rest">—</span>`
       : newWo.is_rest
         ? `<span class="pe-card-rest">Vila</span>`
-        : `<span class="pe-card-label">${escapeHTML(newWo.label || newWo.activity_type || 'Pass')}</span>
+        : `<span class="pe-card-label">${escapeHTML(newWo.label || newWo.activity_type || 'Pass')}${testBadge}</span>
            <span class="pe-card-meta">${zoneBadge} ${dur}</span>`;
     const badge = changed ? `<span class="pe-card-badge">Ändrat</span>` : '';
     const compareBtn = changed
       ? `<button class="pe-card-compare" title="Jämför före/efter" onclick="togglePeCompare(${weekIdx}, ${d})">⇄</button>`
       : '';
     cards += `
-      <div class="pe-card ${changed ? 'pe-card-changed' : ''}" id="pe-card-${weekIdx}-${d}">
+      <div class="pe-card ${changed ? 'pe-card-changed' : ''}${isAssessmentWorkout ? ' pe-card--assess' : ''}" id="pe-card-${weekIdx}-${d}">
         <div class="pe-card-head">
           <span class="pe-card-day">${DAY[d]}</span>
           <div class="pe-card-head-actions">
@@ -10801,9 +11369,13 @@ function renderProposalPreview() {
     </div>
     <div class="pe-week-nav">
       <button class="pe-nav-arrow" onclick="pePreviewWeek(-1)" ${weekIdx === 0 ? 'disabled' : ''} aria-label="Föregående vecka">‹</button>
-      <span class="pe-week-label">Vecka ${newWeek.week_number}${phaseLabel ? ' · ' + escapeHTML(phaseLabel) : ''}${weekChangesCount > 0 ? ` · <span class="pe-week-changes">${weekChangesCount} ändr.</span>` : ''}</span>
+      <span class="pe-week-label${isAssessmentWeek ? ' pe-week-label--assess' : ''}">Vecka ${newWeek.week_number}${phaseLabel ? ' · ' + escapeHTML(phaseLabel) : ''}${weekChangesCount > 0 ? ` · <span class="pe-week-changes">${weekChangesCount} ändr.</span>` : ''}</span>
       <button class="pe-nav-arrow" onclick="pePreviewWeek(1)" ${weekIdx >= newWeeks.length - 1 ? 'disabled' : ''} aria-label="Nästa vecka">›</button>
     </div>
+    ${isAssessmentWeek ? `<div class="assessment-banner pe-assessment-banner">
+      <span class="ab-icon" aria-hidden="true">⚑</span>
+      <span class="ab-text"><strong>Bedömningsvecka.</strong> Tre testpass kalibrerar puls och tempo.</span>
+    </div>` : ''}
     <div class="pe-preview-grid">${cards}</div>
     <div class="pe-preview-actions">
       <button class="btn btn-primary btn-sm" onclick="approvePlanEdit()">Godkänn ändringar</button>
@@ -12311,6 +12883,8 @@ function _ccRenderDiff() {
   diffEl.style.display = 'block';
   document.getElementById('cc-coach-note').textContent = _ccCheckin.coach_note || '';
 
+  _ccRenderHorizonPanel(_ccCheckin);
+
   const listEl = document.getElementById('cc-diff-list');
   const emptyEl = document.getElementById('cc-diff-empty');
   const changes = _ccCheckin.changes || [];
@@ -12354,6 +12928,50 @@ function _ccRenderDiff() {
     ? `<button class="btn btn-primary btn-sm" onclick="_ccDeclineAll()">Klart</button>`
     : `<button class="btn btn-ghost btn-sm" onclick="_ccDeclineAll()">Neka allt</button>
        <button class="btn btn-primary btn-sm" onclick="_ccAcceptSelected()">Acceptera markerade</button>`;
+}
+
+// Render the horizon-regen panel above the per-day diff list. The check-in
+// edge function returns horizon information when a *hard* trigger fired
+// (assessment week completed, new baseline) or a *soft* trigger upgraded
+// to "regenerate the next 2-4 weeks". Shape (best-effort):
+//   _ccCheckin.horizon = {
+//     reason: 'assessment_completed' | 'soft_trigger' | ...,
+//     headline: 'Tröskelpuls upp 4 bpm — Z3/Z4-zoner kalibreras',
+//     bullets: ['Långpasset upp till 90 min', 'Z4 nu 168 bpm (var 164)', ...],
+//     baseline?: { fiveK?: ..., thresholdHr?: ... },
+//     weeks_replanned?: 3,
+//   }
+function _ccRenderHorizonPanel(checkin) {
+  const panel = document.getElementById('cc-horizon-panel');
+  if (!panel) return;
+  const horizon = checkin?.horizon;
+  if (!horizon || (typeof horizon !== 'object')) {
+    panel.classList.add('hidden');
+    return;
+  }
+  const titleEl = document.getElementById('cc-horizon-title');
+  const subEl = document.getElementById('cc-horizon-sub');
+  const bulletsEl = document.getElementById('cc-horizon-bullets');
+
+  const reasonLabel = horizon.reason === 'assessment_completed'
+    ? 'Bedömningsvecka klar — coachen har räknat om kommande veckor'
+    : (horizon.reason === 'soft_trigger'
+        ? 'Mycket har förändrats — coachen har räknat om horisonten'
+        : 'Coachen har räknat om kommande veckor');
+  if (titleEl) titleEl.textContent = horizon.headline ? reasonLabel : reasonLabel;
+
+  const subBits = [];
+  if (horizon.headline) subBits.push(horizon.headline);
+  if (horizon.weeks_replanned) subBits.push(`${horizon.weeks_replanned} v omplanerade`);
+  if (subEl) subEl.textContent = subBits.join(' · ');
+
+  if (bulletsEl) {
+    const bullets = Array.isArray(horizon.bullets) ? horizon.bullets : [];
+    bulletsEl.innerHTML = bullets.length
+      ? bullets.map(b => `<li>${escapeHTML(String(b))}</li>`).join('')
+      : '';
+  }
+  panel.classList.remove('hidden');
 }
 
 async function _ccAcceptSelected() {

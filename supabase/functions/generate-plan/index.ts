@@ -48,6 +48,7 @@ function defaultExpectedQualityForPhase(phase: string): number {
   if (p === "deload") return 1;
   if (p === "taper") return 1;
   if (p === "recovery") return 0;
+  if (p === "assessment") return 2;
   return 1;
 }
 
@@ -153,7 +154,7 @@ function buildRetryMessage(planValidation: PlanValidation): string {
 //  dashboard. See that file for full documentation.)
 // ═══════════════════════════════════════════════════════════════════
 
-type Phase = "base" | "build" | "peak" | "taper" | "deload" | "recovery";
+type Phase = "base" | "build" | "peak" | "taper" | "deload" | "recovery" | "assessment";
 type Tier = "novice" | "developing" | "intermediate" | "advanced";
 type RiskLevel = "comfortable" | "ambitious" | "aggressive" | "unrealistic";
 type Severity = "ok" | "warn" | "high";
@@ -225,10 +226,10 @@ function tierFromInputs(i: CapacityInputs): Tier {
 }
 
 const TIER_QUALITY_MATRIX: Record<Tier, Record<Phase, number>> = {
-  novice:       { base: 0, build: 1, peak: 1, deload: 0, taper: 1, recovery: 0 },
-  developing:   { base: 1, build: 2, peak: 2, deload: 1, taper: 1, recovery: 0 },
-  intermediate: { base: 1, build: 2, peak: 3, deload: 1, taper: 2, recovery: 0 },
-  advanced:     { base: 2, build: 3, peak: 3, deload: 1, taper: 2, recovery: 0 },
+  novice:       { base: 0, build: 1, peak: 1, deload: 0, taper: 1, recovery: 0, assessment: 1 },
+  developing:   { base: 1, build: 2, peak: 2, deload: 1, taper: 1, recovery: 0, assessment: 2 },
+  intermediate: { base: 1, build: 2, peak: 3, deload: 1, taper: 2, recovery: 0, assessment: 2 },
+  advanced:     { base: 2, build: 3, peak: 3, deload: 1, taper: 2, recovery: 0, assessment: 2 },
 };
 
 const TIER_QUALITY_CAP: Record<Tier, number> = {
@@ -609,15 +610,43 @@ Löpning, Cykel, Gym, Hyrox, Stakmaskin, Längdskidor, Annat, Vila
 ## INTENSITY ZONES
 Z1, Z2, Z3, Z4, Z5, mixed
 
+## MILESTONES (output array "milestones", 3-5 items)
+The plan MUST include 3-5 measurable milestones that the user can track on Mina mål.
+- One per training phase ideally (base / build / peak / taper) so progress is visible across the plan, not just at the end.
+- Each milestone is concrete and verifiable from logged workouts: pace at a distance, weekly volume, longest single session, or a specific quality session.
+- Use Swedish titles. Examples: "Vecka 4: tröskelpass 4×5 min Z4", "Vecka 8: långpass 21 km", "Vecka 12: 30 km i 5:45/km".
+- Allowed metric_type values:
+  - "pace_for_distance" (target_value = seconds, target_distance_km set)
+  - "distance_in_session" (target_value = km, target_unit = "km")
+  - "duration_in_zone" (target_value = minutes, target_unit = "min")
+  - "weekly_volume_km" (target_value = km, target_unit = "km")
+  - "weekly_volume_hours" (target_value = hours, target_unit = "h")
+  - "weekly_sessions" (target_value = count, target_unit = "pass")
+  - "qualitative" (only for goal_type = "fitness" / "weight_loss" / "custom" — use sparingly)
+- For race plans the LAST milestone must be the race itself (metric_type: "pace_for_distance", target_week_number = final week).
+- The server may add additional "assessment_baseline" milestones automatically for assessment weeks — do NOT generate those yourself.
+
 ## OUTPUT SCHEMA
 
 {
   "plan_name": "string — short descriptive name in Swedish",
   "summary": "string — 1-2 sentence summary in Swedish",
+  "milestones": [
+    {
+      "sort_order": 1,
+      "target_week_number": 4,
+      "title": "Tröskelpass 4×5 min Z4",
+      "description": "Klara fyra tröskelintervaller på 5 min med ~95 % av tröskelpuls.",
+      "metric_type": "duration_in_zone",
+      "target_value": 20,
+      "target_unit": "min",
+      "target_distance_km": null
+    }
+  ],
   "weeks": [
     {
       "week_number": 1,
-      "phase": "base | build | peak | taper | deload | recovery",
+      "phase": "base | build | peak | taper | deload | recovery | assessment",
       "target_hours": 4.5,
       "target_sessions": 5,
       "notes": "string — coaching note in Swedish",
@@ -664,6 +693,17 @@ Z1, Z2, Z3, Z4, Z5, mixed
 //  LLM CALL
 // ═══════════════════════════════════════════════════════════════════
 
+interface LLMMilestone {
+  sort_order: number;
+  target_week_number: number | null;
+  title: string;
+  description?: string | null;
+  metric_type: string;
+  target_value: number | null;
+  target_unit: string | null;
+  target_distance_km?: number | null;
+}
+
 interface LLMPlan {
   plan_name: string;
   summary: string;
@@ -684,6 +724,7 @@ interface LLMPlan {
       is_rest: boolean;
     }[];
   }[];
+  milestones?: LLMMilestone[];
 }
 
 // A user-message turn can be either a fresh prompt or a follow-up correction
@@ -1094,6 +1135,9 @@ interface PlanRequest {
     activity_types: string[];
     include_gym: boolean;
     preferred_rest_days: number[];
+    include_assessment_week_1?: boolean;
+    free_text?: string;
+    training_philosophy?: { preset?: string; custom?: string };
   };
   start_date: string;
 }
@@ -1103,9 +1147,15 @@ interface BuildUserPromptResult {
   profile: CapacityProfile;
   feasibility: FeasibilityAssessment;
   numWeeks: number;
+  phases: string[];
+  assessmentWeeks: number[];
 }
 
-function buildUserPrompt(req: PlanRequest, workoutHistory: string): BuildUserPromptResult {
+function buildUserPrompt(
+  req: PlanRequest,
+  workoutHistory: string,
+  opts: PhasePlanOpts = {},
+): BuildUserPromptResult {
   const goalDateStr = req.goal_date ? `\nMåldatum: ${req.goal_date}` : "";
   const goalDistanceStr = (req.goal_type === "race" && req.constraints.race_distance_km)
     ? `\nDistans: ${req.constraints.race_distance_km} km`
@@ -1174,7 +1224,11 @@ function buildUserPrompt(req: PlanRequest, workoutHistory: string): BuildUserPro
   const feasibility = assessFeasibility(capacityInputs, profile);
   const capacityStr = formatCapacityForPrompt(profile, feasibility);
 
-  const phasePlanStr = buildPhasePlanSection(numWeeks, !!req.goal_date, profile);
+  const phases = computePhasePlan(numWeeks, !!req.goal_date, opts);
+  const assessmentWeeks = phases
+    .map((p, idx) => (p === "assessment" ? idx + 1 : -1))
+    .filter((n) => n > 0);
+  const phasePlanStr = buildPhasePlanSection(numWeeks, !!req.goal_date, profile, opts);
 
   const prompt = `Generate a ${numWeeks}-week training plan starting ${startDate}.
 
@@ -1206,7 +1260,7 @@ ${workoutHistory || "No logged workouts available."}
 
 Generate the complete plan as JSON. Each week's "phase" field MUST match the PHASE PLAN above, and each week's quality session count MUST match the exact number derived from the athlete's capacity (shown in the PHASE PLAN table). The "summary" field of the plan MUST begin with the coaching note supplied under ATHLETE CAPACITY & FEASIBILITY.`;
 
-  return { prompt, profile, feasibility, numWeeks };
+  return { prompt, profile, feasibility, numWeeks, phases, assessmentWeeks };
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1220,15 +1274,31 @@ Generate the complete plan as JSON. Each week's "phase" field MUST match the PHA
 //   12–16 weeks → 4w base, then build/peak/taper cycle, deload every 4th
 //   16+ weeks  → 5w base, longer build, peak + taper at end if race
 // ─────────────────────────────────────────────────────────────────────
-function buildPhasePlanSection(numWeeks: number, hasRaceDate: boolean, profile: CapacityProfile): string {
-  const phases = computePhasePlan(numWeeks, hasRaceDate);
-  const rows = phases.map((p, i) =>
-    `Week ${i + 1}: phase="${p}" → ${qualityForPhase(p, profile)} kvalitetspass`
-  ).join("\n");
+interface PhasePlanOpts {
+  assessmentWeek1?: boolean;
+  midplanAssessment?: boolean;
+}
+
+function buildPhasePlanSection(
+  numWeeks: number,
+  hasRaceDate: boolean,
+  profile: CapacityProfile,
+  opts: PhasePlanOpts = {},
+): string {
+  const phases = computePhasePlan(numWeeks, hasRaceDate, opts);
+  const rows = phases.map((p, i) => {
+    if (p === "assessment") {
+      // Assessment weeks are deterministically rebuilt server-side after
+      // the LLM responds; we keep the row in the table so the model still
+      // emits 7 day entries that pass the JSON schema check.
+      return `Week ${i + 1}: phase="assessment" → 2 testpass (DETERMINISTIC — kommer ersättas server-side, generera vilken Z2-vecka som helst som platshållare).`;
+    }
+    return `Week ${i + 1}: phase="${p}" → ${qualityForPhase(p, profile)} kvalitetspass`;
+  }).join("\n");
   return `\n## PHASE PLAN (deterministic — every week MUST use exactly this phase + quality count)
 ${rows}
 
-A "kvalitetspass" = a workout with intensity_zone in {Z4, Z5, mixed}. The required count is a HARD MINIMUM. Adding more is forbidden — the per-phase counts above are derived from the athlete's capacity and must be honored exactly. Even deload weeks for stronger athletes include a short quality session (novices may skip it).
+A "kvalitetspass" = a workout with intensity_zone in {Z4, Z5, mixed}. The required count is a HARD MINIMUM. Adding more is forbidden — the per-phase counts above are derived from the athlete's capacity and must be honored exactly. Even deload weeks for stronger athletes include a short quality session (novices may skip it). Assessment-phase weeks are placeholders the server overwrites with a deterministic test protocol — emit them with valid structure but their content is irrelevant.
 `;
 }
 
@@ -1236,12 +1306,45 @@ function qualityForPhase(p: string, profile?: CapacityProfile): number {
   return expectedQualityForPhase(p, profile);
 }
 
-function computePhasePlan(numWeeks: number, hasRaceDate: boolean): string[] {
+// Locate the deload week closest to the midpoint and convert it to
+// 'assessment'. If no deload sits within ±2 of the midpoint, replace the
+// regular week at the midpoint instead — but never overwrite peak/taper
+// (which would invalidate race tapering) or the very first/last weeks.
+function _convertNearestDeloadToAssessment(phases: string[]): void {
+  const n = phases.length;
+  if (n < 4) return;
+  const mid = Math.floor(n / 2);
+  let bestIdx = -1;
+  let bestDist = Infinity;
+  for (let w = 1; w < n - 1; w++) {
+    if (phases[w] === "deload") {
+      const dist = Math.abs(w - mid);
+      if (dist < bestDist) { bestDist = dist; bestIdx = w; }
+    }
+  }
+  if (bestIdx >= 0 && bestDist <= 2) {
+    phases[bestIdx] = "assessment";
+    return;
+  }
+  // No nearby deload — replace the midpoint week itself unless it is
+  // taper/peak/assessment/recovery (those carry critical race-prep meaning).
+  const protected_ = new Set(["taper", "peak", "assessment", "recovery"]);
+  if (!protected_.has(phases[mid])) {
+    phases[mid] = "assessment";
+  }
+}
+
+function computePhasePlan(
+  numWeeks: number,
+  hasRaceDate: boolean,
+  opts: PhasePlanOpts = {},
+): string[] {
   const phases: string[] = new Array(numWeeks);
 
   if (numWeeks < 6) {
     for (let i = 0; i < numWeeks; i++) phases[i] = "build";
     if (hasRaceDate && numWeeks >= 2) phases[numWeeks - 1] = "taper";
+    if (opts.assessmentWeek1 && numWeeks >= 3) phases[0] = "assessment";
     return phases;
   }
 
@@ -1275,7 +1378,299 @@ function computePhasePlan(numWeeks: number, hasRaceDate: boolean): string[] {
       phases[w] = "deload";
     }
   }
+
+  // Mid-plan assessment for long plans replaces the nearest deload (keeps
+  // total length unchanged). Run BEFORE assessmentWeek1 to allow both.
+  if (opts.midplanAssessment && numWeeks >= 12) {
+    _convertNearestDeloadToAssessment(phases);
+  }
+
+  // Assessment-as-week-1 is the user's "I am unsure of my baseline" opt-in.
+  // We replace whatever week 1 was (typically base) with an assessment block.
+  if (opts.assessmentWeek1) {
+    phases[0] = "assessment";
+  }
+
   return phases;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Deterministic assessment-week builder. Two flavors:
+//
+//   'preplan'  — week 1 of a brand-new plan when the user opted in via
+//                the "Osäker på dina värden?" checkbox. 3 calibration
+//                tests across the week (HR-drift, 20 min threshold, 5 km TT).
+//
+//   'midplan'  — auto-inserted at the midpoint of plans >= 12 weeks long
+//                (replaces the nearest deload). 2 confirmation tests at
+//                ~90 % effort to recalibrate without taxing peak prep.
+//
+// Returns an array of 7 day entries (Mon -> Sun) ready to drop straight
+// into LLMPlan.weeks[i].workouts. Activity type is hard-coded to Löpning
+// because the calibration protocol only makes sense for running; if the
+// user has zero running in their preferences we still emit Löpning so the
+// test signals something — the wizard's realism step will warn that the
+// assessment week assumes running.
+// ─────────────────────────────────────────────────────────────────────
+type AssessmentKind = "preplan" | "midplan";
+
+interface AssessmentWorkout {
+  day_of_week: number;
+  activity_type: string;
+  label: string;
+  description: string;
+  target_duration_minutes: number;
+  target_distance_km: number | null;
+  intensity_zone: string | null;
+  is_rest: boolean;
+}
+
+function buildAssessmentWeek(
+  _profile: PlanRequest["baseline"] | undefined,
+  _capacityProfile: CapacityProfile | undefined,
+  kind: AssessmentKind,
+): AssessmentWorkout[] {
+  const rest = (day: number, label = "Vila"): AssessmentWorkout => ({
+    day_of_week: day,
+    activity_type: "Vila",
+    label,
+    description: "",
+    target_duration_minutes: 0,
+    target_distance_km: null,
+    intensity_zone: null,
+    is_rest: true,
+  });
+
+  if (kind === "preplan") {
+    return [
+      // Mon
+      rest(0),
+      // Tue: Z2 HR-drift test
+      {
+        day_of_week: 1,
+        activity_type: "Löpning",
+        label: "Bedömning: Z2 HR-drift test",
+        description:
+          "45 min Z2 (pratstempo). Notera puls vid 10 min och vid 40 min — drifften visar aerob form. Sikta på samma tempo hela vägen.",
+        target_duration_minutes: 45,
+        target_distance_km: 8,
+        intensity_zone: "Z2",
+        is_rest: false,
+      },
+      // Wed: easy spin / rest
+      {
+        day_of_week: 2,
+        activity_type: "Löpning",
+        label: "Lugnt Z1",
+        description: "30-40 min mycket lugnt (Z1). Snacka enkelt hela tiden. Återhämtning efter HR-drift.",
+        target_duration_minutes: 35,
+        target_distance_km: 5,
+        intensity_zone: "Z1",
+        is_rest: false,
+      },
+      // Thu: 20 min threshold test
+      {
+        day_of_week: 3,
+        activity_type: "Löpning",
+        label: "Bedömning: 20 min tröskel-test",
+        description:
+          "15 min uppvärm Z2 → 20 min så hårt du kan hålla jämnt (≈Z4) → 10 min nedvarvning. Snittpuls × 0.95 ≈ tröskelpuls. Logga snittpuls och snittempo.",
+        target_duration_minutes: 45,
+        target_distance_km: 8,
+        intensity_zone: "Z4",
+        is_rest: false,
+      },
+      // Fri: rest
+      rest(4),
+      // Sat: 5 km TT
+      {
+        day_of_week: 5,
+        activity_type: "Löpning",
+        label: "Bedömning: 5 km tidstest",
+        description:
+          "15 min uppvärm Z2 → 5 km så fort du orkar (jämnt!) → 10 min ned. Logga sluttid + maxpuls. Detta blir din nya 5 km-baseline.",
+        target_duration_minutes: 45,
+        target_distance_km: 8,
+        intensity_zone: "Z5",
+        is_rest: false,
+      },
+      // Sun: easy long
+      {
+        day_of_week: 6,
+        activity_type: "Löpning",
+        label: "Lugnt Z2",
+        description: "60 min Z2. Pratstempo, puls under tröskel. Slutet av kalibreringsveckan — nästa vecka rampar planen.",
+        target_duration_minutes: 60,
+        target_distance_km: 10,
+        intensity_zone: "Z2",
+        is_rest: false,
+      },
+    ];
+  }
+
+  // midplan
+  return [
+    rest(0),
+    // Tue: 5 km tempo @ ~90 %
+    {
+      day_of_week: 1,
+      activity_type: "Löpning",
+      label: "Bedömning: 5 km tempo @ 90 %",
+      description:
+        "15 min uppv → 5 km i ~halvmaratontempo (RPE 8) → 10 min ned. Mät puls/tempo, jämför med första bedömningsveckan.",
+      target_duration_minutes: 50,
+      target_distance_km: 9,
+      intensity_zone: "Z4",
+      is_rest: false,
+    },
+    // Wed: easy
+    {
+      day_of_week: 2,
+      activity_type: "Löpning",
+      label: "Lugnt Z2",
+      description: "40 min Z2. Återhämtning mellan testpassen.",
+      target_duration_minutes: 40,
+      target_distance_km: 7,
+      intensity_zone: "Z2",
+      is_rest: false,
+    },
+    rest(3),
+    // Fri: short Z2
+    {
+      day_of_week: 4,
+      activity_type: "Löpning",
+      label: "Lugnt Z2",
+      description: "30 min Z2. Förbered för Z4-bekräftelsen i lördag.",
+      target_duration_minutes: 30,
+      target_distance_km: 5,
+      intensity_zone: "Z2",
+      is_rest: false,
+    },
+    // Sat: 4×5 min Z4 confirmation
+    {
+      day_of_week: 5,
+      activity_type: "Löpning",
+      label: "Bedömning: 4×5 min Z4 @ 90 %",
+      description:
+        "15 min uppv → 4×5 min Z4 (2 min lugn jogg) → 10 min ned. Bekräfta tröskelpuls och tempo. Jämför med första bedömningsveckan.",
+      target_duration_minutes: 55,
+      target_distance_km: 9,
+      intensity_zone: "Z4",
+      is_rest: false,
+    },
+    // Sun: easy long, lower volume than peak
+    {
+      day_of_week: 6,
+      activity_type: "Löpning",
+      label: "Lugnt långpass",
+      description: "60-75 min Z2. Pratstempo. Lägre volym (~65 % av föregående vecka) eftersom kroppen behöver hämta sig efter två testpass.",
+      target_duration_minutes: 70,
+      target_distance_km: 12,
+      intensity_zone: "Z2",
+      is_rest: false,
+    },
+  ];
+}
+
+// Recompute target_hours / target_sessions for a week after we have
+// overwritten its workouts (assessment-week post-LLM overwrite). Keeps the
+// summary numbers consistent with what's actually in plan_workouts.
+function _recomputeWeekTargets(workouts: AssessmentWorkout[]): { target_hours: number; target_sessions: number } {
+  const totalMin = workouts.reduce((acc, w) => acc + (w.is_rest ? 0 : (w.target_duration_minutes || 0)), 0);
+  const sessions = workouts.filter((w) => !w.is_rest).length;
+  return {
+    target_hours: Math.round((totalMin / 60) * 10) / 10,
+    target_sessions: sessions,
+  };
+}
+
+// Overwrite any week with phase === 'assessment' with the deterministic
+// assessment template. Both week 1 (preplan) and the auto mid-plan are
+// detected by position: the first assessment-phase week we see (if it is
+// week 1) is preplan; later ones are midplan.
+function applyAssessmentOverwrites(plan: LLMPlan, profileBaseline?: PlanRequest["baseline"], capacityProfile?: CapacityProfile): number[] {
+  const overwritten: number[] = [];
+  for (const week of plan.weeks) {
+    if ((week.phase || "").toLowerCase() !== "assessment") continue;
+    const kind: AssessmentKind = week.week_number === 1 ? "preplan" : "midplan";
+    const newWorkouts = buildAssessmentWeek(profileBaseline, capacityProfile, kind);
+    week.workouts = newWorkouts as unknown as LLMPlan["weeks"][0]["workouts"];
+    const recomputed = _recomputeWeekTargets(newWorkouts);
+    week.target_hours = recomputed.target_hours;
+    week.target_sessions = recomputed.target_sessions;
+    if (!week.notes || week.notes.trim().length < 5) {
+      week.notes = kind === "preplan"
+        ? "Bedömningsvecka — kalibrera puls, tröskel och 5 km-tid innan planen rampar."
+        : "Mid-plan bedömning — bekräfta puls och tempo, jämför med vecka 1.";
+    }
+    overwritten.push(week.week_number);
+  }
+  return overwritten;
+}
+
+// Build the assessment_baseline milestone rows the server adds for every
+// assessment week. Idempotent: if assessmentWeeks is empty, returns [].
+function buildAssessmentMilestoneRows(
+  assessmentWeeks: number[],
+  startSortOrder: number,
+  startDate: string,
+): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  let so = startSortOrder;
+  for (const wk of assessmentWeeks) {
+    const target = new Date(startDate);
+    target.setDate(target.getDate() + wk * 7 - 1);
+    out.push({
+      sort_order: so++,
+      target_week_number: wk,
+      target_date: target.toISOString().split("T")[0],
+      title: wk === 1
+        ? "Genomför bedömningsvecka 1 — kalibrera puls och 5 km-tid"
+        : `Bekräfta form i bedömningsvecka ${wk}`,
+      description: wk === 1
+        ? "Logga alla tre testpassen (HR-drift, tröskel, 5 km TT) — resultaten blir nya baselines i planen."
+        : "Logga båda bekräftelsepassen (5 km tempo + 4×5 min Z4) så vi kan jämföra mot vecka 1.",
+      metric_type: "assessment_baseline",
+      target_value: 2,
+      target_unit: "pass",
+      target_distance_km: null,
+      status: "pending",
+      source: "assessment",
+    });
+  }
+  return out;
+}
+
+// Convert LLM milestones into DB rows (with a target_date derived from
+// start_date + target_week_number, when present). Filters out malformed
+// entries and clamps sort_order monotonically.
+function llmMilestonesToRows(
+  llmMs: LLMMilestone[] | undefined,
+  startDate: string,
+): Array<Record<string, unknown>> {
+  if (!Array.isArray(llmMs) || llmMs.length === 0) return [];
+  const valid = llmMs.filter((m) => m && typeof m.title === "string" && m.title.trim().length > 0);
+  return valid.map((m, idx) => {
+    let target_date: string | null = null;
+    if (typeof m.target_week_number === "number" && m.target_week_number > 0) {
+      const d = new Date(startDate);
+      d.setDate(d.getDate() + m.target_week_number * 7 - 1);
+      target_date = d.toISOString().split("T")[0];
+    }
+    return {
+      sort_order: typeof m.sort_order === "number" ? m.sort_order : idx + 1,
+      target_week_number: m.target_week_number ?? null,
+      target_date,
+      title: m.title,
+      description: m.description ?? null,
+      metric_type: m.metric_type || "qualitative",
+      target_value: m.target_value ?? null,
+      target_unit: m.target_unit ?? null,
+      target_distance_km: m.target_distance_km ?? null,
+      status: "pending",
+      source: "ai",
+    };
+  });
 }
 
 function buildFreeTextSection(prefs: any): string {
@@ -1346,6 +1741,7 @@ serve(async (req) => {
       current_workout?: unknown;
       conversation_history?: { role: string; content: string }[];
       proposed_plan?: unknown;
+      milestones?: Array<Record<string, unknown>>;
     }) = await req.json();
 
     const db = supabaseAdmin();
@@ -1500,6 +1896,200 @@ Return ONLY a JSON object with these fields: activity_type, label, description, 
       );
     }
 
+    // ── CONFIRM_PLAN MODE: flip a draft plan -> active, persist edited
+    //    milestones, archive any other active plan, and create the
+    //    plan_derived (or plan_derived_race) row in user_goals so Mina mål
+    //    always shows the plan's primary goal. ──
+    if (body.mode === "confirm_plan" && body.plan_id) {
+      if (!(await assertPlanOwnership(body.plan_id))) {
+        return new Response(JSON.stringify({ error: "forbidden" }), {
+          status: 403,
+          headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+        });
+      }
+
+      const planId = body.plan_id;
+
+      // Load the draft plan so we can derive the goal row's title/date.
+      const { data: planRow, error: planRowErr } = await db
+        .from("training_plans")
+        .select("id, profile_id, name, goal_type, goal_text, goal_date, start_date, end_date, status")
+        .eq("id", planId)
+        .maybeSingle();
+      if (planRowErr || !planRow) {
+        return new Response(JSON.stringify({ error: "plan_not_found" }), {
+          status: 404,
+          headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+        });
+      }
+
+      // 1. Replace plan_milestones if the wizard sent edits.
+      const incomingMilestones = Array.isArray(
+        (body as unknown as Record<string, unknown>).milestones,
+      ) ? (body as unknown as { milestones: Array<Record<string, unknown>> }).milestones : null;
+      if (incomingMilestones && incomingMilestones.length > 0) {
+        // Wipe existing rows for this plan, then re-insert the edited set.
+        // Assessment-baseline rows are not editable in the wizard; they
+        // arrive unchanged in the payload, so we trust the client.
+        try {
+          await db.from("plan_milestones").delete().eq("plan_id", planId);
+          const rows = incomingMilestones.map((m, idx) => ({
+            plan_id: planId,
+            profile_id,
+            sort_order: typeof m.sort_order === "number" ? m.sort_order : idx + 1,
+            target_week_number: m.target_week_number ?? null,
+            target_date: m.target_date ?? null,
+            title: m.title ?? "Milstolpe",
+            description: m.description ?? null,
+            metric_type: m.metric_type ?? "qualitative",
+            target_value: m.target_value ?? null,
+            target_unit: m.target_unit ?? null,
+            target_distance_km: m.target_distance_km ?? null,
+            status: "pending",
+            source: m.source ?? "user",
+          }));
+          if (rows.length > 0) {
+            const { error: msErr } = await db.from("plan_milestones").insert(rows);
+            if (msErr) {
+              console.warn("confirm_plan: replacing milestones failed (non-fatal):", msErr);
+            }
+          }
+        } catch (e) {
+          console.warn("confirm_plan: milestone replace threw (non-fatal):", e);
+        }
+      }
+
+      // 2. Archive any OTHER active plan for this profile (current draft is
+      //    not active yet, so the unique index will not collide).
+      await db.from("training_plans")
+        .update({ status: "archived" })
+        .eq("profile_id", profile_id)
+        .eq("status", "active");
+
+      // 3. Flip this plan to active.
+      const { error: flipErr } = await db.from("training_plans")
+        .update({ status: "active" })
+        .eq("id", planId);
+      if (flipErr) {
+        console.error("confirm_plan: flip to active failed", flipErr);
+        return new Response(JSON.stringify({ error: "internal_error" }), {
+          status: 500,
+          headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+        });
+      }
+
+      // 4. Ensure a plan_derived (or plan_derived_race) row in user_goals.
+      //    We try insert first; on conflict we patch the existing row.
+      const isRace = (planRow.goal_type || "").toLowerCase() === "race";
+      const goalType = isRace ? "plan_derived_race" : "plan_derived";
+
+      // Pick a target_distance_km from the longest distance milestone, if any.
+      let targetDistanceKm: number | null = null;
+      try {
+        const { data: msRows } = await db
+          .from("plan_milestones")
+          .select("metric_type, target_distance_km, target_value, target_unit")
+          .eq("plan_id", planId);
+        if (msRows && msRows.length > 0) {
+          const longest = msRows
+            .map((r: Record<string, unknown>) => {
+              if (typeof r.target_distance_km === "number") return r.target_distance_km;
+              if (r.metric_type === "distance_in_session" && (r.target_unit === "km" || !r.target_unit) && typeof r.target_value === "number") {
+                return r.target_value;
+              }
+              return 0;
+            })
+            .reduce((a: number, b: number) => Math.max(a, b), 0);
+          if (longest > 0) targetDistanceKm = longest;
+        }
+      } catch (_e) { /* non-fatal */ }
+
+      const goalTitle = (planRow.name && String(planRow.name).trim()) || planRow.goal_text || "Träningsplan";
+      const goalTargetDate = isRace
+        ? (planRow.goal_date || null)
+        : (planRow.goal_date || planRow.end_date || null);
+
+      // user_goals.target_value / target_unit are NOT NULL — match the
+      // existing _ensurePlanDerivedRaceGoal helper convention by writing
+      // sentinel values (frontend ignores them on plan-derived rows).
+      const goalTargetValue = isRace ? 0 : 1;
+      const goalTargetUnit = isRace ? "race" : "plan";
+
+      let createdGoalId: string | null = null;
+      try {
+        const { data: existingGoal } = await db
+          .from("user_goals")
+          .select("id")
+          .eq("plan_id", planId)
+          .in("goal_type", ["plan_derived_race", "plan_derived"])
+          .maybeSingle();
+
+        if (existingGoal && existingGoal.id) {
+          const { error: patchErr } = await db
+            .from("user_goals")
+            .update({
+              goal_type: goalType,
+              title: goalTitle,
+              target_value: goalTargetValue,
+              target_unit: goalTargetUnit,
+              target_date: goalTargetDate,
+              target_distance_km: targetDistanceKm,
+              notes: planRow.goal_text || null,
+              active: true,
+              baseline_date: planRow.start_date,
+            })
+            .eq("id", existingGoal.id);
+          if (patchErr) {
+            console.warn("confirm_plan: patch user_goals failed (non-fatal):", patchErr);
+          } else {
+            createdGoalId = existingGoal.id;
+          }
+        } else {
+          const { data: newGoal, error: insertGoalErr } = await db
+            .from("user_goals")
+            .insert({
+              profile_id,
+              plan_id: planId,
+              goal_type: goalType,
+              title: goalTitle,
+              target_value: goalTargetValue,
+              target_unit: goalTargetUnit,
+              target_date: goalTargetDate,
+              target_distance_km: targetDistanceKm,
+              baseline_date: planRow.start_date,
+              notes: planRow.goal_text || null,
+              active: true,
+            })
+            .select("id")
+            .single();
+          if (insertGoalErr) {
+            console.warn("confirm_plan: insert user_goals failed (non-fatal):", insertGoalErr);
+          } else if (newGoal) {
+            createdGoalId = newGoal.id;
+          }
+        }
+      } catch (e) {
+        console.warn("confirm_plan: ensure user_goals threw (non-fatal):", e);
+      }
+
+      // 5. Re-read milestones so the client gets the canonical view.
+      const { data: finalMs } = await db
+        .from("plan_milestones")
+        .select("*")
+        .eq("plan_id", planId)
+        .order("sort_order", { ascending: true });
+
+      return new Response(
+        JSON.stringify({
+          plan_id: planId,
+          status: "active",
+          goal_id: createdGoalId,
+          milestones: finalMs ?? [],
+        }),
+        { status: 200, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
+      );
+    }
+
     // ── EDIT MODE: modify existing plan via AI chat (legacy direct-apply) ──
     if (body.mode === "edit" && body.plan_id && body.instruction) {
       if (!(await assertPlanOwnership(body.plan_id))) {
@@ -1592,11 +2182,22 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
       );
     }
 
-    // 3. Archive existing active plan
-    await db.from("training_plans")
-      .update({ status: "archived" })
-      .eq("profile_id", profile_id)
-      .eq("status", "active");
+    // 3. Look up the profile's adaptive_replan_enabled flag — gates the
+    //    auto mid-plan assessment week.
+    let adaptiveReplanEnabled = true;
+    try {
+      const { data: profileFlagRow } = await db
+        .from("profiles")
+        .select("adaptive_replan_enabled")
+        .eq("id", profile_id)
+        .maybeSingle();
+      if (profileFlagRow && typeof profileFlagRow.adaptive_replan_enabled === "boolean") {
+        adaptiveReplanEnabled = profileFlagRow.adaptive_replan_enabled;
+      }
+    } catch (_e) {
+      // Migration may not be applied yet -- default to enabled.
+      adaptiveReplanEnabled = true;
+    }
 
     // 4. Fetch recent workout history for context
     const fourWeeksAgo = new Date();
@@ -1620,8 +2221,30 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
     // 5. Build prompt and call LLM (with one validation-driven retry to
     //    catch all-Z2 weeks before they reach the database).
     const startDate = body.start_date || new Date().toISOString().split("T")[0];
-    const { prompt: userPrompt, profile, feasibility } = buildUserPrompt(body, historyStr);
+
+    // Decide whether to inject assessment weeks into the deterministic
+    // phase plan. Week 1 is the user's opt-in; mid-plan is automatic when
+    // the plan is long enough AND the profile has the feature flag on.
+    const computedNumWeeks = (() => {
+      if (body.goal_date) {
+        const diffMs = new Date(body.goal_date).getTime() - new Date(startDate).getTime();
+        return Math.max(4, Math.min(24, Math.ceil(diffMs / (7 * 86400000))));
+      }
+      return 12;
+    })();
+    const phaseOpts: PhasePlanOpts = {
+      assessmentWeek1: !!body.preferences?.include_assessment_week_1,
+      midplanAssessment: adaptiveReplanEnabled && computedNumWeeks >= 20,
+    };
+
+    const { prompt: userPrompt, profile, feasibility } = buildUserPrompt(body, historyStr, phaseOpts);
     const { plan, validation, retried } = await generatePlanWithRetry(userPrompt, profile);
+
+    // 5b. Server-side overwrite of any assessment-phase weeks. The LLM was
+    //     told these are placeholders; we now replace their workouts with
+    //     the deterministic test protocol so every user gets the same
+    //     calibration regardless of model drift.
+    const overwrittenAssessmentWeeks = applyAssessmentOverwrites(plan, body.baseline, profile);
     const validationWarnings = validation.valid
       ? []
       : validation.weekResults
@@ -1656,7 +2279,9 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
     endDate.setDate(endDate.getDate() + numWeeks * 7 - 1);
     const endDateStr = endDate.toISOString().split("T")[0];
 
-    // 7. Insert training_plan
+    // 7. Insert training_plan as DRAFT. The wizard's milestone-review step
+    //    calls confirm_plan to flip draft -> active and archive any other
+    //    active plan for this profile.
     const { data: tpData, error: tpErr } = await db.from("training_plans").insert({
       profile_id,
       name: plan.plan_name || body.goal_text || "Träningsplan",
@@ -1668,7 +2293,7 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
       preferences: body.preferences,
       start_date: startDate,
       end_date: endDateStr,
-      status: "active",
+      status: "draft",
       generation_model: LLM_PROVIDER === "gemini" ? "gemini-2.0-flash" : LLM_PROVIDER === "anthropic" ? "claude-sonnet" : "gpt-4o",
     }).select("id").single();
 
@@ -1725,7 +2350,41 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
       }
     }
 
-    // 9. Return success
+    // 8b. Insert plan_milestones rows: LLM-generated first, then any
+    //     assessment_baseline rows the server adds for assessment weeks.
+    //     Best-effort: failures are logged but do not fail the request --
+    //     the wizard can still proceed and milestones will be re-generated
+    //     later via the check-in backfill path.
+    const llmRows = llmMilestonesToRows(plan.milestones, startDate);
+    const assessmentRows = buildAssessmentMilestoneRows(
+      overwrittenAssessmentWeeks,
+      llmRows.length + 1,
+      startDate,
+    );
+    const allMilestoneRows = [...llmRows, ...assessmentRows].map((r) => ({
+      ...r,
+      plan_id: planId,
+      profile_id,
+    }));
+    let insertedMilestones: Array<Record<string, unknown>> = [];
+    if (allMilestoneRows.length > 0) {
+      try {
+        const { data: msInserted, error: msErr } = await db
+          .from("plan_milestones")
+          .insert(allMilestoneRows)
+          .select("*");
+        if (msErr) {
+          console.warn("generate-plan: insert plan_milestones failed (non-fatal):", msErr);
+        } else if (msInserted) {
+          insertedMilestones = msInserted;
+        }
+      } catch (e) {
+        console.warn("generate-plan: insert plan_milestones threw (non-fatal):", e);
+      }
+    }
+
+    // 9. Return success — plan is in DRAFT state. The wizard collects the
+    //    user's milestone edits and calls mode='confirm_plan' to finalize.
     return new Response(
       JSON.stringify({
         plan_id: planId,
@@ -1734,6 +2393,10 @@ Apply the user's instruction to the plan. Return the COMPLETE modified plan in t
         weeks: numWeeks,
         start_date: startDate,
         end_date: endDateStr,
+        status: "draft",
+        requires_confirmation: true,
+        milestones: insertedMilestones,
+        assessment_weeks: overwrittenAssessmentWeeks,
         validation_warnings: validationWarnings,
         profile,
         feasibility,

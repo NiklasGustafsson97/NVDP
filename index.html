@@ -734,7 +734,7 @@
           <button type="button" class="btn btn-primary btn-sm" id="goal-add-btn" onclick="openAddGoalSheet()">+ Lägg till mål</button>
         </div>
         <div id="goals-race-section" hidden>
-          <div class="goals-section-label">Racemål</div>
+          <div class="goals-section-label" id="goals-race-label">Mål från ditt schema</div>
           <div id="goals-race-cards"></div>
         </div>
         <div id="goals-custom-section">
@@ -1307,6 +1307,18 @@
         <div class="wizard-step-title">Coachens förslag</div>
         <div class="cc-coach-note" id="cc-coach-note"></div>
       </div>
+      <!-- Horizon-regen panel: shown when the response includes a hard
+           re-plan (e.g. an assessment week was just completed). Surfaces
+           the headline summary + "what changed in your horizon" before
+           the per-day diff list. -->
+      <div id="cc-horizon-panel" class="cc-horizon-panel hidden">
+        <div class="cc-horizon-head">
+          <span class="cc-horizon-icon" aria-hidden="true">⚑</span>
+          <strong id="cc-horizon-title">Coachen har räknat om kommande veckor</strong>
+        </div>
+        <p class="cc-horizon-sub" id="cc-horizon-sub"></p>
+        <ul class="cc-horizon-bullets" id="cc-horizon-bullets"></ul>
+      </div>
       <div id="cc-diff-list" class="cc-diff-list"></div>
       <div class="cc-diff-empty hidden" id="cc-diff-empty">
         <p>Coachen har inget att ändra den här veckan — kör på som planerat.</p>
@@ -1339,7 +1351,7 @@
     </div>
 
     <!-- Progress indicator -->
-    <div class="wizard-step-banner" id="wizard-step-banner" aria-live="polite">Steg 1 av 5</div>
+    <div class="wizard-step-banner" id="wizard-step-banner" aria-live="polite">Steg 1 av 6</div>
     <div class="wizard-progress">
       <div class="wizard-step-dot active" data-step="0"></div>
       <div class="wizard-step-line"></div>
@@ -1350,6 +1362,8 @@
       <div class="wizard-step-dot" data-step="3"></div>
       <div class="wizard-step-line"></div>
       <div class="wizard-step-dot" data-step="4"></div>
+      <div class="wizard-step-line"></div>
+      <div class="wizard-step-dot" data-step="5"></div>
     </div>
 
     <!-- Intro 0: Goal -->
@@ -1469,6 +1483,21 @@
         <label>Nuvarande lugnt tempo (min/km)</label>
         <div class="wiz-field-hint">Tempo du kan hålla i 60+ minuter utan att bli andfådd &mdash; du ska kunna föra ett samtal (pratvänligt tempo, ungefär puls-zon 2).</div>
         <input type="text" id="wiz-easy-pace" placeholder="t.ex. 5:45">
+      </div>
+      <div class="wiz-section-divider"></div>
+      <div class="wiz-assessment-callout" id="wiz-assessment-callout">
+        <div class="wiz-assessment-head">
+          <span class="wiz-assessment-icon" aria-hidden="true">⚑</span>
+          <strong>Osäker på dina värden?</strong>
+        </div>
+        <label class="wiz-assessment-check">
+          <input type="checkbox" id="wiz-assessment-week-1">
+          <span class="wiz-assessment-text">
+            Lägg in en bedömningsvecka som vecka 1 &mdash; tre lätta testpass kalibrerar puls,
+            5&nbsp;km-tid och pratstempo innan planen drar igång.
+          </span>
+        </label>
+        <div class="wiz-assessment-hint">Resterande veckor anpassas efter dina testresultat.</div>
       </div>
     </div>
 
@@ -1635,6 +1664,20 @@
           <div class="wiz-run-fact-text" id="wiz-run-fact-text">&nbsp;</div>
         </div>
       </div>
+    </div>
+
+    <!-- Step 5 (milestone review): shown after a successful draft plan has been
+         created. Lets the user inspect the suggested milestones (including any
+         server-injected assessment-baseline checkpoints) before activating the
+         plan via /generate-plan?mode=confirm_plan. -->
+    <div class="wizard-step" id="wizard-step-milestones" style="display:none">
+      <div class="wizard-step-title">Granska milstolpar</div>
+      <div class="wizard-step-subtitle">Så här mäter vi att du är på rätt väg mot målet</div>
+      <div id="wiz-milestones-summary" class="wiz-milestones-summary"></div>
+      <div id="wiz-milestones-list" class="wiz-milestones-list"></div>
+      <p class="wiz-realism-cta-hint" id="wiz-milestones-hint">
+        Du kan justera dina milstolpar senare under <strong>Dina mål</strong>.
+      </p>
     </div>
 
     <!-- Navigation buttons -->

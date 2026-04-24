@@ -112,6 +112,7 @@ const PHASE_LABELS = {
   taper: 'Nedtrappning',
   deload: 'Deload',
   recovery: 'Återhämtning',
+  assessment: 'Bedömning',
 };
 
 // ── Strava Integration ──

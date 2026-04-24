@@ -3182,6 +3182,16 @@ input.code-input {
 .phase-taper { background: rgba(155,89,182,0.12); color: #9B59B6; }
 .phase-deload { background: rgba(231,76,60,0.12); color: #E74C3C; }
 .phase-recovery { background: rgba(26,188,156,0.12); color: #1ABC9C; }
+.phase-assessment {
+  background: rgba(255,176,32,0.18);
+  color: #C77F00;
+  box-shadow: inset 0 0 0 1px rgba(255,176,32,0.45);
+}
+.phase-assessment::before {
+  content: '⚑ ';
+  font-size: 0.85em;
+  vertical-align: -1px;
+}
 
 /* ── Schema Plan Target Duration ── */
 .sr-target { font-size: 0.7rem; color: var(--text-dim); margin-top: 2px; }
@@ -4964,3 +4974,358 @@ body.chat-mode #view-coach { height: 100%; }
 }
 #gate button:hover { background: #2474a8; transform: translateY(-1px); }
 #gate .error { color: #E74C3C; font-size: 0.85rem; margin-top: 0.75rem; min-height: 1.2em; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Adaptive plans + assessment weeks (2026-04-24)
+
+   Visual design tokens for:
+   - assessment-week banners (dashboard / schema header / plan preview)
+   - milestone timelines on Mina mål
+   - the primary plan-derived goal card (Huvudmål)
+   - the "Frågor om ditt mål" Q&A panel
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Inline banner used by dashboard cards, schema header, plan preview to
+   call out that the upcoming/current week is a calibration week. */
+.assessment-banner {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  margin: 6px 0 10px;
+  background: rgba(255,176,32,0.10);
+  border: 1px solid rgba(255,176,32,0.35);
+  border-radius: 10px;
+  font-size: 0.82rem;
+  color: #C77F00;
+  font-weight: 600;
+}
+.assessment-banner .ab-icon { font-size: 1.05em; }
+.assessment-banner .ab-text { line-height: 1.35; font-weight: 500; color: var(--text); }
+.assessment-banner .ab-text strong { color: #C77F00; font-weight: 700; }
+
+/* Variants for the banner placements. */
+.ddc-assessment-banner { margin: 0 0 10px; }
+.schema-assessment-banner { margin: 0 0 12px; }
+.pm-assessment-banner { margin: 6px 0 8px; font-size: 0.78rem; }
+
+.pm-prev-day--assess {
+  background: rgba(255,176,32,0.08);
+  border-radius: 6px;
+}
+.pm-prev-week-label--assess { color: #C77F00; font-weight: 700; }
+.pe-assessment-banner { margin: 6px 0 8px; font-size: 0.78rem; }
+.pe-week-label--assess { color: #C77F00; font-weight: 700; }
+.pe-card.pe-card--assess {
+  border-color: rgba(255,176,32,0.45);
+  box-shadow: inset 3px 0 0 rgba(255,176,32,0.55);
+}
+
+/* Coach check-in: horizon-regen panel (shown after assessment week or
+   when a soft trigger upgrades into a multi-week re-plan). */
+.cc-horizon-panel {
+  margin: 8px 0 12px;
+  padding: 12px 14px;
+  background: rgba(255,176,32,0.08);
+  border: 1px solid rgba(255,176,32,0.32);
+  border-radius: 12px;
+  color: var(--text);
+}
+.cc-horizon-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 0.95rem;
+  color: #C77F00;
+  margin-bottom: 4px;
+}
+.cc-horizon-icon { font-size: 1.05em; }
+.cc-horizon-sub {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+  color: var(--text);
+  line-height: 1.4;
+}
+.cc-horizon-bullets {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.cc-horizon-bullets li { margin-bottom: 2px; }
+
+/* Schedule plan card highlighted as a test pass. */
+.sr-pass-card.sr-pass-assessment {
+  border-color: rgba(255,176,32,0.45);
+  background: rgba(255,176,32,0.05);
+  box-shadow: inset 3px 0 0 rgba(255,176,32,0.55);
+}
+
+/* Dashboard plan body when in an assessment week. */
+.ddc-plan.ddc-plan--assessment .ddc-plan-title { color: #C77F00; }
+
+/* Wizard "Osäker?" callout that hosts the include_assessment_week_1 checkbox. */
+.wiz-assessment-callout {
+  margin-top: 6px;
+  padding: 14px 14px 12px;
+  background: rgba(255,176,32,0.08);
+  border: 1px solid rgba(255,176,32,0.32);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wiz-assessment-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.92rem;
+  color: #C77F00;
+}
+.wiz-assessment-icon { font-size: 1.05em; }
+.wiz-assessment-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+.wiz-assessment-check input[type="checkbox"] {
+  margin-top: 3px;
+  width: 18px; height: 18px;
+  accent-color: #C77F00;
+}
+.wiz-assessment-text { color: var(--text); }
+.wiz-assessment-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-left: 28px;
+}
+
+/* Wizard step 5: milestone-review list. */
+.wiz-milestones-summary {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  background: var(--surface-2, #f7f8fa);
+  border-radius: 12px;
+}
+.wiz-milestones-plan-name { font-weight: 700; font-size: 1rem; color: var(--text); }
+.wiz-milestones-plan-meta { font-size: 0.82rem; color: var(--text-muted); margin-top: 2px; }
+.wiz-milestones-assess-note {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(255,176,32,0.08);
+  border: 1px solid rgba(255,176,32,0.32);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.wiz-milestones-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wiz-milestones-empty {
+  padding: 18px;
+  text-align: center;
+  color: var(--text-muted);
+  background: var(--surface-2, #f7f8fa);
+  border-radius: 10px;
+  font-size: 0.9rem;
+}
+.wiz-milestone-row {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.wiz-milestone-row--assess {
+  background: rgba(255,176,32,0.06);
+  border-color: rgba(255,176,32,0.32);
+}
+.wiz-milestone-week {
+  align-self: start;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-align: center;
+  padding-top: 2px;
+}
+.wiz-milestone-row--assess .wiz-milestone-week { color: #C77F00; }
+.wiz-milestone-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.wiz-milestone-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.wiz-milestone-title { font-weight: 600; color: var(--text); font-size: 0.95rem; }
+.wiz-milestone-tag {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  background: var(--surface-2, #f0f1f5);
+  color: var(--text-muted);
+}
+.wiz-milestone-tag--assess {
+  background: rgba(255,176,32,0.18);
+  color: #C77F00;
+}
+.wiz-milestone-desc { font-size: 0.85rem; color: var(--text-muted); line-height: 1.35; }
+.wiz-milestone-target { font-size: 0.82rem; color: var(--text); font-weight: 500; }
+
+/* Smaller badge variant for plan-preview calendar chips. */
+.day-badge--test {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(255,176,32,0.18);
+  color: #C77F00;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  margin-left: 4px;
+  vertical-align: 1px;
+}
+
+/* ── Milestone timeline (Mina mål card) ─────────────────────────── */
+.milestone-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.milestone-timeline-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.milestone-row {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  gap: 10px;
+  align-items: start;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 8px;
+  border-left: 3px solid rgba(255,255,255,0.08);
+}
+.milestone-row--assessment {
+  border-left-color: rgba(255,176,32,0.55);
+  background: rgba(255,176,32,0.06);
+}
+.milestone-week {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding-top: 2px;
+}
+.milestone-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.milestone-title { font-size: 0.92rem; font-weight: 600; line-height: 1.25; }
+.milestone-evidence { font-size: 0.78rem; color: var(--text-muted); line-height: 1.35; }
+.milestone-status-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+  align-self: center;
+}
+.milestone-status-pill--hit { background: rgba(46,204,113,0.18); color: #27ae60; }
+.milestone-status-pill--on { background: rgba(52,152,219,0.18); color: #2980b9; }
+.milestone-status-pill--lag { background: rgba(243,156,18,0.18); color: #C77F00; }
+.milestone-status-pill--miss { background: rgba(231,76,60,0.18); color: #c0392b; }
+.milestone-status-pill--pending { background: rgba(255,255,255,0.08); color: var(--text-muted); }
+
+/* ── Primary plan-derived goal card (always pinned at top of Mina mål) ── */
+.goal-card--primary {
+  border: 1px solid rgba(46,134,193,0.35);
+  box-shadow: 0 2px 14px rgba(46,134,193,0.10);
+  position: relative;
+}
+.goal-card--primary::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  background: linear-gradient(180deg, #2E86C1 0%, #1ABC9C 100%);
+  border-radius: 4px 0 0 4px;
+}
+.goal-chip-primary {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(46,134,193,0.18);
+  color: #2E86C1;
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-right: 8px;
+  vertical-align: 2px;
+}
+.goal-headline {
+  margin: 8px 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  line-height: 1.4;
+  font-weight: 600;
+}
+.goal-headline--på-väg { background: rgba(46,204,113,0.10); color: var(--text); border-left: 3px solid #2ECC71; }
+.goal-headline--tufft { background: rgba(243,156,18,0.10); color: var(--text); border-left: 3px solid #F39C12; }
+.goal-headline--efter { background: rgba(231,76,60,0.10); color: var(--text); border-left: 3px solid #E74C3C; }
+
+/* ── Frågor om ditt mål panel (mini Q&A) ────────────────────────── */
+.goal-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 8px;
+}
+.goal-questions-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.goal-question {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 8px;
+  align-items: start;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+.goal-question .gq-icon {
+  color: var(--text-muted);
+  font-size: 0.95em;
+  padding-top: 2px;
+}
+.goal-question .gq-q { color: var(--text-muted); font-weight: 600; }
+.goal-question .gq-a { color: var(--text); }
+.goal-question .gq-fix { color: #2E86C1; font-style: italic; }
