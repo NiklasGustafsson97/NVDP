@@ -208,54 +208,14 @@ serve(async (req) => {
       incrementalAfter = Math.min(lastSyncTs || sixtyDaysAgo, fourteenDaysAgo);
     }
 
-    // First verify the token works by checking athlete profile. If Strava
-    // returns 401, our stored access_token has been server-side
-    // invalidated even though `expires_at` says it should still be valid
-    // (e.g. force-rotated, or the user changed Strava password). Force a
-    // refresh and retry once before giving up — and only then surface
-    // strava_auth_revoked so the UI can prompt re-auth.
-    let athleteRes = await fetch("https://www.strava.com/api/v3/athlete", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (athleteRes.status === 401) {
-      const errBody = await athleteRes.text();
-      console.warn("strava-sync: /athlete returned 401, force-refreshing token", errBody.slice(0, 300));
-      const fresh = await forceRefreshStravaToken(conn);
-      if (!fresh) {
-        return new Response(
-          JSON.stringify({ error: "strava_auth_revoked" }),
-          { status: 401, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
-        );
-      }
-      accessToken = fresh;
-      athleteRes = await fetch("https://www.strava.com/api/v3/athlete", {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (athleteRes.status === 401) {
-        // Refresh succeeded but the new token still gets rejected — that
-        // shouldn't happen unless the user revoked the app between the
-        // refresh and this call. Treat as revoked.
-        return new Response(
-          JSON.stringify({ error: "strava_auth_revoked" }),
-          { status: 401, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
-        );
-      }
-    }
-    if (!athleteRes.ok) {
-      const errBody = await athleteRes.text();
-      console.error("strava-sync: athlete endpoint error", athleteRes.status, errBody.slice(0, 500));
-      return new Response(
-        JSON.stringify({
-          error: "strava_api_error",
-          strava_status: athleteRes.status,
-          // Surface a short snippet so the client alert isn't a black box.
-          // Strava errors don't carry user data; safe to forward.
-          strava_message: errBody.slice(0, 200),
-        }),
-        { status: 502, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
-      );
-    }
-    const athlete = await athleteRes.json();
+    // We used to do a defensive `GET /athlete` here to verify the token.
+    // It was pure overhead: the very next request (the activities list)
+    // would catch the same 401 / rate-limit anyway, and the extra call
+    // chewed through ~1/100 of Strava's 15-minute application budget on
+    // every chunk of a deep sync. The activities loop below now handles
+    // 401 (force-refresh + retry, then strava_auth_revoked if it still
+    // fails) and 429 (propagated as rate_limited with retry_after_s) on
+    // its own, so the health check is gone.
 
     // --- Page loop ----------------------------------------------------
     let page = 1;
@@ -277,7 +237,6 @@ serve(async (req) => {
       deep_floor: deepFloor,
       deep_anchor_in: deepAnchor,
       incremental_after: incrementalAfter,
-      athlete_id: athlete.id,
       activity_log: activityLog,
     };
 
@@ -304,7 +263,31 @@ serve(async (req) => {
           `?after=${incrementalAfter}&per_page=${perPage}&page=${page}`;
       }
 
-      const listResult = await fetchStravaWithRetry(listUrl, accessToken, budgetMsLeft());
+      let listResult = await fetchStravaWithRetry(listUrl, accessToken, budgetMsLeft());
+
+      // 401 → token went stale server-side (force-rotated by Strava, app
+      // revoked, password change). Try a force-refresh once and retry the
+      // same page. If the refresh itself fails or the retry still 401s,
+      // surface strava_auth_revoked so the UI can prompt re-auth.
+      if (listResult.res?.status === 401) {
+        console.warn("strava-sync: /activities returned 401 on page", page, "— force-refreshing token");
+        const fresh = await forceRefreshStravaToken(conn);
+        if (!fresh) {
+          return new Response(
+            JSON.stringify({ error: "strava_auth_revoked" }),
+            { status: 401, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
+          );
+        }
+        accessToken = fresh;
+        listResult = await fetchStravaWithRetry(listUrl, accessToken, budgetMsLeft());
+        if (listResult.res?.status === 401) {
+          return new Response(
+            JSON.stringify({ error: "strava_auth_revoked" }),
+            { status: 401, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
+          );
+        }
+      }
+
       if (listResult.rateLimited) {
         rateLimited = true;
         retryAfterS = listResult.retryAfterS;
@@ -316,6 +299,19 @@ serve(async (req) => {
         const errBody = listResult.res ? await listResult.res.text() : (listResult.error?.message ?? "");
         console.error("strava-sync: activities endpoint error", status, errBody.slice(0, 500));
         debug.activities_error = { page, status };
+        // For 4xx other than 401 (we handled that above), don't break
+        // silently — surface the upstream status to the client so it can
+        // show a useful message instead of "0 importerade".
+        if (status >= 400 && status < 500) {
+          return new Response(
+            JSON.stringify({
+              error: "strava_api_error",
+              strava_status: status,
+              strava_message: errBody.slice(0, 200),
+            }),
+            { status: 502, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
+          );
+        }
         break;
       }
 
@@ -501,8 +497,12 @@ serve(async (req) => {
       debug.pages_processed = pagesProcessed;
       debug.chunk_exhausted = chunkExhausted;
     } else {
-      // Incremental path: legacy semantics — bump last_sync_at iff we
-      // actually heard back from Strava (even with 0 activities).
+      // Incremental path: bump last_sync_at iff we actually heard back
+      // from Strava (even with 0 activities). If we got rate-limited
+      // before page 1 returned anything, leave last_sync_at alone and
+      // signal not-done so the client surfaces the wait — otherwise the
+      // legacy `done: true, imported: 0` reply makes a rate-limited sync
+      // look indistinguishable from a successful empty one.
       if (totalFetched > 0) {
         newSyncAt = new Date().toISOString();
         await db
@@ -510,8 +510,13 @@ serve(async (req) => {
           .update({ last_sync_at: newSyncAt })
           .eq("id", conn.id);
       }
-      done = true;
-      progressPct = 100;
+      if (rateLimited && totalFetched === 0) {
+        done = false;
+        progressPct = 0;
+      } else {
+        done = true;
+        progressPct = 100;
+      }
     }
 
     // --- Derive user_max_hr (unchanged) -------------------------------

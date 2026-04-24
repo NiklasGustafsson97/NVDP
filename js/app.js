@@ -8872,7 +8872,16 @@ async function syncStrava() {
         `error=${result.skippedError||0})`,
         result.debug
       );
-      await showAlertModal('Synk klar', buildStravaSyncMessage(result));
+      if (result.rate_limited && !result.done) {
+        const waitS = Math.max(5, Math.min(900, result.retry_after_s || 60));
+        const waitMin = Math.ceil(waitS / 60);
+        await showAlertModal(
+          'Strava rate-limit',
+          `Strava begränsar antal anrop (~100 per 15 min). Vänta ${waitMin} min och försök igen — eller använd "Synka allt" som väntar automatiskt mellan steg.`
+        );
+      } else {
+        await showAlertModal('Synk klar', buildStravaSyncMessage(result));
+      }
       navigate(currentView);
     } else {
       const status = res.status;
