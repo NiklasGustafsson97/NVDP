@@ -54,7 +54,7 @@
   -->
   <link rel="icon" type="image/svg+xml"
     href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Crect%20width='100'%20height='100'%20rx='20'%20fill='%233498DB'/%3E%3Ctext%20x='50'%20y='70'%20font-family='Arial,sans-serif'%20font-size='62'%20font-weight='bold'%20text-anchor='middle'%20fill='white'%3EN%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/style.css?v=3f98787">
+  <link rel="stylesheet" href="css/style.css?v=friendly-metrics-v1">
   <!--
     PERF (Improvement #4): all script tags below now use `defer` so they
     download in parallel with HTML parsing and execute, in document order,
@@ -587,14 +587,15 @@
         </div>
 
         <div class="pmc-info-popover hidden" id="pmc-info-popover" role="region" aria-label="Förklaring">
-          <p><strong>Formtopp</strong> visar var du är i tränings­cykeln just nu. Det enda värdet du behöver titta på dagligen är <strong>TSB (form)</strong>:</p>
+          <p><strong>Formtopp</strong> visar var du är i tränings­cykeln just nu, på en skala 0–100:</p>
           <ul>
-            <li><strong>&gt; +5</strong> — utvilad, redo för nyckelpass eller tävling.</li>
-            <li><strong>−10 till −30</strong> — bygger fitness, normalt trött.</li>
-            <li><strong>&lt; −30</strong> — för hög belastning, dra ner.</li>
+            <li><strong>≥ 64</strong> — utvilad, redo för nyckelpass eller tävling.</li>
+            <li><strong>36–64</strong> — i balans, kör enligt plan.</li>
+            <li><strong>1–36</strong> — bygger fitness, normalt trött.</li>
+            <li><strong>0</strong> — för hög belastning, dra ner.</li>
           </ul>
-          <p class="pmc-info-meta">CTL = långsiktig fitness (42 dagar, se "Fitness"-grafen nedan). TSB = form i förhållande till trötthet.</p>
-          <p class="pmc-info-meta"><strong>OBS — TSB rör sig "bakvänt":</strong> när du tränar hårt går TSB <em>ner</em> (du staplar trötthet snabbare än du bygger fitness). När du vilar går TSB <em>upp</em> (tröttheten faller snabbt, fitness faller långsamt). Du peakar genom att tapera, inte genom att köra hårt sista veckan. Samma räknesätt som Garmin Training Status och TrainingPeaks.</p>
+          <p class="pmc-info-meta">Tekniskt är detta en omskalning av <strong>TSB</strong> (Training Stress Balance, samma siffra som Garmin och TrainingPeaks använder). TSB = långsiktig fitness (CTL, 42 d) minus aktuell trötthet (ATL, 7 d). Vi mappar TSB-intervallet −30 → +25 till 0 → 100 så det blir lättare att läsa av en blick.</p>
+          <p class="pmc-info-meta"><strong>OBS — Formtopp rör sig "bakvänt":</strong> när du tränar hårt går scoren <em>ner</em> (trötthet stiger snabbare än fitness). När du vilar går scoren <em>upp</em> (trötthet faller snabbt, fitness faller långsamt). Du peakar genom att tapera, inte genom att köra hårt sista veckan.</p>
         </div>
 
         <div class="chart-container chart-container--skeleton" id="chart-pmc-wrap">
@@ -607,7 +608,18 @@
 
       <div class="card" id="pmc-ctl-card">
         <div class="card-header">
-          <span class="card-title">Fitness</span>
+          <span class="card-title">Personal fitness score</span>
+          <button type="button" class="pmc-info-btn" id="pmc-ctl-info-btn"
+                  onclick="togglePopover('pmc-ctl-info-popover','pmc-ctl-info-btn')"
+                  aria-label="Visa förklaring" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          </button>
+        </div>
+
+        <div class="pmc-info-popover hidden" id="pmc-ctl-info-popover" role="region" aria-label="Förklaring">
+          <p><strong>Personal fitness score</strong> visar hur du tränat över tid jämfört med när du började mäta. <strong>1.00 = startnivå.</strong> Värden över 1 = du är mer vältränad nu än då (1.50 = +50 %). Värden under 1 = du har tappat fitness sen start.</p>
+          <p class="pmc-info-meta">Tekniskt är detta din <strong>CTL</strong> (Chronic Training Load — 42-dagars exponentiellt glidande snitt av effort, samma siffra som Garmin och TrainingPeaks använder) dividerad med din CTL efter 28 dagars trä­nings­data. Vi väntar 28 dagar så att EWMA-kurvan hinner stabilisera sig innan vi ankarpunkten — annars skulle nya användare få vilda hopp i ratio från små denominators.</p>
+          <p class="pmc-info-meta"><strong>Hur den rör sig:</strong> stiger när du tränar konsekvent över tid, faller när du vilar för länge eller backar i volym. En 0.05–0.10 svängning över ett par veckor är normalt — fokusera på trenden över månader, inte enskilda dagar.</p>
         </div>
 
         <div class="chart-container chart-container--skeleton" id="chart-pmc-ctl-wrap">
@@ -659,7 +671,7 @@
               tabindex="0"
               role="button"
               aria-label="Vad är VO2max?"
-              title="Beräknad från dina löppass via Jack Daniels VDOT-formel (samma definition som Strava och Garmin använder). Per pass: vi tar fart och varaktighet, räknar ut syreförbrukning vid pacen och vilken andel av VO2max det motsvarar för den varaktigheten. Per vecka visas ditt bästa pass — VDOT speglar aktuell tävlingsform. Veckor utan löpning lämnas som lucka. Tempopass och tävlingar lyfter kurvan; rena Z1-jogg gör det inte."
+              title="Estimerad VO2max i ml/kg/min — samma metric som Garmin visar. Per pass: vi tar fart och varaktighet, räknar ut syreförbrukning vid pacen och vilken andel av maxsyreupptag det motsvarar för den varaktigheten. Visar dels enskilda pass som prickar och dels en 28-dagars snittlinje (det är trenden du ska titta på). Tempopass och tävlingar lyfter kurvan; rena Z1-jogg gör det inte. Tekniskt grundas formeln på Jack Daniels VDOT, samma definition som används i Strava och Garmin."
             >&#9432;</span>
           </span>
         </div>
@@ -1792,8 +1804,8 @@
   </div>
 </div>
 
-<script defer src="js/config.js?v=3f98787"></script>
-<script defer src="js/app.js?v=3f98787"></script>
+<script defer src="js/config.js?v=friendly-metrics-v1"></script>
+<script defer src="js/app.js?v=friendly-metrics-v1"></script>
 <!--
   Beta-gate logic. Loaded after app.js because it depends on `gateOpen`,
   `NVDP_resumeAfterGate` and `registerAction` defined there. Previously this

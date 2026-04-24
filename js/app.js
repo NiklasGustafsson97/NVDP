@@ -5175,7 +5175,7 @@ function renderRaceGoalCard(goal, workouts) {
 
   const ind = _computeRaceIndicators(workouts);
   const indicators = [
-    { key: 'vdot', label: 'VO2max (VDOT)', ...ind.vdot },
+    { key: 'vdot', label: 'VO2max', ...ind.vdot },
     { key: 'volume', label: 'Volym (h/v)', ...ind.volume },
     { key: 'consistency', label: 'Konsekvens (pass/v)', ...ind.consistency },
   ];
@@ -5908,6 +5908,33 @@ function _ewma(values, tau) {
   return out;
 }
 
+// ─────────────────────────────────────────────────────────────
+//  TSB → Formtopp 0-100 mapping
+//  Coggan's classic TSB bands span roughly -30 (overreached) up to +25
+//  (peaking/transitional). We map that range linearly to a 0-100 score so
+//  the user never has to know what TSB is. Anchors:
+//    TSB >= +25  → 100  ("toppform")
+//    TSB =    +5 →  64  (still "utvilad")
+//    TSB =     0 →  55  ("i balans")
+//    TSB =   -10 →  36  ("bygger fitness")
+//    TSB =   -30 →   0  ("hög trötthet")
+// ─────────────────────────────────────────────────────────────
+const FORMTOPP_TSB_FLOOR = -30;
+const FORMTOPP_TSB_CEIL = 25;
+function tsbToFormtoppScore(tsb) {
+  const span = FORMTOPP_TSB_CEIL - FORMTOPP_TSB_FLOOR;
+  const raw = ((tsb - FORMTOPP_TSB_FLOOR) / span) * 100;
+  return Math.max(0, Math.min(100, raw));
+}
+
+// Day-index used as the "where I started" anchor for the personal
+// fitness score. CTL is an EWMA with tau=42d, so we wait ~30 days for the
+// curve to settle into a meaningful baseline before we anchor to it. New
+// users with less history get a "bygger baseline" insight instead of a
+// noisy ratio that explodes on tiny denominators.
+const FITNESS_BASELINE_DAY = 28;
+const FITNESS_BASELINE_MIN_CTL = 1.0;
+
 function renderPmcChart(workouts) {
   const tsbCanvas = document.getElementById('chart-pmc');
   const ctlCanvas = document.getElementById('chart-pmc-ctl');
@@ -5915,28 +5942,59 @@ function renderPmcChart(workouts) {
   if (window._chartPmc) window._chartPmc.destroy();
   if (window._chartPmcCtl) window._chartPmcCtl.destroy();
 
-  const series = _dailyLoadSeries(workouts, 120);
-  if (series.every((s) => s.load === 0)) {
-    _renderChartInsight('pmc-insight', {
-      band: 'neutral',
-      title: 'För lite data',
-      sub: 'Logga några pass så fylls formen i.',
-    });
-    _renderChartInsight('pmc-ctl-insight', {
-      band: 'neutral',
-      title: 'För lite data',
-      sub: 'Logga några pass så fylls fitness-kurvan i.',
-    });
+  // Find earliest workout so we can build the FULL CTL history (needed for
+  // the personal fitness baseline). The chart itself still only shows the
+  // last 120 days, but the ratio denominator is anchored to the user's
+  // first month of training.
+  const allDates = [];
+  for (const w of workouts) if (w.workout_date) allDates.push(w.workout_date);
+  if (allDates.length === 0) {
+    _renderChartInsight('pmc-insight', { band: 'neutral', title: 'För lite data', sub: 'Logga några pass så fylls formen i.' });
+    _renderChartInsight('pmc-ctl-insight', { band: 'neutral', title: 'För lite data', sub: 'Logga några pass så fylls fitness-kurvan i.' });
+    return;
+  }
+  allDates.sort();
+  const firstDate = allDates[0];
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const firstDateObj = new Date(firstDate + 'T00:00:00');
+  const totalDays = Math.max(1, Math.round((today - firstDateObj) / 86400000) + 1);
+
+  const fullSeries = _dailyLoadSeries(workouts, totalDays);
+  if (fullSeries.every((s) => s.load === 0)) {
+    _renderChartInsight('pmc-insight', { band: 'neutral', title: 'För lite data', sub: 'Logga några pass så fylls formen i.' });
+    _renderChartInsight('pmc-ctl-insight', { band: 'neutral', title: 'För lite data', sub: 'Logga några pass så fylls fitness-kurvan i.' });
     return;
   }
 
-  // Scale raw effort to Effort display to align with the effort chart.
-  // ATL is still computed internally because TSB = CTL - ATL, but it's no
-  // longer surfaced anywhere in the UI.
-  const loads = series.map((s) => effortRawToDisplay(s.load));
-  const ctl = _ewma(loads, 42);
-  const atl = _ewma(loads, 7);
-  const tsb = ctl.map((c, i) => c - atl[i]);
+  // Scale raw effort to Effort display so the EWMA values align with the
+  // Effort chart. ATL is still computed internally because TSB = CTL - ATL,
+  // but TSB is now only used as input to the 0-100 Formtopp score.
+  const fullLoads = fullSeries.map((s) => effortRawToDisplay(s.load));
+  const fullCtl = _ewma(fullLoads, 42);
+  const fullAtl = _ewma(fullLoads, 7);
+  const fullTsb = fullCtl.map((c, i) => c - fullAtl[i]);
+  const fullScore = fullTsb.map(tsbToFormtoppScore);
+
+  // Personal fitness baseline = CTL on day FITNESS_BASELINE_DAY of the
+  // user's training history (or null if they don't have that much data
+  // yet, or their CTL still hasn't crossed the meaningful-baseline floor).
+  let baselineCtl = null;
+  let baselineDateIso = null;
+  if (fullCtl.length > FITNESS_BASELINE_DAY) {
+    const candidate = fullCtl[FITNESS_BASELINE_DAY];
+    if (candidate >= FITNESS_BASELINE_MIN_CTL) {
+      baselineCtl = candidate;
+      baselineDateIso = fullSeries[FITNESS_BASELINE_DAY]?.date || null;
+    }
+  }
+
+  // Slice the last 120 days for the actual charts.
+  const VISIBLE_DAYS = 120;
+  const sliceStart = Math.max(0, fullSeries.length - VISIBLE_DAYS);
+  const series = fullSeries.slice(sliceStart);
+  const ctl = fullCtl.slice(sliceStart);
+  const tsb = fullTsb.slice(sliceStart);
+  const score = fullScore.slice(sliceStart);
   const labels = series.map((s) => {
     const d = new Date(s.date + 'T00:00:00');
     return `${d.getDate()}/${d.getMonth() + 1}`;
@@ -5946,15 +6004,17 @@ function renderPmcChart(workouts) {
   const ctlColor = 'rgba(46, 134, 193, 0.9)';
   const tsbColor = 'rgba(46, 204, 113, 0.95)';
 
-  // Chart 1 — TSB-only på #pmc-card.
+  // Chart 1 — Formtopp 0-100 score on #pmc-card. The underlying TSB is
+  // still available in tooltips for the curious, but the headline number
+  // is the friendly 0-100 score.
   window._chartPmc = new Chart(tsbCanvas.getContext('2d'), {
     type: 'line',
     data: {
       labels,
       datasets: [
         {
-          label: 'TSB (form)',
-          data: tsb.map((v) => +v.toFixed(2)),
+          label: 'Formtopp',
+          data: score.map((v) => +v.toFixed(1)),
           borderColor: tsbColor,
           borderWidth: 2.5,
           pointRadius: 0,
@@ -5971,22 +6031,17 @@ function renderPmcChart(workouts) {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (c) => `TSB: ${c.parsed.y >= 0 ? '+' : ''}${c.parsed.y.toFixed(1)}`,
+            label: (c) => `Formtopp: ${Math.round(c.parsed.y)} / 100`,
           },
         },
       },
       scales: {
         y: {
+          min: 0,
+          max: 100,
           grid: { color: 'rgba(255,255,255,0.05)' },
-          ticks: {
-            color: textColor,
-            callback: (v) => {
-              const n = Number(v);
-              const sign = n > 0 ? '+' : '';
-              return sign + n.toFixed(1);
-            },
-          },
-          title: { display: true, text: 'TSB (form)', color: textColor },
+          ticks: { color: textColor, stepSize: 20, callback: (v) => v },
+          title: { display: true, text: 'Formtopp (0–100)', color: textColor },
         },
         x: {
           grid: { display: false },
@@ -5996,16 +6051,25 @@ function renderPmcChart(workouts) {
     },
   });
 
-  // Chart 2 — CTL-only på #pmc-ctl-card.
+  // Chart 2 — Personal fitness score on #pmc-ctl-card. Either ratio (if
+  // we have a baseline) or raw CTL fallback (if user is still building
+  // history). The ratio version starts at ~1.0 and drifts upward as
+  // fitness improves vs day 28 of training.
   if (ctlCanvas) {
+    const useRatio = baselineCtl !== null;
+    const fitnessData = useRatio
+      ? ctl.map((c) => +(c / baselineCtl).toFixed(3))
+      : ctl.map((c) => +c.toFixed(2));
+    const yTitle = useRatio ? 'Fitness-score' : 'Belastning (bygger baseline)';
+    const yMin = useRatio ? Math.max(0, Math.min(...fitnessData) * 0.95) : 0;
     window._chartPmcCtl = new Chart(ctlCanvas.getContext('2d'), {
       type: 'line',
       data: {
         labels,
         datasets: [
           {
-            label: 'CTL (fitness)',
-            data: ctl.map((v) => +v.toFixed(2)),
+            label: 'Fitness-score',
+            data: fitnessData,
             borderColor: ctlColor,
             backgroundColor: 'rgba(46,134,193,0.15)',
             borderWidth: 2,
@@ -6023,16 +6087,19 @@ function renderPmcChart(workouts) {
           legend: { display: false },
           tooltip: {
             callbacks: {
-              label: (c) => `CTL: Effort ${c.parsed.y.toFixed(1)}`,
-            },
+              label: (c) => useRatio
+                ? `Fitness-score: ${c.parsed.y.toFixed(2)} (${(c.parsed.y * 100 - 100 >= 0 ? '+' : '') + (c.parsed.y * 100 - 100).toFixed(0)} % vs start)`
+                : `Belastning: ${c.parsed.y.toFixed(1)}`,
           },
+        },
         },
         scales: {
           y: {
-            beginAtZero: true,
+            min: useRatio ? yMin : 0,
+            beginAtZero: !useRatio,
             grid: { color: 'rgba(255,255,255,0.05)' },
-            ticks: { color: textColor, callback: (v) => Number(v).toFixed(1) },
-            title: { display: true, text: 'Effort', color: textColor },
+            ticks: { color: textColor, callback: (v) => useRatio ? Number(v).toFixed(2) : Number(v).toFixed(1) },
+            title: { display: true, text: yTitle, color: textColor },
           },
           x: {
             grid: { display: false },
@@ -6045,53 +6112,63 @@ function renderPmcChart(workouts) {
 
   const lastCtl = ctl[ctl.length - 1];
   const lastTsb = tsb[tsb.length - 1];
-  const prev7Ctl = ctl[ctl.length - 8] ?? 0;
-  const ctlDelta = lastCtl - prev7Ctl;
+  const lastScore = score[score.length - 1];
 
-  // Formtopp — the one number most people actually look at. Map the legacy
-  // pmc bands (fresh / neutral / productive / risk) onto the unified
-  // chart-insight bands (ok / neutral / warn / bad) so this insight box
-  // looks identical to every other weekly chart.
-  let pmcBand, insightBand, title, sub2;
+  // Formtopp insight — the one number most people actually look at.
+  // Bands derived from TSB so they map onto the established physiological
+  // thresholds, but the user-facing number is the friendly 0-100 score.
+  let insightBand, title, sub2;
   if (lastTsb > 5) {
-    pmcBand = 'fresh'; insightBand = 'ok';
+    insightBand = 'ok';
     title = 'Utvilad';
     sub2 = 'Bra tajming för ett nyckelpass eller tävling.';
   } else if (lastTsb > -10) {
-    pmcBand = 'neutral'; insightBand = 'neutral';
+    insightBand = 'neutral';
     title = 'I balans';
     sub2 = 'Form och trötthet i balans — kör enligt plan.';
   } else if (lastTsb > -30) {
-    pmcBand = 'productive'; insightBand = 'warn';
+    insightBand = 'warn';
     title = 'Bygger fitness';
     sub2 = 'Produktiv belastning. Planera in en deload snart.';
   } else {
-    pmcBand = 'risk'; insightBand = 'bad';
+    insightBand = 'bad';
     title = 'Hög trötthet';
     sub2 = 'Dra ner — risk för överträning.';
   }
-
-  const tsbStr = (lastTsb >= 0 ? '+' : '') + lastTsb.toFixed(1);
   _renderChartInsight('pmc-insight', {
     band: insightBand,
     title,
     sub: sub2,
-    headline: tsbStr,
-    headlineLabel: 'TSB · form',
+    headline: `${Math.round(lastScore)} / 100`,
+    headlineLabel: 'FORMTOPP',
   });
 
-  // Fitness (CTL) insight — short trend on the long-term load curve.
-  const ctlDeltaStr = (ctlDelta >= 0 ? '+' : '') + ctlDelta.toFixed(1);
-  _renderChartInsight('pmc-ctl-insight', {
-    band: ctlDelta >= 0 ? 'ok' : 'neutral',
-    title: 'Långsiktig belastning (CTL)',
-    sub: `Fitness Effort ${lastCtl.toFixed(1)} (${ctlDeltaStr} senaste veckan)`,
-    headline: lastCtl.toFixed(1),
-    headlineLabel: 'CTL',
-  });
-
-  // Legacy band reference kept in case other code paths key off it.
-  void pmcBand;
+  // Fitness insight — show the ratio if we have a baseline, otherwise
+  // explain that we're still building one.
+  if (baselineCtl !== null) {
+    const ratio = lastCtl / baselineCtl;
+    const ratioPct = (ratio - 1) * 100;
+    const baselineDate = baselineDateIso
+      ? (() => { const d = new Date(baselineDateIso + 'T00:00:00'); return `V${weekNumber(d)} ${d.getFullYear()}`; })()
+      : 'start';
+    const sub = ratio >= 1
+      ? `+${ratioPct.toFixed(0)} % bättre än när du började mäta (${baselineDate}).`
+      : `${ratioPct.toFixed(0)} % vs när du började mäta (${baselineDate}).`;
+    _renderChartInsight('pmc-ctl-insight', {
+      band: ratio >= 1.05 ? 'ok' : (ratio >= 0.95 ? 'neutral' : 'warn'),
+      title: 'Personal fitness score',
+      sub,
+      headline: ratio.toFixed(2),
+      headlineLabel: 'FITNESS',
+    });
+  } else {
+    const daysSoFar = fullCtl.length;
+    _renderChartInsight('pmc-ctl-insight', {
+      band: 'neutral',
+      title: 'Bygger baseline',
+      sub: `${daysSoFar} av ${FITNESS_BASELINE_DAY} dagar tränings­historik. Vi anker fitness-scoren när vi har minst ${FITNESS_BASELINE_DAY} dagars data.`,
+    });
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -6615,9 +6692,9 @@ function renderVo2maxChart(workouts) {
     _renderChartInsight('vo2max-insight', {
       band: 'neutral',
       title: 'Behöver ett kvalpass till',
-      sub: `Behöver ≥ 2 kvalpass i fönstret för att rita trend. Senaste: VDOT ${v.toFixed(1)} · 1 kvalpass.`,
+      sub: `Behöver ≥ 2 kvalpass i fönstret för att rita trend. Senaste: VO2max ${v.toFixed(1)} · 1 kvalpass.`,
       headline: v.toFixed(1),
-      headlineLabel: 'VDOT',
+      headlineLabel: 'VO2MAX',
     });
     _drawVo2maxChart(canvas, visiblePoints, /* withTrend */ false, windowStartMs, windowEndMs);
     return;
@@ -6647,7 +6724,7 @@ function renderVo2maxChart(workouts) {
       title: 'Bygg historik',
       sub: `Behöver ~4 veckor med kvalpass för att jämföra trenden. ${passCountStr}.`,
       headline: latestSmoothed.toFixed(1),
-      headlineLabel: 'VDOT',
+      headlineLabel: 'VO2MAX',
     });
     return;
   }
@@ -6656,21 +6733,21 @@ function renderVo2maxChart(workouts) {
   let band, title, sub;
   if (delta >= 0.8) {
     band = 'ok';
-    title = `Form upp: VDOT +${delta.toFixed(1)} mot för 4 v sen`;
+    title = `Form upp: VO2max +${delta.toFixed(1)} mot för 4 v sen`;
     sub = `Snabbare på samma puls. ${passCountStr}.`;
   } else if (delta <= -0.8) {
     band = 'bad';
-    title = `Form ner: VDOT ${delta.toFixed(1)} mot för 4 v sen`;
+    title = `Form ner: VO2max ${delta.toFixed(1)} mot för 4 v sen`;
     sub = `Kolla återhämtning, värme eller om kvalpassen tappat skärpa. ${passCountStr}.`;
   } else {
     band = 'neutral';
-    title = `Stabil snittad VDOT (${delta >= 0 ? '+' : ''}${delta.toFixed(1)})`;
+    title = `Stabil snittad VO2max (${delta >= 0 ? '+' : ''}${delta.toFixed(1)})`;
     sub = `Mot för 4 veckor sen. ${passCountStr}.`;
   }
   _renderChartInsight('vo2max-insight', {
     band, title, sub,
     headline: latestSmoothed.toFixed(1),
-    headlineLabel: 'VDOT',
+    headlineLabel: 'VO2MAX',
   });
 }
 
@@ -6692,7 +6769,7 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
   //      on; the dots are there for transparency.
   const datasets = [
     {
-      label: 'Kvalpass (raw VDOT)',
+      label: 'Kvalpass (per pass)',
       data: points.map((p) => ({ x: p.x, y: p.y, meta: p.meta })),
       parsing: false,
       borderColor: 'rgba(214, 99, 158, 0.4)',
@@ -6706,7 +6783,7 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
   ];
   if (withTrend) {
     datasets.push({
-      label: `Snittad VDOT (${VO2MAX_SMOOTH_DAYS}d)`,
+      label: `Snittad VO2max (${VO2MAX_SMOOTH_DAYS}d)`,
       data: points.map((p) => ({ x: p.x, y: p.smoothed, meta: p.meta, windowCount: p.windowCount })),
       parsing: false,
       borderColor: 'rgba(214, 99, 158, 0.95)',
@@ -6745,9 +6822,9 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
               const isTrend = c.dataset.label && c.dataset.label.startsWith('Snittad');
               if (isTrend) {
                 const cnt = c.raw.windowCount;
-                return `Snittad VDOT: ${c.raw.y.toFixed(1)} (${cnt} pass i fönstret)`;
+                return `Snittad VO2max: ${c.raw.y.toFixed(1)} (${cnt} pass i fönstret)`;
               }
-              return `Pass-VDOT: ${c.raw.y.toFixed(1)}`;
+              return `VO2max (pass): ${c.raw.y.toFixed(1)}`;
             },
             afterLabel: (c) => {
               if (c.dataset.label && c.dataset.label.startsWith('Snittad')) return '';
@@ -6772,7 +6849,7 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
           max: maxVal,
           grid: { color: 'rgba(255,255,255,0.05)' },
           ticks: { color: textColor, callback: (v) => v.toFixed(0) },
-          title: { display: true, text: 'VDOT (ml/kg/min)', color: textColor },
+          title: { display: true, text: 'VO2max (ml/kg/min)', color: textColor },
         },
         x: {
           type: 'time',
