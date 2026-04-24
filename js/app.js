@@ -1409,12 +1409,38 @@ function hideViewLoading(viewId) {
 //  DATA FETCHING
 // ═══════════════════════
 async function fetchWorkouts(profileId, from, to) {
-  let q = sb.from('workouts').select('*').order('workout_date', { ascending: true });
-  if (profileId) q = q.eq('profile_id', profileId);
-  if (from) q = q.gte('workout_date', from);
-  if (to) q = q.lte('workout_date', to);
-  const { data } = await q;
-  return data || [];
+  // PostgREST silently caps each response at 1000 rows. With ASC ordering
+  // that means callers without a date range (notably _loadTrends, which
+  // pulls the user's entire history for the Din progress charts) lose the
+  // *most recent* rows once the user crosses 1000 workouts — Strava +
+  // Garmin imports get there fast. The visible symptom was Säsongstotaler
+  // 2026 showing absurdly low YTD numbers vs 2025, because the truncation
+  // landed somewhere in 2025 and 2026 was almost entirely chopped off.
+  // Page through in 1000-row chunks (same pattern as fetchAllWorkouts) so
+  // every caller always sees the full window, regardless of how big the
+  // history grows.
+  const PAGE = 1000;
+  const all = [];
+  let offset = 0;
+  while (true) {
+    let q = sb.from('workouts').select('*').order('workout_date', { ascending: true });
+    if (profileId) q = q.eq('profile_id', profileId);
+    if (from) q = q.gte('workout_date', from);
+    if (to) q = q.lte('workout_date', to);
+    q = q.range(offset, offset + PAGE - 1);
+    const { data, error } = await q;
+    if (error) {
+      console.error('fetchWorkouts page error', error);
+      break;
+    }
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < PAGE) break;
+    offset += PAGE;
+    // Safety net so a runaway loop never hangs the app.
+    if (offset > 100000) break;
+  }
+  return all;
 }
 
 async function fetchAllWorkouts() {
