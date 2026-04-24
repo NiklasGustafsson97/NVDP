@@ -7,6 +7,7 @@ import {
   forceRefreshStravaToken,
   activityToWorkout,
   shouldImportActivity,
+  needsStravaDetail,
   fetchHRZoneSeconds,
   fetchStravaWithRetry,
   corsHeaders,
@@ -24,10 +25,14 @@ const DEEP_SYNC_BUDGET_MS = 90_000;
 // processes in ~10-15s.
 const DEEP_SYNC_PAGES_PER_CHUNK = 1;
 const DEEP_SYNC_PER_PAGE = 200;
-// Incremental syncs (no `since`) stay tight — 5 pages × 50 = 250 acts is
-// ample for anything added in the past 14 days.
-const INCREMENTAL_PAGES = 5;
-const INCREMENTAL_PER_PAGE = 50;
+// Incremental syncs (no `since`) stay tight. With webhook-driven imports
+// catching real-time activity creates, the incremental sync is only a
+// catch-up safety net (e.g. webhook delivery dropped, app reconnected
+// after offline). 1 page × 30 acts covers ~2-3 weeks for a typical
+// power user and uses 1 list call instead of 5 — enough headroom to
+// scale from 3 to 30 users without touching the 100/15-min budget.
+const INCREMENTAL_PAGES = 1;
+const INCREMENTAL_PER_PAGE = 30;
 // Concurrency for the detail + zones fetches inside a page. Strava's
 // rate limit is 100 req/15min, so 8-in-flight averages well below that
 // while still cutting per-page wall-clock ~8x.
@@ -52,29 +57,37 @@ async function buildWorkoutForActivity(
   profileId: string,
   budgetMsLeft: () => number,
 ): Promise<DetailFetchOutcome> {
-  // Detail fetch — gives us splits, laps, perceived_exertion.
-  const detail = await fetchStravaWithRetry(
-    `https://www.strava.com/api/v3/activities/${summary.id}`,
-    accessToken,
-    budgetMsLeft(),
-  );
-  if (detail.rateLimited) {
-    return { rateLimited: true, retryAfterS: detail.retryAfterS };
-  }
+  // For Gym/Hyrox/Stakmaskin/Annat the summary already has every field
+  // we render (duration, calories, avg HR). Splits, laps, and HR-zone
+  // breakdowns are only consumed by the endurance charts (pace zones,
+  // EF, polarization). Skipping detail+zones for these saves 2 of the
+  // 3 Strava calls per imported activity -- a 67% cut on every gym
+  // session, every hyrox workout, every elliptical, every swim.
+  const wantsDetail = needsStravaDetail(summary);
 
   let activity: StravaActivity = summary;
-  if (detail.res?.ok) {
-    try {
-      activity = await detail.res.json();
-    } catch {
-      // fall back to summary
+  if (wantsDetail) {
+    const detail = await fetchStravaWithRetry(
+      `https://www.strava.com/api/v3/activities/${summary.id}`,
+      accessToken,
+      budgetMsLeft(),
+    );
+    if (detail.rateLimited) {
+      return { rateLimited: true, retryAfterS: detail.retryAfterS };
+    }
+    if (detail.res?.ok) {
+      try {
+        activity = await detail.res.json();
+      } catch {
+        // fall back to summary
+      }
     }
   }
 
   const workout = activityToWorkout(activity, profileId);
 
-  // Zones fetch (only if HR data exists). Same Retry-After handling.
-  if (activity.has_heartrate || activity.average_heartrate) {
+  // Zones fetch (only if HR data exists AND the type uses HR zones).
+  if (wantsDetail && (activity.has_heartrate || activity.average_heartrate)) {
     const zones = await fetchHRZoneSeconds(activity.id, accessToken, budgetMsLeft());
     if (zones) workout.hr_zone_seconds = JSON.stringify(zones);
   }
@@ -103,37 +116,63 @@ serve(async (req) => {
       });
     }
 
-    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !user) {
-      return new Response(JSON.stringify({ error: "Invalid token" }), {
-        status: 401,
-        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
-      });
-    }
+    // Service-role bypass: strava-sync-daily (and any other server-side
+    // caller) authenticates with the service-role key and passes the
+    // target user's profile_id in the body. We MUST gate this on an
+    // exact-match of the service-role key -- never trust a body-provided
+    // profile_id from a regular user JWT (that would be a tenancy break,
+    // see the user-JWT branch below for the assertion).
+    const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const isServiceRole =
+      !!SERVICE_KEY && authHeader === `Bearer ${SERVICE_KEY}`;
 
-    const { since } = await req.json();
+    let profile_id: string;
+    let since: string | null = null;
+    const body = await req.json().catch(() => ({}));
+    since = body?.since ?? null;
+
+    if (isServiceRole) {
+      const bodyProfileId = body?.profile_id;
+      if (!bodyProfileId || typeof bodyProfileId !== "string") {
+        return new Response(
+          JSON.stringify({ error: "service_role_call_requires_profile_id" }),
+          { status: 400, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
+        );
+      }
+      profile_id = bodyProfileId;
+    } else {
+      const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user }, error: userErr } = await userClient.auth.getUser();
+      if (userErr || !user) {
+        return new Response(JSON.stringify({ error: "Invalid token" }), {
+          status: 401,
+          headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+        });
+      }
+
+      const dbForProfile = supabaseAdmin();
+
+      // Derive profile_id from the authenticated user (never from the body).
+      // This prevents a legit user from passing someone else's profile_id and
+      // reading/writing into another account via the service-role client below.
+      const { data: callerProfile, error: profErr } = await dbForProfile
+        .from("profiles")
+        .select("id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (profErr || !callerProfile) {
+        console.error("strava-sync: profile lookup failed", profErr);
+        return new Response(JSON.stringify({ error: "profile_not_found" }), {
+          status: 404,
+          headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+        });
+      }
+      profile_id = callerProfile.id;
+    }
 
     const db = supabaseAdmin();
-
-    // Derive profile_id from the authenticated user (never from the body).
-    // This prevents a legit user from passing someone else's profile_id and
-    // reading/writing into another account via the service-role client below.
-    const { data: callerProfile, error: profErr } = await db
-      .from("profiles")
-      .select("id")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (profErr || !callerProfile) {
-      console.error("strava-sync: profile lookup failed", profErr);
-      return new Response(JSON.stringify({ error: "profile_not_found" }), {
-        status: 404,
-        headers: { ...corsHeaders(req), "Content-Type": "application/json" },
-      });
-    }
-    const profile_id = callerProfile.id;
 
     const { data: conn, error: connErr } = await db
       .from("strava_connections")
@@ -497,20 +536,31 @@ serve(async (req) => {
       debug.pages_processed = pagesProcessed;
       debug.chunk_exhausted = chunkExhausted;
     } else {
-      // Incremental path: bump last_sync_at iff we actually heard back
-      // from Strava (even with 0 activities). If we got rate-limited
-      // before page 1 returned anything, leave last_sync_at alone and
-      // signal not-done so the client surfaces the wait — otherwise the
-      // legacy `done: true, imported: 0` reply makes a rate-limited sync
-      // look indistinguishable from a successful empty one.
-      if (totalFetched > 0) {
+      // Incremental path: bump last_sync_at iff Strava actually answered
+      // us with at least one successful list page (even an empty one),
+      // OR Strava confirmed there were no more activities (chunkExhausted).
+      //
+      // The OLD rule was `if (totalFetched > 0)` -- which silently broke
+      // every user who happened to have no new Strava activities since
+      // the last sync. Their `last_sync_at` never advanced, so the
+      // browser's autoSyncStravaIfStale (1h threshold) re-polled Strava
+      // on EVERY app load forever. With 30 users and ~3 app loads each
+      // per day, that's ~90 wasted polls/day burning through the
+      // 100-per-15-min Strava budget for nothing.
+      //
+      // New rule: if we got an authoritative answer from Strava (data
+      // OR a clean empty page), the connection is up to date. Only when
+      // we never made it past a rate-limit or hard error do we leave
+      // last_sync_at alone so the next attempt retries.
+      const heardFromStrava = pagesProcessed > 0 || chunkExhausted;
+      if (heardFromStrava) {
         newSyncAt = new Date().toISOString();
         await db
           .from("strava_connections")
           .update({ last_sync_at: newSyncAt })
           .eq("id", conn.id);
       }
-      if (rateLimited && totalFetched === 0) {
+      if (rateLimited && !heardFromStrava) {
         done = false;
         progressPct = 0;
       } else {

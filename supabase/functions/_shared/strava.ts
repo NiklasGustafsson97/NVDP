@@ -86,6 +86,26 @@ export function mapStravaType(stravaType: string): string {
   return STRAVA_TYPE_MAP[stravaType] || "Annat";
 }
 
+// Activity types whose summary fields are sufficient -- we don't show
+// splits, laps, perceived_exertion or HR-zone time-in-zone for these,
+// so paying for the GET /activities/{id} detail call and the
+// GET /activities/{id}/zones call is pure waste of Strava budget.
+//
+// We KEEP detail+zones for endurance activities (Löpning, Cykel,
+// Längdskidor) where pace zones, splits, and HR-zone breakdowns
+// drive the polarization / EF / VO2max charts.
+const STRAVA_NO_DETAIL_TARGET_TYPES = new Set([
+  "Gym",
+  "Hyrox",
+  "Stakmaskin",
+  "Annat",
+]);
+
+export function needsStravaDetail(activity: StravaActivity): boolean {
+  const targetType = mapStravaType(activity.sport_type || activity.type);
+  return !STRAVA_NO_DETAIL_TARGET_TYPES.has(targetType);
+}
+
 export function guessIntensity(avgHr: number | null): string | null {
   if (!avgHr) return null;
   return avgHr < 145 ? "Z2" : "Kvalitet";
@@ -269,15 +289,105 @@ export interface StravaFetchResult {
   error?: Error;
 }
 
+// Pre-emptive rate-limit headroom: stop fetching at 80% of either the
+// 15-min OR the daily Strava budget so we always leave 20% for
+// interactive user actions and never hit the actual 429 wall.
+//
+// The 80% threshold is a published Strava-API best practice (see
+// https://developers.strava.com/docs/rate-limits/) and matches what
+// most clients do.
+const STRAVA_PREEMPT_FRACTION = 0.8;
+
+// Module-level cache of the most recent X-RateLimit-Usage / -Limit
+// header pair. Lives for the duration of one Deno isolate (i.e. one
+// Edge Function invocation, possibly reused for warm follow-ups). It's
+// fine for this to reset on cold start -- the next response will
+// repopulate it before we make a second call.
+interface RateLimitWindow {
+  usage: number;
+  limit: number;
+}
+interface RateLimitState {
+  fifteenMin: RateLimitWindow | null;
+  daily: RateLimitWindow | null;
+}
+let _stravaRateLimitState: RateLimitState = { fifteenMin: null, daily: null };
+
+function parseRateLimitHeader(value: string | null): [number, number] | null {
+  // Strava header format: "<short_window>,<long_window>" e.g. "100,1000"
+  // for limits and "7,150" for usage.
+  if (!value) return null;
+  const parts = value.split(",").map((s) => parseInt(s.trim(), 10));
+  if (parts.length < 2 || parts.some((n) => Number.isNaN(n))) return null;
+  return [parts[0], parts[1]];
+}
+
+function recordRateLimitFromResponse(res: Response): void {
+  const limit = parseRateLimitHeader(res.headers.get("x-ratelimit-limit"));
+  const usage = parseRateLimitHeader(res.headers.get("x-ratelimit-usage"));
+  if (!limit || !usage) return;
+  _stravaRateLimitState = {
+    fifteenMin: { usage: usage[0], limit: limit[0] },
+    daily: { usage: usage[1], limit: limit[1] },
+  };
+}
+
+function secondsUntilNextQuarterHour(now = new Date()): number {
+  const minutes = now.getUTCMinutes();
+  const seconds = now.getUTCSeconds();
+  const elapsedInWindow = (minutes % 15) * 60 + seconds;
+  const remaining = 15 * 60 - elapsedInWindow;
+  // Add a 5s safety margin so we don't hammer Strava the millisecond
+  // the window flips.
+  return Math.max(5, remaining + 5);
+}
+
+function preemptIfQuotaExhausted(): { retryAfterS: number; reason: string } | null {
+  const s = _stravaRateLimitState;
+  if (s.fifteenMin) {
+    const ratio = s.fifteenMin.usage / s.fifteenMin.limit;
+    if (ratio >= STRAVA_PREEMPT_FRACTION) {
+      return {
+        retryAfterS: secondsUntilNextQuarterHour(),
+        reason: `15min usage ${s.fifteenMin.usage}/${s.fifteenMin.limit} (${Math.round(ratio * 100)}%)`,
+      };
+    }
+  }
+  if (s.daily) {
+    const ratio = s.daily.usage / s.daily.limit;
+    if (ratio >= STRAVA_PREEMPT_FRACTION) {
+      // Daily window: don't try to be clever, just defer for 30 min and
+      // let the next chunk re-evaluate. The daily window resets at
+      // midnight UTC; if we're past 80% we should mostly stop until then.
+      return {
+        retryAfterS: 30 * 60,
+        reason: `daily usage ${s.daily.usage}/${s.daily.limit} (${Math.round(ratio * 100)}%)`,
+      };
+    }
+  }
+  return null;
+}
+
 export async function fetchStravaWithRetry(
   url: string,
   accessToken: string,
   budgetMsLeft: number,
 ): Promise<StravaFetchResult> {
+  // Pre-empt: if the LAST response told us we're past 80% of either
+  // window, return a synthesized rate-limit instead of burning another
+  // call. The caller (strava-sync) already handles `rateLimited` by
+  // breaking the loop and surfacing retry_after_s to the client.
+  const preempt = preemptIfQuotaExhausted();
+  if (preempt) {
+    console.warn(`fetchStravaWithRetry: pre-empting (${preempt.reason}), wait ${preempt.retryAfterS}s`);
+    return { rateLimited: true, retryAfterS: preempt.retryAfterS };
+  }
+
   try {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
+    recordRateLimitFromResponse(res);
     if (res.status !== 429) return { res };
 
     // Honour Retry-After (seconds). Strava also sets X-RateLimit-Limit /
@@ -297,6 +407,7 @@ export async function fetchStravaWithRetry(
       const retry = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
+      recordRateLimitFromResponse(retry);
       if (retry.status !== 429) return { res: retry };
       const retryAfter2 = retry.headers.get("retry-after");
       return {

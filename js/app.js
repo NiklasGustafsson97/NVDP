@@ -8687,8 +8687,16 @@ async function autoSyncStravaIfStale() {
   if (!_stravaConnection || !currentProfile) return;
   const lastSync = _stravaConnection.last_sync_at;
   if (lastSync) {
+    // Pre-2026-04: this was 1h, which meant every app load after 60min
+    // hit /strava-sync just to verify there was nothing new. With the
+    // webhook handling real-time imports and a server-side daily cron
+    // (strava-sync-daily, runs 04:00 UTC) catching anything the webhook
+    // missed, the client only needs to poll if BOTH have failed for
+    // ~24h. That cuts client-driven Strava traffic by ~24x with no
+    // perceptible UX change (the dashboard already updates on webhook
+    // events via Supabase realtime).
     const elapsed = Date.now() - new Date(lastSync).getTime();
-    if (elapsed < 3600_000) return;
+    if (elapsed < 24 * 3600_000) return;
   }
   try {
     const { data: { session } } = await sb.auth.getSession();
@@ -8754,7 +8762,6 @@ function updateStravaUI() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
             Synka
           </button>
-          <button class="strava-sync-btn strava-deep-sync-btn" onclick="syncStravaAll()">Synka allt</button>
           <button class="strava-disconnect-btn" onclick="disconnectStrava()">Koppla från</button>
         </div>
         <div class="strava-powered-by">
@@ -8996,16 +9003,19 @@ function _formatStravaSyncError({ status, result, bodyText, parseError }) {
   return text.slice(0, 200) + '…';
 }
 
-async function syncStravaAll() {
+async function syncStravaAll(opts) {
   if (!_stravaConnection || !currentProfile) return;
-  const sinceDate = _deepSyncFloorDate();
-  const confirmed = await showConfirmModal(
-    'Synka allt från Strava',
-    `Detta hämtar alla aktiviteter sedan ${sinceDate} från Strava och fyller i hela tränings­historiken som syns i graferna. Det görs i flera mindre steg och kan ta någon minut.\n\nVanlig synk sker automatiskt varje timme.`,
-    'Synka allt ändå',
-    false
-  );
-  if (!confirmed) return;
+  const { skipConfirm = false, sinceDate: sinceOverride = null, doneTitle = 'Full synk klar' } = opts || {};
+  const sinceDate = sinceOverride || _deepSyncFloorDate();
+  if (!skipConfirm) {
+    const confirmed = await showConfirmModal(
+      'Synka allt från Strava',
+      `Detta hämtar alla aktiviteter sedan ${sinceDate} från Strava och fyller i hela tränings­historiken som syns i graferna. Det görs i flera mindre steg och kan ta någon minut.\n\nVanlig synk sker automatiskt varje timme.`,
+      'Synka allt ändå',
+      false
+    );
+    if (!confirmed) return;
+  }
 
   _setDeepSyncProgress('Synkar... 0%');
 
@@ -9097,7 +9107,7 @@ async function syncStravaAll() {
         skippedType: totalSkippedType,
         skippedError: totalSkippedError,
       }, true);
-      await showAlertModal('Full synk klar', summary);
+      await showAlertModal(doneTitle, summary);
       navigate(currentView);
     }
   } catch (e) {
@@ -9111,8 +9121,39 @@ async function syncStravaAll() {
 function handleStravaRedirect() {
   const params = new URLSearchParams(window.location.search);
   if (params.has('strava_connected')) {
+    const isFirstConnect = params.get('first_connect') === '1';
     history.replaceState(null, '', window.location.pathname);
-    setTimeout(() => showAlertModal('Strava kopplad!', 'Ditt Strava-konto är nu anslutet. Dina pass synkas automatiskt.'), 500);
+    if (isFirstConnect) {
+      // First-ever connect: kick off the deep backfill automatically and
+      // skip the confirm modal (the user just clicked "Connect" — that's
+      // the consent). We stop exposing the "Synka allt" button after this
+      // because subsequent imports go through the webhook, so this is the
+      // user's only chance to seed historical data without admin help.
+      //
+      // Window: 90 days. This matches the deep_sync_floor pre-seed in
+      // strava-auth and is enough to prime the PMC fitness/fatigue model
+      // (CTL τ = 42 days) without spending 3-5x the Strava budget on
+      // mostly-cosmetic older history.
+      const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 3600 * 1000)
+        .toISOString().slice(0, 10);
+      setTimeout(async () => {
+        await showAlertModal(
+          'Strava kopplad!',
+          'Importerar din träningshistorik från Strava (de senaste ~3 månaderna). Det tar någon minut, du kan fortsätta använda appen under tiden.'
+        );
+        try {
+          await syncStravaAll({
+            skipConfirm: true,
+            sinceDate: ninetyDaysAgo,
+            doneTitle: 'Historik importerad',
+          });
+        } catch (e) {
+          console.error('Strava initial backfill failed:', e);
+        }
+      }, 500);
+    } else {
+      setTimeout(() => showAlertModal('Strava kopplad!', 'Ditt Strava-konto är nu anslutet. Dina pass synkas automatiskt.'), 500);
+    }
   } else if (params.has('strava_error')) {
     const err = params.get('strava_error');
     history.replaceState(null, '', window.location.pathname);

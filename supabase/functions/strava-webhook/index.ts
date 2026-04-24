@@ -5,6 +5,7 @@ import {
   refreshTokenIfNeeded,
   activityToWorkout,
   shouldImportActivity,
+  needsStravaDetail,
   fetchHRZoneSeconds,
   corsHeaders,
   type StravaActivity,
@@ -91,7 +92,12 @@ serve(async (req) => {
 
       const workout = activityToWorkout(activity, conn.profile_id);
 
-      if (activity.has_heartrate) {
+      // Skip the HR-zones call for activities that don't render zone
+      // breakdowns (Gym/Hyrox/Stakmaskin/Annat). Saves 1 of 2 Strava
+      // calls per webhook for these types -- meaningful when a single
+      // gym session can otherwise spend 2 calls of the 100/15-min
+      // application budget.
+      if (activity.has_heartrate && needsStravaDetail(activity)) {
         const zoneSeconds = await fetchHRZoneSeconds(activityId, accessToken);
         if (zoneSeconds) workout.hr_zone_seconds = JSON.stringify(zoneSeconds);
       }

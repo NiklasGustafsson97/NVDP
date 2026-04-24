@@ -67,19 +67,58 @@ The GitHub Action at `.github/workflows/deploy-functions.yml` will automatically
 
 ## 8. Register Strava Webhook
 
-After Edge Functions are deployed, register the webhook subscription (one-time):
+After Edge Functions are deployed, register the push-subscription via the
+`strava-webhook-register` admin endpoint. This endpoint is idempotent —
+re-running it returns the existing subscription instead of failing.
+
+Set `CRON_SECRET` in Edge Function secrets first (any random string;
+also used by the daily cron and weekly reminder).
 
 ```bash
-curl -X POST https://www.strava.com/api/v3/push_subscriptions \
-  -d client_id=YOUR_CLIENT_ID \
-  -d client_secret=YOUR_CLIENT_SECRET \
-  -d callback_url=https://enqfhumeachdgupthnci.supabase.co/functions/v1/strava-webhook \
-  -d verify_token=nvdp_strava_2026
+# Register (idempotent)
+curl -X POST "https://enqfhumeachdgupthnci.supabase.co/functions/v1/strava-webhook-register" \
+  -H "x-cron-secret: $CRON_SECRET"
+
+# Confirm it's live
+curl "https://enqfhumeachdgupthnci.supabase.co/functions/v1/strava-webhook-register" \
+  -H "x-cron-secret: $CRON_SECRET"
+
+# Recover from a stuck verify_token (deletes ALL subs, then re-register)
+curl -X DELETE "https://enqfhumeachdgupthnci.supabase.co/functions/v1/strava-webhook-register" \
+  -H "x-cron-secret: $CRON_SECRET"
 ```
 
-Replace `YOUR_CLIENT_ID`, `YOUR_CLIENT_SECRET`, and `verify_token` with your actual values.
-The `verify_token` must match the `STRAVA_VERIFY_TOKEN` secret set in step 5.
+Strava drops a subscription if our `/strava-webhook` callback returns
+non-2xx for ~24h, so re-run the register POST any time the live-import
+loop goes quiet.
 
 ## Done
 
 After setup, the "Koppla Strava" button appears in the side menu. Workouts sync automatically via webhook and can be manually triggered via "Synka nu".
+
+## Admin: triggering "Synka allt" (deep sync) for a user
+
+The deep-sync button is intentionally NOT exposed in the UI (it can burn ~800-2400 Strava API calls and saturate the per-app 100/15-min budget for everyone). New users get an automatic backfill once at first connect via `strava-auth`. Beyond that, only an admin should trigger a deep sync from outside the UI.
+
+To trigger a deep sync for a user from Cursor chat / devtools:
+
+1. Sign in as that user (or use the service-role key with the user's `profile_id` -- preferred for support cases).
+2. From devtools console while signed in as the user, run:
+
+```js
+syncStravaAll()
+```
+
+The `syncStravaAll` function is still defined on `window` (just not bound to a button). It loops the chunked `/strava-sync` cursor until `done`, pausing for `Retry-After` between chunks if Strava rate-limits.
+
+To trigger it server-side without a browser session (e.g. for a user who can't sign in), POST to the function with that user's JWT:
+
+```bash
+curl -X POST "$SUPABASE_FUNCTIONS_URL/strava-sync" \
+  -H "Authorization: Bearer <user_jwt>" \
+  -H "apikey: $SUPABASE_ANON_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"profile_id":"<profile_uuid>","since":"2025-01-01"}'
+```
+
+Repeat the call until the response includes `"done": true`. The cursor (`deep_sync_anchor` / `deep_sync_floor` on `strava_connections`) is persisted between calls, so it's safe to interrupt and resume.

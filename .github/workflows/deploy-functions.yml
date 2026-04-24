@@ -67,6 +67,18 @@ jobs:
       - name: Deploy weekly-checkin-reminder
         run: supabase functions deploy weekly-checkin-reminder --no-verify-jwt
 
+      # ── Admin tool: register/list/delete the Strava push-subscription
+      #    that drives webhook-based activity imports. Same CRON_SECRET /
+      #    service-role gate as the cron functions, so --no-verify-jwt is
+      #    safe.
+      - name: Deploy strava-webhook-register
+        run: supabase functions deploy strava-webhook-register --no-verify-jwt
+
+      # ── Daily safety-net Strava sync (pg_cron triggers it at 04:00 UTC,
+      #    catches anything the webhook missed). Same CRON_SECRET gate.
+      - name: Deploy strava-sync-daily
+        run: supabase functions deploy strava-sync-daily --no-verify-jwt
+
       # ── User-facing endpoints.
       #
       # NOTE (2026-04-18 — Supabase ES256 gateway limitation):

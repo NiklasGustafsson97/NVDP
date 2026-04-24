@@ -91,14 +91,39 @@ serve(async (req) => {
       .eq("strava_athlete_id", athlete.id)
       .neq("profile_id", profileId);
 
+    // Detect whether this is the user's first-ever Strava connect. If so,
+    // pre-seed the deep-sync cursor on the row so the client can begin
+    // chunked backfill immediately (loop /strava-sync with `since`) without
+    // a separate "click here to import history" affordance.
+    //
+    // Window: 90 days back covers the PMC fitness/fatigue model's useful
+    // memory (CTL has a 42-day τ; 90 days fully primes it). Going further
+    // back is purely cosmetic for the long-history charts and would burn
+    // ~3-5x more Strava budget per new user.
+    const { data: prior } = await db
+      .from("strava_connections")
+      .select("id, last_sync_at, deep_sync_floor")
+      .eq("profile_id", profileId)
+      .maybeSingle();
+
+    const isFirstConnect = !prior || (!prior.last_sync_at && !prior.deep_sync_floor);
+    const nowSec = Math.floor(Date.now() / 1000);
+    const ninetyDaysAgo = nowSec - 90 * 24 * 3600;
+
+    const upsertRow: Record<string, unknown> = {
+      profile_id: profileId,
+      strava_athlete_id: athlete.id,
+      access_token,
+      refresh_token,
+      expires_at,
+    };
+    if (isFirstConnect) {
+      upsertRow.deep_sync_floor = ninetyDaysAgo;
+      upsertRow.deep_sync_anchor = null;
+    }
+
     const { error: upsertErr } = await db.from("strava_connections").upsert(
-      {
-        profile_id: profileId,
-        strava_athlete_id: athlete.id,
-        access_token,
-        refresh_token,
-        expires_at,
-      },
+      upsertRow,
       { onConflict: "profile_id" },
     );
 
@@ -107,7 +132,10 @@ serve(async (req) => {
       return Response.redirect(`${APP_URL}?strava_error=db_error`, 302);
     }
 
-    return Response.redirect(`${APP_URL}?strava_connected=true`, 302);
+    const redirectUrl = isFirstConnect
+      ? `${APP_URL}?strava_connected=true&first_connect=1`
+      : `${APP_URL}?strava_connected=true`;
+    return Response.redirect(redirectUrl, 302);
   } catch (err) {
     console.error("strava-auth error", err);
     return Response.redirect(`${APP_URL}?strava_error=unknown`, 302);
