@@ -33,6 +33,11 @@ const PERSON_COLORS = {
   Love: '#E74C3C',
 };
 
+// Original training-group profiles for whom the legacy `period_plans`
+// weekly template is still shown as a default schedule. Everyone else
+// gets an empty state + "Skapa ditt första schema" CTA instead.
+const LEGACY_PLAN_USERS = ['Niklas', 'Love'];
+
 const PRINCIPLES = [
   '80–90% lugnt (Z1–Z2), max 1 "riktigt hårt" pass/vecka tills Juni',
   '3 veckor upp + 1 vecka ner (deload): var 4:e vecka sänker vi konditionsvolymen 25–35%',

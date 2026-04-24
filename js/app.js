@@ -1636,6 +1636,16 @@ async function fetchPlans(periodId) {
   return data || [];
 }
 
+// The legacy `period_plans` weekly template is shared across all users in a
+// period. Only the original training group (Niklas, Love) keeps it as a
+// default schedule when they have no AI plan; everyone else sees an empty
+// state with a "Skapa ditt första schema" CTA instead.
+function isLegacyPlanProfile(profile) {
+  if (!profile?.name) return false;
+  const first = profile.name.split(' ')[0];
+  return Array.isArray(LEGACY_PLAN_USERS) && LEGACY_PLAN_USERS.includes(first);
+}
+
 async function fetchPeriods() {
   const { data } = await sb.from('periods').select('*').order('start_date');
   return data || [];
@@ -1720,13 +1730,18 @@ async function _renderDashCalendar() {
   _calStripRange = { start: dataStartStr, end: dataEndStr };
   _calStripLoadedRange = { start: dataStartStr, end: dataEndStr };
 
-  // Pre-fetch legacy plans for the visible window so day taps are instant
+  // Pre-fetch legacy plans for the visible window so day taps are instant.
+  // Only the original training group still uses the shared template — for
+  // everyone else the day card naturally falls back to "Ingen planerad
+  // träning", and skipping the fetch saves a round-trip on cold start.
   _dashLegacyPlans = null;
-  try {
-    const periods = await fetchPeriods();
-    const period = periods.find(p => dataStartStr >= p.start_date && dataEndStr <= p.end_date);
-    if (period) _dashLegacyPlans = await fetchPlans(period.id);
-  } catch (e) { /* ignore */ }
+  if (isLegacyPlanProfile(currentProfile)) {
+    try {
+      const periods = await fetchPeriods();
+      const period = periods.find(p => dataStartStr >= p.start_date && dataEndStr <= p.end_date);
+      if (period) _dashLegacyPlans = await fetchPlans(period.id);
+    } catch (e) { /* ignore */ }
+  }
 
   _dashPlanWorkouts = [];
   if (_activePlan) {
@@ -1997,7 +2012,7 @@ async function _renderDashDayCard(dateStr) {
 
   let useAiPlan = !!(_activePlan && dateStr >= _activePlan.start_date && dateStr <= _activePlan.end_date);
   let legacyPlan = null;
-  if (!useAiPlan && _dashLegacyPlans) {
+  if (!useAiPlan && _dashLegacyPlans && isLegacyPlanProfile(currentProfile)) {
     legacyPlan = _dashLegacyPlans.find(p => p.day_of_week === dayOfWeek) || null;
   }
 
@@ -3011,7 +3026,9 @@ async function _loadSchema() {
     updateSchemaEditBar();
     renderSchemaPlan(workouts, planWorkouts, targetMonday, invitations, isOwnSchema, profile, phase);
   } else {
-    // Legacy mode (period_plans)
+    // Legacy mode (period_plans). Only the original training group keeps the
+    // shared weekly template as a default; new users get an empty state with
+    // a CTA to create their first AI schedule.
     _schemaEditMode = false;
     const deload = isDeloadWeek(targetMonday);
     document.getElementById('schema-week-label').textContent =
@@ -3020,13 +3037,17 @@ async function _loadSchema() {
     renderGenerateButton();
     updateSchemaEditBar();
 
-    const periods = await fetchPeriods();
-    const mondayStr = isoDate(targetMonday);
-    const period = periods.find(p => mondayStr >= p.start_date && mondayStr <= p.end_date);
-    let plans = [];
-    if (period) plans = await fetchPlans(period.id);
+    if (isOwnSchema && !isLegacyPlanProfile(profile)) {
+      renderSchemaEmpty(targetMonday, targetSunday);
+    } else {
+      const periods = await fetchPeriods();
+      const mondayStr = isoDate(targetMonday);
+      const period = periods.find(p => mondayStr >= p.start_date && mondayStr <= p.end_date);
+      let plans = [];
+      if (period) plans = await fetchPlans(period.id);
 
-    renderSchema(workouts, plans, targetMonday, deload, invitations, isOwnSchema, profile);
+      renderSchema(workouts, plans, targetMonday, deload, invitations, isOwnSchema, profile);
+    }
   }
   try { await updateCoachCheckinBanner(); } catch (_e) { /* non-blocking */ }
 }
@@ -3082,8 +3103,11 @@ async function _loadSchemaMonth() {
   }
 
   // Legacy period_plans fallback for cells outside any AI plan window.
+  // Only the original training group sees the shared template; for everyone
+  // else the cells just stay empty (the top-of-page pill provides the CTA).
   let legacyPlans = [];
-  if (isOwnSchema && (!_activePlan || isoDate(monthStart) < _activePlan.start_date || isoDate(monthEnd) > _activePlan.end_date)) {
+  if (isOwnSchema && isLegacyPlanProfile(profile) &&
+      (!_activePlan || isoDate(monthStart) < _activePlan.start_date || isoDate(monthEnd) > _activePlan.end_date)) {
     const periods = await fetchPeriods();
     const period = periods.find(p => isoDate(monthStart) <= p.end_date && isoDate(monthEnd) >= p.start_date);
     if (period) legacyPlans = await fetchPlans(period.id);
@@ -3713,6 +3737,30 @@ function renderSchema(workouts, plans, monday, isDeload, invitations, isOwnSchem
 
   container.innerHTML = html;
   requestAnimationFrame(() => initMapThumbnails());
+}
+
+// Empty state shown in the week view when the user has no AI plan and is
+// not part of the original training group (so the legacy `period_plans`
+// fallback shouldn't apply). The CTA opens the plan wizard.
+function renderSchemaEmpty(_monday, _sunday) {
+  const container = document.getElementById('schema-content');
+  if (!container) return;
+  container.innerHTML = `
+    <div class="card schema-empty-state">
+      <div class="schema-empty-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="40" height="40">
+          <rect x="3" y="4" width="18" height="18" rx="2"/>
+          <line x1="16" y1="2" x2="16" y2="6"/>
+          <line x1="8" y1="2" x2="8" y2="6"/>
+          <line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+      </div>
+      <h3 class="schema-empty-title">Du har inget träningsschema än</h3>
+      <p class="schema-empty-body">Skapa ditt första schema så bygger vi en plan som matchar ditt mål, din tid och din nuvarande nivå.</p>
+      <button type="button" class="schema-empty-cta" onclick="openPlanWizard()">
+        Skapa ditt första schema
+      </button>
+    </div>`;
 }
 
 // ── AI Plan Schema Renderer ──
