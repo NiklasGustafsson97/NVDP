@@ -4981,9 +4981,20 @@ async function _fetchPlanMilestones(planId) {
 async function loadGoals(workouts) {
   if (!currentProfile) return;
   _userGoals = await fetchUserGoals(currentProfile.id);
-  if (_activePlan) {
-    await _ensurePlanDerivedGoal(_activePlan, currentProfile.id);
-    _planMilestones[_activePlan.id] = await _fetchPlanMilestones(_activePlan.id);
+
+  // Make sure the active plan is loaded before deciding whether to
+  // backfill the plan_derived row. loadGoals can run before the schedule
+  // view has had a chance to set the _activePlan global, which would
+  // otherwise cause the primary goal card to be skipped on first load.
+  let plan = _activePlan;
+  if (!plan) {
+    plan = await fetchActivePlan(currentProfile.id);
+    if (plan) _activePlan = plan;
+  }
+
+  if (plan) {
+    await _ensurePlanDerivedGoal(plan, currentProfile.id);
+    _planMilestones[plan.id] = await _fetchPlanMilestones(plan.id);
   }
   renderGoals(workouts || window._lastSeasonWorkouts || []);
 }
@@ -8865,11 +8876,9 @@ async function syncStrava() {
       navigate(currentView);
     } else {
       const status = res.status;
-      const detail = result?.error
-        || (bodyText && bodyText.length < 200 ? bodyText : '')
-        || (parseError ? 'svaret kunde inte tolkas' : '');
-      console.error('Strava sync failed:', { status, body: bodyText?.slice(0, 500), parseError });
-      await showAlertModal('Synk-fel', `Tekniskt fel (HTTP ${status}). ${detail || 'Försök igen om en stund.'}`);
+      const detail = _formatStravaSyncError({ status, result, bodyText, parseError });
+      console.error('Strava sync failed:', { status, body: bodyText?.slice(0, 1000), parseError });
+      await showAlertModal('Synk-fel', `Tekniskt fel (HTTP ${status}). ${detail}`);
     }
   } catch (e) {
     console.error('Strava sync error:', e);
@@ -8935,6 +8944,38 @@ async function _stravaSyncRequest(sinceDate) {
     parseError = e;
   }
   return { res, result, bodyText, parseError };
+}
+
+// Build a human-readable error line for Strava sync failures. Supabase's
+// Edge Functions gateway returns 502s for two very different things — our
+// own function returning 502 with a JSON body (e.g. strava_api_error), or
+// the runtime itself failing (BOOT_ERROR, WORKER_LIMIT, timeout) with an
+// HTML / plain-text body. The previous logic only surfaced bodies < 200
+// chars, which silently swallowed every gateway error and made debugging
+// 502s impossible. Now we always surface SOMETHING:
+//   * JSON {"error":"..."} → use the error field
+//   * Short text body → show as-is
+//   * Long / HTML body → look for known platform keywords and tag the
+//     failure (boot, timeout, capacity) so the user (and we) know it's a
+//     platform issue, not a Strava issue.
+function _formatStravaSyncError({ status, result, bodyText, parseError }) {
+  if (result?.error) return result.error;
+  const text = (bodyText || '').trim();
+  if (!text) {
+    return parseError ? 'svaret kunde inte tolkas' : 'inget felmeddelande från servern';
+  }
+  if (text.length <= 200) return text;
+  const upper = text.toUpperCase();
+  if (upper.includes('BOOT_ERROR') || upper.includes('UNCAUGHT EXCEPTION')) {
+    return 'edge function kraschade vid start (BOOT_ERROR) — kontrollera Supabase function-loggarna';
+  }
+  if (upper.includes('WORKER_LIMIT') || upper.includes('CPU TIME') || upper.includes('WALL CLOCK') || upper.includes('TIMEOUT')) {
+    return 'edge function tidsade ut eller slog i resursgränsen — kontrollera Supabase function-loggarna';
+  }
+  if (upper.includes('<HTML') || upper.includes('BAD GATEWAY') || upper.includes('NGINX') || upper.includes('CLOUDFLARE')) {
+    return `gateway-fel (${status}) — Supabase-runtime svarade inte med JSON; kontrollera function-loggarna`;
+  }
+  return text.slice(0, 200) + '…';
 }
 
 async function syncStravaAll() {
