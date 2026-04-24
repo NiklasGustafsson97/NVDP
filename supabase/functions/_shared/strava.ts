@@ -211,17 +211,79 @@ export function activityToWorkout(
   return result;
 }
 
+// Strava-aware fetch wrapper used by the deep sync. Surfaces 429s with the
+// Retry-After hint instead of silently returning null, and never sleeps
+// past the caller-supplied wall-clock budget so the edge function can
+// always return *something* before Supabase's ~150s kill switch fires.
+//
+// Returns one of:
+//   { res: Response }                 - request succeeded (res.ok may still be false for 4xx/5xx)
+//   { rateLimited: true, retryAfterS } - Strava 429; caller should bail and let the chunk return early
+//   { error: Error }                  - network error / fetch threw
+export interface StravaFetchResult {
+  res?: Response;
+  rateLimited?: boolean;
+  retryAfterS?: number;
+  error?: Error;
+}
+
+export async function fetchStravaWithRetry(
+  url: string,
+  accessToken: string,
+  budgetMsLeft: number,
+): Promise<StravaFetchResult> {
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (res.status !== 429) return { res };
+
+    // Honour Retry-After (seconds). Strava also sets X-RateLimit-Limit /
+    // X-RateLimit-Usage headers, but Retry-After is the simplest signal.
+    const retryAfterRaw = res.headers.get("retry-after");
+    const retryAfterS = retryAfterRaw ? Math.max(1, parseInt(retryAfterRaw, 10) || 60) : 60;
+
+    // If the rate-limit window is shorter than what's left of our budget
+    // (and short enough to make a retry worthwhile) we can sleep+retry
+    // once. Otherwise let the caller surface the rate-limit to the client
+    // so the next chunk picks up after the cool-down.
+    if (
+      retryAfterS <= STRAVA_RATE_LIMIT_RETRY_MAX_S &&
+      retryAfterS * 1000 + 5_000 < budgetMsLeft
+    ) {
+      await new Promise((r) => setTimeout(r, retryAfterS * 1000));
+      const retry = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (retry.status !== 429) return { res: retry };
+      const retryAfter2 = retry.headers.get("retry-after");
+      return {
+        rateLimited: true,
+        retryAfterS: retryAfter2 ? Math.max(1, parseInt(retryAfter2, 10) || 60) : retryAfterS,
+      };
+    }
+
+    return { rateLimited: true, retryAfterS };
+  } catch (err) {
+    return { error: err instanceof Error ? err : new Error(String(err)) };
+  }
+}
+
+export const STRAVA_RATE_LIMIT_RETRY_MAX_S = 30;
+
 export async function fetchHRZoneSeconds(
   activityId: number,
-  accessToken: string
+  accessToken: string,
+  budgetMsLeft = 30_000,
 ): Promise<number[] | null> {
+  const result = await fetchStravaWithRetry(
+    `https://www.strava.com/api/v3/activities/${activityId}/zones`,
+    accessToken,
+    budgetMsLeft,
+  );
+  if (!result.res || !result.res.ok) return null;
   try {
-    const res = await fetch(
-      `https://www.strava.com/api/v3/activities/${activityId}/zones`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
-    if (!res.ok) return null;
-    const zones = await res.json();
+    const zones = await result.res.json();
     const hrZone = zones.find((z: { type: string }) => z.type === "heartrate");
     if (!hrZone?.distribution_buckets) return null;
     const buckets: Array<{ min: number; max: number; time: number }> = hrZone.distribution_buckets;

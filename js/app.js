@@ -8312,6 +8312,9 @@ async function autoSyncStravaIfStale() {
   try {
     const { data: { session } } = await sb.auth.getSession();
     if (!session) return;
+    // Pass since:null so the server takes the incremental path. Sending
+    // a truthy `since` puts the function into chunked deep-sync mode,
+    // which is reserved for "Synka allt".
     const res = await fetch(SUPABASE_FUNCTIONS_URL + '/strava-sync', {
       method: 'POST',
       headers: {
@@ -8319,15 +8322,27 @@ async function autoSyncStravaIfStale() {
         'Authorization': 'Bearer ' + session.access_token,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ profile_id: currentProfile.id, since: _stravaConnection.last_sync_at || null }),
+      body: JSON.stringify({ profile_id: currentProfile.id, since: null }),
     });
-    if (res.ok) {
-      const result = await res.json();
-      console.log(`Strava auto-sync: imported=${result.imported}, fetched=${result.totalFetched}, skipped=${result.skipped}`, result.debug);
-      if (result.last_sync_at) _stravaConnection.last_sync_at = result.last_sync_at;
-      updateStravaUI();
-      if (result.imported > 0) navigate(currentView);
+
+    let bodyText = '';
+    let result = null;
+    try {
+      bodyText = await res.text();
+      if (bodyText) result = JSON.parse(bodyText);
+    } catch (e) {
+      console.warn('Auto-sync Strava: response not JSON', { status: res.status, body: bodyText.slice(0, 300), parseError: e });
     }
+
+    if (!res.ok || !result) {
+      console.error('Auto-sync Strava failed:', { status: res.status, body: bodyText.slice(0, 500) });
+      return;
+    }
+
+    console.log(`Strava auto-sync: imported=${result.imported}, fetched=${result.totalFetched}, skipped=${result.skipped}`, result.debug);
+    if (result.last_sync_at) _stravaConnection.last_sync_at = result.last_sync_at;
+    updateStravaUI();
+    if (result.imported > 0) navigate(currentView);
   } catch (e) {
     console.error('Auto-sync Strava failed:', e);
   }
@@ -8439,7 +8454,7 @@ function buildStravaSyncMessage(result, deep = false) {
     lines.push('Strava returnerade 0 aktiviteter.');
     lines.push('Möjliga orsaker:');
     lines.push('• Behörigheten saknar "all activities" — koppla från och anslut igen, godkänn alla rutor.');
-    lines.push('• Aktiviteterna är äldre än sökperioden (vanlig synk tittar 14 dagar bakåt; använd "Synka allt" för 3 år).');
+    lines.push('• Aktiviteterna är äldre än sökperioden (vanlig synk tittar 14 dagar bakåt; använd "Synka allt" för full historik).');
   } else {
     lines.push('Inga nya pass att importera.');
     lines.push(`Hämtade ${fetched} från Strava, men inga var nya.`);
@@ -8462,26 +8477,29 @@ async function syncStrava() {
   if (btn) { btn.classList.add('syncing'); btn.textContent = 'Synkar...'; }
 
   try {
-    const { data: { session } } = await sb.auth.getSession();
-    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/strava-sync', {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': 'Bearer ' + session.access_token,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ profile_id: currentProfile.id, since: _stravaConnection.last_sync_at || null }),
-    });
+    // Pass since:null so the server takes the incremental path. The deep
+    // sync (chunked, cursor-based) is reserved for "Synka allt".
+    const req = await _stravaSyncRequest(null);
+    const { res, result, bodyText, parseError } = req;
 
-    const result = await res.json();
-    if (res.ok) {
+    if (res.ok && result) {
       if (result.last_sync_at) _stravaConnection.last_sync_at = result.last_sync_at;
       updateStravaUI();
-      console.log(`Strava sync: imported=${result.imported}, fetched=${result.totalFetched}, skipped=${result.skipped} (short=${result.skippedShort||0}, type=${result.skippedType||0}, error=${result.skippedError||0})`, result.debug);
+      console.log(
+        `Strava sync: imported=${result.imported}, fetched=${result.totalFetched}, ` +
+        `skipped=${result.skipped} (short=${result.skippedShort||0}, type=${result.skippedType||0}, ` +
+        `error=${result.skippedError||0})`,
+        result.debug
+      );
       await showAlertModal('Synk klar', buildStravaSyncMessage(result));
       navigate(currentView);
     } else {
-      await showAlertModal('Synk-fel', result.error || 'Okänt fel');
+      const status = res.status;
+      const detail = result?.error
+        || (bodyText && bodyText.length < 200 ? bodyText : '')
+        || (parseError ? 'svaret kunde inte tolkas' : '');
+      console.error('Strava sync failed:', { status, body: bodyText?.slice(0, 500), parseError });
+      await showAlertModal('Synk-fel', `Tekniskt fel (HTTP ${status}). ${detail || 'Försök igen om en stund.'}`);
     }
   } catch (e) {
     console.error('Strava sync error:', e);
@@ -8491,59 +8509,171 @@ async function syncStrava() {
   if (btn) { btn.classList.remove('syncing'); btn.textContent = 'Synka'; }
 }
 
-// TWEAK-5: cutoff for the deep "Synka allt" backfill. We pull from 1 jan
-// of last calendar year — that covers the full current season + the prior
-// 3 years lookback: enough to populate the long-term trend graphs (which
-// can scroll back through the full history via the chart navigator) without
-// hitting Strava's pagination ceilings. Tied to server-side maxPages /
-// per_page in supabase/functions/strava-sync/index.ts.
-function _deepSyncSinceDate() {
-  const d = new Date();
-  d.setFullYear(d.getFullYear() - 3);
-  return d.toISOString().slice(0, 10);
+// Fixed historical floor for the deep "Synka allt" backfill. Covers full
+// current season + ample CTL warm-up. The server walks BACKWARDS from now
+// to this floor across many short edge-fn invocations (cursor on
+// strava_connections), so the floor doesn't need to track "N years from
+// now" — it's a hard calendar date. Revisit annually when the season
+// rolls over and the warm-up window stops being useful.
+function _deepSyncFloorDate() { return '2025-01-01'; }
+
+// Backwards-compat shim in case anything in the wild still calls the old
+// name (devtools snippets, console plays). Safe to remove once nobody
+// references it.
+function _deepSyncSinceDate() { return _deepSyncFloorDate(); }
+
+function _setDeepSyncProgress(text) {
+  const btn = document.querySelector('.strava-deep-sync-btn');
+  if (btn) {
+    btn.textContent = text || 'Synka allt';
+    if (text) btn.classList.add('syncing'); else btn.classList.remove('syncing');
+  }
+  // Also surface progress in the inline sync info line so users see it
+  // even if the button label is truncated on narrow screens.
+  const info = document.querySelector('.strava-sync-info');
+  if (info && text) {
+    info.dataset.deepSyncOriginal = info.dataset.deepSyncOriginal || info.textContent || '';
+    info.textContent = text;
+  } else if (info && info.dataset.deepSyncOriginal) {
+    info.textContent = info.dataset.deepSyncOriginal;
+    delete info.dataset.deepSyncOriginal;
+  }
+}
+
+async function _stravaSyncRequest(sinceDate) {
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch(SUPABASE_FUNCTIONS_URL + '/strava-sync', {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': 'Bearer ' + session.access_token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ profile_id: currentProfile.id, since: sinceDate || null }),
+  });
+
+  // 503/504/timeout/HTML pages: read body as text, never as JSON. The old
+  // code did res.json() unconditionally and then claimed "Okänt fel" when
+  // the parse failed.
+  let result = null;
+  let parseError = null;
+  let bodyText = '';
+  try {
+    bodyText = await res.text();
+    if (bodyText) result = JSON.parse(bodyText);
+  } catch (e) {
+    parseError = e;
+  }
+  return { res, result, bodyText, parseError };
 }
 
 async function syncStravaAll() {
   if (!_stravaConnection || !currentProfile) return;
-  const sinceDate = _deepSyncSinceDate();
+  const sinceDate = _deepSyncFloorDate();
   const confirmed = await showConfirmModal(
     'Synka allt från Strava',
-    `Detta hämtar alla aktiviteter sedan ${sinceDate} från Strava (3 år bakåt — fyller i hela tränings­historiken som syns i graferna). Det tar längre tid än en vanlig synk.\n\nVanlig synk sker automatiskt varje timme.`,
+    `Detta hämtar alla aktiviteter sedan ${sinceDate} från Strava och fyller i hela tränings­historiken som syns i graferna. Det görs i flera mindre steg och kan ta någon minut.\n\nVanlig synk sker automatiskt varje timme.`,
     'Synka allt ändå',
     false
   );
   if (!confirmed) return;
-  const btn = document.querySelector('.strava-deep-sync-btn');
-  if (btn) { btn.classList.add('syncing'); btn.textContent = 'Synkar...'; }
+
+  _setDeepSyncProgress('Synkar... 0%');
+
+  let totalImported = 0;
+  let totalFetched = 0;
+  let totalSkipped = 0;
+  let totalSkippedShort = 0;
+  let totalSkippedType = 0;
+  let totalSkippedError = 0;
+  let chunkIdx = 0;
+  let lastResult = null;
 
   try {
-    const { data: { session } } = await sb.auth.getSession();
-    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/strava-sync', {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': 'Bearer ' + session.access_token,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ profile_id: currentProfile.id, since: _deepSyncSinceDate() }),
-    });
+    while (true) {
+      chunkIdx++;
+      _setDeepSyncProgress(`Synkar... batch ${chunkIdx} • ${totalImported} importerade`);
 
-    const result = await res.json();
-    if (res.ok) {
+      // Try the request, with up to 3 retries for transient platform
+      // errors (503/504, network glitch, edge fn cold-start kill).
+      let attempt = 0;
+      let req = null;
+      while (attempt < 3) {
+        attempt++;
+        req = await _stravaSyncRequest(sinceDate);
+        if (req.res.ok && req.result) break;
+
+        const status = req.res.status;
+        const transient = (status >= 500 && status <= 599) || status === 0 || status === 408;
+        if (!transient || attempt >= 3) break;
+
+        const waitMs = [5_000, 10_000, 20_000][Math.min(attempt - 1, 2)];
+        _setDeepSyncProgress(`Tillfälligt fel (HTTP ${status}). Försöker igen om ${waitMs / 1000}s...`);
+        await new Promise(r => setTimeout(r, waitMs));
+      }
+
+      if (!req.res.ok || !req.result) {
+        const status = req.res.status;
+        const detail = req.result?.error
+          || (req.bodyText && req.bodyText.length < 200 ? req.bodyText : '')
+          || (req.parseError ? 'svaret kunde inte tolkas' : '');
+        const msg = `Tekniskt fel (HTTP ${status}). ${detail || 'Försök igen om en stund.'}`;
+        console.error('Strava deep sync request failed:', status, req.bodyText?.slice(0, 500), req.parseError);
+        await showAlertModal('Synk-fel', msg);
+        break;
+      }
+
+      const result = req.result;
+      lastResult = result;
+      totalImported += result.imported || 0;
+      totalFetched += result.totalFetched || 0;
+      totalSkipped += result.skipped || 0;
+      totalSkippedShort += result.skippedShort || 0;
+      totalSkippedType += result.skippedType || 0;
+      totalSkippedError += result.skippedError || 0;
+
       if (result.last_sync_at) _stravaConnection.last_sync_at = result.last_sync_at;
-      updateStravaUI();
-      if (result.debug) console.log('Strava deep sync debug:', result.debug);
-      await showAlertModal('Full synk klar', buildStravaSyncMessage(result, true));
+
+      const pct = Math.max(0, Math.min(100, result.progress_pct || 0));
+      _setDeepSyncProgress(`Synkar... ${pct}% • ${totalImported} importerade`);
+
+      console.log(
+        `Strava deep sync chunk ${chunkIdx}: imported=${result.imported}, fetched=${result.totalFetched}, ` +
+        `skipped=${result.skipped} (short=${result.skippedShort||0}, type=${result.skippedType||0}, ` +
+        `error=${result.skippedError||0}), pct=${pct}, done=${result.done}`,
+        result.debug
+      );
+
+      if (result.done) break;
+
+      if (result.rate_limited) {
+        const waitS = Math.max(5, Math.min(120, result.retry_after_s || 60));
+        _setDeepSyncProgress(`Strava rate-limit, väntar ${waitS}s...`);
+        await new Promise(r => setTimeout(r, waitS * 1000));
+      }
+
+      // Small inter-chunk pause keeps us well under Strava's 100req/15min.
+      await new Promise(r => setTimeout(r, 500));
+    }
+
+    if (lastResult && lastResult.done) {
+      const summary = buildStravaSyncMessage({
+        imported: totalImported,
+        totalFetched,
+        skipped: totalSkipped,
+        skippedShort: totalSkippedShort,
+        skippedType: totalSkippedType,
+        skippedError: totalSkippedError,
+      }, true);
+      await showAlertModal('Full synk klar', summary);
       navigate(currentView);
-    } else {
-      await showAlertModal('Synk-fel', result.error || 'Okänt fel');
     }
   } catch (e) {
     console.error('Strava deep sync error:', e);
     await showAlertModal('Synk-fel', 'Nätverksfel vid synkning');
+  } finally {
+    updateStravaUI();
   }
-
-  if (btn) { btn.classList.remove('syncing'); btn.textContent = 'Synka allt'; }
 }
 
 function handleStravaRedirect() {
