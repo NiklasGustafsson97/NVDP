@@ -1222,6 +1222,126 @@ function calendarBaselineMonday(fromMonday) {
   return m;
 }
 
+// ─── Weekly-chart 12-week window helpers ─────────────────────────────────────
+// All weekly time-series charts (Effort, Aktivitetsmix, Easy HR, Group hours,
+// Group effort) used to dump every available week onto one axis. That made the
+// X axis cramped and triggered the "V25 → V8" bug where the label resets at a
+// year boundary because weekNumber() is year-local. These helpers give every
+// chart a contiguous Monday-by-Monday timeline plus a 12-week sliding window.
+
+const WEEKLY_CHART_WINDOW = 12;
+
+/** State per chart canvas id → end-anchor index into the contiguous week list.
+ *  A value of null (or missing) means "show the latest 12 weeks". */
+window._weeklyChartAnchor = window._weeklyChartAnchor || {};
+
+/** Build a contiguous list of Monday ISO keys between two Monday ISO keys
+ *  (inclusive). Used so chart X axis is monotonic in real time and gaps in
+ *  data render as zero rather than visually-adjacent labels jumping
+ *  weeks/years. */
+function _buildContiguousWeeks(firstMonIso, lastMonIso) {
+  if (!firstMonIso || !lastMonIso) return [];
+  const start = parseISOWeekKeyLocal(firstMonIso);
+  const end = parseISOWeekKeyLocal(lastMonIso);
+  if (end < start) return [];
+  const out = [];
+  let cursor = new Date(start.getTime());
+  // Hard cap to avoid runaway loops if data ever contains a bad date.
+  let safety = 520;
+  while (cursor <= end && safety-- > 0) {
+    out.push(isoDate(cursor));
+    cursor = addDays(cursor, 7);
+  }
+  return out;
+}
+
+/** Return the 12-week window ending at anchorIdx (clamped). If anchorIdx is
+ *  null/undefined, defaults to the latest window. Returns
+ *  { weeks, startIdx, endIdx, anchor } where anchor is the resolved end index. */
+function _sliceWeekWindow(allWeekKeys, anchorIdx, size = WEEKLY_CHART_WINDOW) {
+  const n = allWeekKeys.length;
+  if (n === 0) return { weeks: [], startIdx: 0, endIdx: -1, anchor: -1 };
+  let end = (anchorIdx === null || anchorIdx === undefined) ? n - 1 : anchorIdx;
+  end = Math.max(0, Math.min(n - 1, end));
+  // Window must always be exactly `size` long when there's enough data, even
+  // if the user paged past the start.
+  let start = Math.max(0, end - size + 1);
+  // If we're at the very start of history and have <size weeks, expand end
+  // forward instead so we still try to show `size`.
+  if (end - start + 1 < size) {
+    end = Math.min(n - 1, start + size - 1);
+  }
+  return { weeks: allWeekKeys.slice(start, end + 1), startIdx: start, endIdx: end, anchor: end };
+}
+
+/** Format a short date range like "5 maj – 21 jul" for the navigator subtitle.
+ *  Uses Sunday of the last week as the end of the visual range. */
+function _formatWeekRangeLabel(firstMonIso, lastMonIso) {
+  if (!firstMonIso || !lastMonIso) return '';
+  const a = parseISOWeekKeyLocal(firstMonIso);
+  const b = addDays(parseISOWeekKeyLocal(lastMonIso), 6);
+  const fmt = (d) => d.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
+  return `${fmt(a)} – ${fmt(b)}`;
+}
+
+/** Inject (or refresh) a small navigator strip into the parent .card of the
+ *  given chart canvas. Buttons mutate window._weeklyChartAnchor[chartId] and
+ *  call rerender() to redraw the chart. */
+function _renderChartWeekNav(chartId, totalWeeks, windowInfo, rerender) {
+  const canvas = document.getElementById(chartId);
+  if (!canvas) return;
+  const container = canvas.closest('.chart-container') || canvas.parentElement;
+  if (!container) return;
+  const card = container.parentElement; // typically the .card wrapper
+  if (!card) return;
+
+  let nav = card.querySelector(`.chart-week-nav[data-chart="${chartId}"]`);
+  if (!nav) {
+    nav = document.createElement('div');
+    nav.className = 'chart-week-nav';
+    nav.dataset.chart = chartId;
+    nav.innerHTML = `
+      <button type="button" class="chart-week-nav-btn" data-dir="prev" aria-label="Föregående 12 veckor">‹</button>
+      <span class="chart-week-nav-range"></span>
+      <button type="button" class="chart-week-nav-btn" data-dir="next" aria-label="Nästa 12 veckor">›</button>
+      <button type="button" class="chart-week-nav-latest" data-dir="latest">Senaste</button>
+    `;
+    container.parentElement.insertBefore(nav, container);
+  }
+
+  const { weeks, startIdx, endIdx, anchor } = windowInfo;
+  const rangeEl = nav.querySelector('.chart-week-nav-range');
+  if (rangeEl) {
+    rangeEl.textContent = weeks.length
+      ? _formatWeekRangeLabel(weeks[0], weeks[weeks.length - 1])
+      : '';
+  }
+  const prevBtn = nav.querySelector('[data-dir="prev"]');
+  const nextBtn = nav.querySelector('[data-dir="next"]');
+  const latestBtn = nav.querySelector('[data-dir="latest"]');
+  if (prevBtn) prevBtn.disabled = startIdx <= 0;
+  if (nextBtn) nextBtn.disabled = endIdx >= totalWeeks - 1;
+  if (latestBtn) latestBtn.hidden = endIdx >= totalWeeks - 1;
+
+  // Replace listeners by reattaching (idempotent).
+  const handler = (delta, jumpToLatest) => () => {
+    const cur = (window._weeklyChartAnchor[chartId] === null || window._weeklyChartAnchor[chartId] === undefined)
+      ? totalWeeks - 1
+      : window._weeklyChartAnchor[chartId];
+    if (jumpToLatest) {
+      window._weeklyChartAnchor[chartId] = null;
+    } else {
+      const next = Math.max(0, Math.min(totalWeeks - 1, cur + delta));
+      // If user steps past the latest, treat as "latest" so future data flows in.
+      window._weeklyChartAnchor[chartId] = (delta > 0 && next === totalWeeks - 1) ? null : next;
+    }
+    rerender();
+  };
+  if (prevBtn) { prevBtn.onclick = handler(-WEEKLY_CHART_WINDOW, false); }
+  if (nextBtn) { nextBtn.onclick = handler(+WEEKLY_CHART_WINDOW, false); }
+  if (latestBtn) { latestBtn.onclick = handler(0, true); }
+}
+
 function getCurrentPeriod(date) {
   const d = new Date(date);
   if (d >= new Date(P2_START) && d <= new Date(P2_END)) return 2;
@@ -4013,49 +4133,12 @@ async function _loadTrends() {
     return;
   }
 
-  const weekData = {};
-  const weekWorkouts = {};
-  myWorkouts.forEach(w => {
-    const mon = mondayOfWeek(new Date(w.workout_date));
-    const key = isoDate(mon);
-    if (!weekData[key]) weekData[key] = {};
-    if (!weekWorkouts[key]) weekWorkouts[key] = [];
-    weekData[key][w.activity_type] = (weekData[key][w.activity_type] || 0) + w.duration_minutes;
-    weekWorkouts[key].push(w);
-  });
-
-  const weeks = Object.keys(weekData).sort();
-  const labels = weeks.map(w => {
-    const mon = parseISOWeekKeyLocal(w);
-    const wn = weekNumber(mon);
-    return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
-  });
   const isNorm = effortMode === 'normalized';
-  const yUnit = isNorm ? ' Effort' : 'h';
-
   const weeklyTitleEl = document.getElementById('trends-weekly-title');
-  const mixTitleEl = document.getElementById('trends-mix-title');
   if (weeklyTitleEl) {
     weeklyTitleEl.textContent = isNorm ? 'Belastning per vecka (Effort)' : 'Timmar per vecka';
   }
   // mix title is set later when chart renders (respects _mixUnit toggle)
-
-  const myData = weeks.map(w => {
-    const types = trendMode === 'cardio' ? CARDIO_TYPES : [...CARDIO_TYPES, 'Gym'];
-    const wos = weekWorkouts[w].filter(wo => types.includes(wo.activity_type));
-    if (isNorm) {
-      const raw = wos.reduce((s, wo) => s + calcWorkoutEffort(wo), 0);
-      return effortRawToDisplay(raw);
-    }
-    return wos.reduce((s, wo) => s + durationWeightedHours(wo), 0);
-  });
-
-  const wowDeltas = myData.map((val, i) => {
-    const bi = wowBaselineWeekIndex(weeks, i);
-    if (bi === null) return null;
-    const prev = myData[bi];
-    return prev > 0 ? ((val - prev) / prev) * 100 : null;
-  });
 
   // Week summary card moved to dashboard - clear here to avoid duplication
   const deltaEl = document.getElementById('volume-delta');
@@ -4063,58 +4146,9 @@ async function _loadTrends() {
   const wsCard = document.getElementById('weekly-summary-card');
   if (wsCard) wsCard.classList.add('hidden');
 
-  // Activity mix stacked bar
-  const mixCanvas = document.getElementById('chart-mix-personal');
-  if (mixCanvas) {
-    if (chartMixPersonal) chartMixPersonal.destroy();
-    const types = ['Löpning', 'Cykel', 'Gym', 'Annat', 'Hyrox', 'Stakmaskin', 'Längdskidor'];
-    const mixIsKm = _mixUnit === 'km';
-    const mixYUnit = mixIsKm ? ' km' : yUnit;
-
-    if (mixTitleEl) mixTitleEl.textContent = mixIsKm ? 'Aktivitetsmix (km)' : (isNorm ? 'Aktivitetsmix (Effort)' : 'Aktivitetsmix (timmar)');
-
-    const weekEffortByType = {};
-    if (isNorm && !mixIsKm) {
-      weeks.forEach(w => {
-        weekEffortByType[w] = {};
-        (weekWorkouts[w] || []).forEach(wo => {
-          weekEffortByType[w][wo.activity_type] = (weekEffortByType[w][wo.activity_type] || 0) + calcWorkoutEffort(wo);
-        });
-      });
-    }
-
-    const datasets = types.filter(t => weeks.some(w => {
-      const wos = (weekWorkouts[w] || []).filter(wo => wo.activity_type === t);
-      if (mixIsKm) return wos.reduce((s, wo) => s + (wo.distance_km || 0), 0) > 0;
-      if (isNorm) return (weekEffortByType[w]?.[t] || 0) > 0;
-      return wos.reduce((s, wo) => s + durationWeightedHours(wo), 0) > 0;
-    })).map(t => ({
-      label: t,
-      data: weeks.map(w => {
-        const wos = (weekWorkouts[w] || []).filter(wo => wo.activity_type === t);
-        if (mixIsKm) return +wos.reduce((s, wo) => s + (wo.distance_km || 0), 0).toFixed(1);
-        if (isNorm) return +effortRawToDisplay(weekEffortByType[w]?.[t] || 0).toFixed(2);
-        return +wos.reduce((s, wo) => s + durationWeightedHours(wo), 0).toFixed(2);
-      }),
-      backgroundColor: ACTIVITY_COLORS[t] || '#555',
-      borderRadius: 4
-    }));
-    chartMixPersonal = new Chart(mixCanvas.getContext('2d'), {
-      type: 'bar',
-      data: { labels, datasets },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: {
-          legend: { position: 'bottom', labels: { color: '#aaa', usePointStyle: true, boxWidth: 12 } },
-          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)}${mixYUnit}` } }
-        },
-        scales: {
-          y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + mixYUnit } },
-          x: { stacked: true, grid: { display: false }, ticks: { color: '#888' } }
-        }
-      }
-    });
-  }
+  // Activity mix stacked bar (extracted so the 12-week navigator can re-render
+  // it without re-fetching workouts).
+  renderMixChart(myWorkouts);
 
   // Season totals: summary card + horizontal bar charts
   renderSeasonTotals(myWorkouts);
@@ -5329,6 +5363,86 @@ function _effortBandClassify(effortData) {
   return { targetUpper, targetLower, classes };
 }
 
+function renderMixChart(workouts) {
+  const mixCanvas = document.getElementById('chart-mix-personal');
+  if (!mixCanvas) return;
+  if (chartMixPersonal) chartMixPersonal.destroy();
+
+  const isNorm = effortMode === 'normalized';
+  const yUnit = isNorm ? ' Effort' : 'h';
+  const mixIsKm = _mixUnit === 'km';
+  const mixYUnit = mixIsKm ? ' km' : yUnit;
+  const mixTitleEl = document.getElementById('trends-mix-title');
+  if (mixTitleEl) mixTitleEl.textContent = mixIsKm ? 'Aktivitetsmix (km)' : (isNorm ? 'Aktivitetsmix (Effort)' : 'Aktivitetsmix (timmar)');
+
+  const weekWorkouts = {};
+  workouts.forEach(w => {
+    const mon = mondayOfWeek(new Date(w.workout_date));
+    const key = isoDate(mon);
+    if (!weekWorkouts[key]) weekWorkouts[key] = [];
+    weekWorkouts[key].push(w);
+  });
+  const allDataWeeks = Object.keys(weekWorkouts).sort();
+  if (allDataWeeks.length === 0) return;
+  const allWeekKeys = _buildContiguousWeeks(allDataWeeks[0], allDataWeeks[allDataWeeks.length - 1]);
+  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-mix-personal']);
+  const visibleWeeks = win.weeks;
+
+  const labels = visibleWeeks.map(w => {
+    const mon = parseISOWeekKeyLocal(w);
+    const wn = weekNumber(mon);
+    return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
+  });
+
+  const types = ['Löpning', 'Cykel', 'Gym', 'Annat', 'Hyrox', 'Stakmaskin', 'Längdskidor'];
+
+  // Per-week effort cache only when needed.
+  const weekEffortByType = {};
+  if (isNorm && !mixIsKm) {
+    visibleWeeks.forEach(w => {
+      weekEffortByType[w] = {};
+      (weekWorkouts[w] || []).forEach(wo => {
+        weekEffortByType[w][wo.activity_type] = (weekEffortByType[w][wo.activity_type] || 0) + calcWorkoutEffort(wo);
+      });
+    });
+  }
+
+  const datasets = types.filter(t => visibleWeeks.some(w => {
+    const wos = (weekWorkouts[w] || []).filter(wo => wo.activity_type === t);
+    if (mixIsKm) return wos.reduce((s, wo) => s + (wo.distance_km || 0), 0) > 0;
+    if (isNorm) return (weekEffortByType[w]?.[t] || 0) > 0;
+    return wos.reduce((s, wo) => s + durationWeightedHours(wo), 0) > 0;
+  })).map(t => ({
+    label: t,
+    data: visibleWeeks.map(w => {
+      const wos = (weekWorkouts[w] || []).filter(wo => wo.activity_type === t);
+      if (mixIsKm) return +wos.reduce((s, wo) => s + (wo.distance_km || 0), 0).toFixed(1);
+      if (isNorm) return +effortRawToDisplay(weekEffortByType[w]?.[t] || 0).toFixed(2);
+      return +wos.reduce((s, wo) => s + durationWeightedHours(wo), 0).toFixed(2);
+    }),
+    backgroundColor: ACTIVITY_COLORS[t] || '#555',
+    borderRadius: 4
+  }));
+
+  chartMixPersonal = new Chart(mixCanvas.getContext('2d'), {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#aaa', usePointStyle: true, boxWidth: 12 } },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)}${mixYUnit}` } }
+      },
+      scales: {
+        y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + mixYUnit } },
+        x: { stacked: true, grid: { display: false }, ticks: { color: '#888' } }
+      }
+    }
+  });
+
+  _renderChartWeekNav('chart-mix-personal', allWeekKeys.length, win, () => renderMixChart(workouts));
+}
+
 function renderEffortChart(workouts) {
   const effortCanvas = document.getElementById('chart-effort');
   if (!effortCanvas) return;
@@ -5344,17 +5458,34 @@ function renderEffortChart(workouts) {
     weekMap[key].hours += w.duration_minutes / 60;
   });
 
-  const weeks = Object.keys(weekMap).sort();
-  const effortData = weeks.map(w => +effortRawToDisplay(weekMap[w].effort).toFixed(2));
-  const hoursData = weeks.map(w => +weekMap[w].hours.toFixed(1));
-  const isDeload = weeks.map(w => isDeloadWeek(parseISOWeekKeyLocal(w)));
-  const labels = weeks.map((w, i) => {
+  const dataWeeks = Object.keys(weekMap).sort();
+  if (dataWeeks.length === 0) return;
+  // Contiguous Monday timeline (fills gaps so the X axis is monotonic in
+  // real time and "V25 → V8" jumps disappear).
+  const allWeekKeys = _buildContiguousWeeks(dataWeeks[0], dataWeeks[dataWeeks.length - 1]);
+  // Compute the FULL effort/hours/class series on the contiguous timeline so
+  // the rolling band lookback stays anchored to real calendar weeks regardless
+  // of which 12-week window the user is currently viewing.
+  const effortDataAll = allWeekKeys.map(w => +effortRawToDisplay((weekMap[w]?.effort) || 0).toFixed(2));
+  const hoursDataAll = allWeekKeys.map(w => +((weekMap[w]?.hours) || 0).toFixed(1));
+  const isDeloadAll = allWeekKeys.map(w => isDeloadWeek(parseISOWeekKeyLocal(w)));
+  const { targetUpper: targetUpperAll, targetLower: targetLowerAll, classes: classesAll } = _effortBandClassify(effortDataAll);
+
+  // Slice down to the visible 12-week window.
+  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-effort']);
+  const visibleWeeks = win.weeks;
+  const effortData = effortDataAll.slice(win.startIdx, win.endIdx + 1);
+  const hoursData = hoursDataAll.slice(win.startIdx, win.endIdx + 1);
+  const isDeload = isDeloadAll.slice(win.startIdx, win.endIdx + 1);
+  const targetUpper = targetUpperAll.slice(win.startIdx, win.endIdx + 1);
+  const targetLower = targetLowerAll.slice(win.startIdx, win.endIdx + 1);
+  const classes = classesAll.slice(win.startIdx, win.endIdx + 1);
+
+  const labels = visibleWeeks.map((w, i) => {
     const mon = parseISOWeekKeyLocal(w);
     const wn = weekNumber(mon);
     return isDeload[i] ? `V${wn} (D)` : `V${wn}`;
   });
-
-  const { targetUpper, targetLower, classes } = _effortBandClassify(effortData);
 
   // Bars: color per classification. Deload weeks that classify as 'under'
   // are kept as 'under' (amber) — that's actually informative ("yes you
@@ -5486,11 +5617,14 @@ function renderEffortChart(workouts) {
   // up in the number.
   const subEl = document.getElementById('effort-subtitle');
   if (subEl) {
+    // Subtitle always reports on the most recent calendar weeks across the
+    // FULL series — it's a snapshot of "now", not of whatever 12-week window
+    // the user happens to be browsing.
     const gradedRecent = [];
-    for (let i = effortData.length - 1; i >= 0 && gradedRecent.length < 8; i--) {
-      if (classes[i] === 'neutral') continue;
-      if (isDeload[i]) continue;
-      gradedRecent.push(classes[i]);
+    for (let i = effortDataAll.length - 1; i >= 0 && gradedRecent.length < 8; i--) {
+      if (classesAll[i] === 'neutral') continue;
+      if (isDeloadAll[i]) continue;
+      gradedRecent.push(classesAll[i]);
     }
     if (gradedRecent.length === 0) {
       subEl.textContent = `Bygg ≥ ${EFFORT_BAND_LOOKBACK + 1} v historik så ritar vi mål-bandet.`;
@@ -5499,8 +5633,8 @@ function renderEffortChart(workouts) {
       const overCnt = gradedRecent.filter((c) => c === 'over').length;
       const underCnt = gradedRecent.filter((c) => c === 'under').length;
       const total = gradedRecent.length;
-      const lastCls = classes[classes.length - 1];
-      const lastTag = isDeload[isDeload.length - 1]
+      const lastCls = classesAll[classesAll.length - 1];
+      const lastTag = isDeloadAll[isDeloadAll.length - 1]
         ? ' (planerad deload)'
         : lastCls === 'over'
           ? ' (för hög)'
@@ -5523,6 +5657,8 @@ function renderEffortChart(workouts) {
       <div class="effort-legend-item effort-legend-meta">Effort = normaliserad belastning (rå score ÷ ${EFFORT_DISPLAY_DIVISOR} ≈ 1 h @ MET 10). Bandet = ±${Math.round(EFFORT_BAND_PCT * 100)} % runt rullande ${EFFORT_BAND_LOOKBACK}-veckorssnitt av föregående veckor.</div>
     `;
   }
+
+  _renderChartWeekNav('chart-effort', allWeekKeys.length, win, () => renderEffortChart(workouts));
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -5954,9 +6090,9 @@ function renderEasyHrChart(workouts) {
     entry.kmSum += agg.km;
     entry.passes++;
   }
-  const keys = [...byWeek.keys()].sort();
+  const dataKeys = [...byWeek.keys()].sort();
 
-  if (keys.length < 2) {
+  if (dataKeys.length < 2) {
     subEl.textContent = '';
     statusEl.textContent = qualifiedPasses === 0
       ? `Inga kvalificerade pass än. Behöver löppass med splits från Strava och puls i ${hrMin}–${hrMax} bpm efter de första 10 min.`
@@ -5964,21 +6100,38 @@ function renderEasyHrChart(workouts) {
     return;
   }
 
-  const labels = keys.map((k) => `V${weekNumber(parseISOWeekKeyLocal(k))}`);
-  const efData = keys.map((k) => {
+  // Contiguous Monday timeline; weeks without qualifying passes render as
+  // null gaps (spanGaps keeps the line continuous so a missed Z2 week doesn't
+  // break the trend visually).
+  const allWeekKeys = _buildContiguousWeeks(dataKeys[0], dataKeys[dataKeys.length - 1]);
+  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-easy-hr']);
+  const visibleWeeks = win.weeks;
+
+  const labels = visibleWeeks.map((k) => `V${weekNumber(parseISOWeekKeyLocal(k))}`);
+  const efData = visibleWeeks.map((k) => {
     const e = byWeek.get(k);
+    if (!e) return null;
     const gap = e.gapSum / e.weightSum;
     const hr = e.hrSum / e.weightSum;
     return +(gap / hr * 100).toFixed(2);
   });
-  const ctxData = keys.map((k) => {
+  const ctxData = visibleWeeks.map((k) => {
     const e = byWeek.get(k);
+    if (!e) return null;
     return {
       gap: +(e.gapSum / e.weightSum).toFixed(2),
       hr: Math.round(e.hrSum / e.weightSum),
       km: +e.kmSum.toFixed(1),
       passes: e.passes,
     };
+  });
+  // Recent EF stats for the subtitle — always over the FULL series so they
+  // describe "now", not the browsed window.
+  const efDataAll = dataKeys.map((k) => {
+    const e = byWeek.get(k);
+    const gap = e.gapSum / e.weightSum;
+    const hr = e.hrSum / e.weightSum;
+    return +(gap / hr * 100).toFixed(2);
   });
 
   const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
@@ -5996,6 +6149,7 @@ function renderEasyHrChart(workouts) {
         pointHoverRadius: 5,
         fill: true,
         tension: 0.25,
+        spanGaps: true,
       }],
     },
     options: {
@@ -6034,10 +6188,14 @@ function renderEasyHrChart(workouts) {
     },
   });
 
-  const recentEf = efData.slice(-4);
-  const earlierEf = efData.slice(-8, -4);
+  // Subtitle / status work off the FULL series so they always describe the
+  // most recent trend regardless of which window is being browsed.
+  const recentEf = efDataAll.slice(-4);
+  const earlierEf = efDataAll.slice(-8, -4);
   const avgRecent = recentEf.reduce((a, b) => a + b, 0) / recentEf.length;
   subEl.textContent = `Senaste 4 v: EF ${avgRecent.toFixed(2)} · Z2-band ${hrMin}–${hrMax} bpm`;
+
+  _renderChartWeekNav('chart-easy-hr', allWeekKeys.length, win, () => renderEasyHrChart(workouts));
 
   if (earlierEf.length === 0) {
     statusEl.textContent = 'Bygg historik: behöver ~8 veckor med kvalificerade Z2-pass för att jämföra trenden.';
@@ -6494,23 +6652,28 @@ function renderGroupChart(allWorkouts, members) {
     weekData[key][w.profile_id] = (weekData[key][w.profile_id] || 0) + val;
   });
 
-  const weeks = Object.keys(weekData).sort();
-  const labels = weeks.map(w => {
+  if (chartGroupWeekly) chartGroupWeekly.destroy();
+  const canvas = document.getElementById('chart-group-weekly');
+  if (!canvas) return;
+
+  const dataWeeks = Object.keys(weekData).sort();
+  if (dataWeeks.length === 0) return;
+  const allWeekKeys = _buildContiguousWeeks(dataWeeks[0], dataWeeks[dataWeeks.length - 1]);
+  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-group-weekly']);
+  const visibleWeeks = win.weeks;
+
+  const labels = visibleWeeks.map(w => {
     const mon = parseISOWeekKeyLocal(w);
     const wn = weekNumber(mon);
     return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
   });
-
-  if (chartGroupWeekly) chartGroupWeekly.destroy();
-  const canvas = document.getElementById('chart-group-weekly');
-  if (!canvas) return;
 
   const titleEl = document.getElementById('grp-chart-title');
   if (titleEl) titleEl.textContent = isGrpNorm ? 'Belastning per vecka (Effort)' : 'Timmar per vecka';
 
   const datasets = members.map((m, i) => ({
     label: m.name.split(' ')[0],
-    data: weeks.map(w => isGrpNorm ? +effortRawToDisplay(weekData[w]?.[m.id] || 0).toFixed(2) : (weekData[w]?.[m.id] || 0) / 60),
+    data: visibleWeeks.map(w => isGrpNorm ? +effortRawToDisplay(weekData[w]?.[m.id] || 0).toFixed(2) : (weekData[w]?.[m.id] || 0) / 60),
     borderColor: colors[i % colors.length],
     backgroundColor: colors[i % colors.length],
     tension: 0.35, fill: false, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2.5
@@ -6532,6 +6695,8 @@ function renderGroupChart(allWorkouts, members) {
       }
     }
   });
+
+  _renderChartWeekNav('chart-group-weekly', allWeekKeys.length, win, () => renderGroupChart(allWorkouts, members));
 }
 
 function renderGroupEffortChart(allWorkouts, members) {
@@ -6550,8 +6715,13 @@ function renderGroupEffortChart(allWorkouts, members) {
     weekMap[key][w.profile_id].hours += w.duration_minutes / 60;
   });
 
-  const weeks = Object.keys(weekMap).sort();
-  const labels = weeks.map(w => {
+  const dataWeeks = Object.keys(weekMap).sort();
+  if (dataWeeks.length === 0) return;
+  const allWeekKeys = _buildContiguousWeeks(dataWeeks[0], dataWeeks[dataWeeks.length - 1]);
+  const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-group-effort']);
+  const visibleWeeks = win.weeks;
+
+  const labels = visibleWeeks.map(w => {
     const mon = parseISOWeekKeyLocal(w);
     const wn = weekNumber(mon);
     return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
@@ -6560,7 +6730,7 @@ function renderGroupEffortChart(allWorkouts, members) {
 
   const datasets = members.map((m, i) => ({
     label: m.name.split(' ')[0],
-    data: weeks.map(w => +effortRawToDisplay(weekMap[w]?.[m.id]?.effort || 0).toFixed(2)),
+    data: visibleWeeks.map(w => +effortRawToDisplay(weekMap[w]?.[m.id]?.effort || 0).toFixed(2)),
     borderColor: colors[i % colors.length],
     backgroundColor: colors[i % colors.length],
     tension: 0.35, fill: false, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2.5,
@@ -6587,6 +6757,8 @@ function renderGroupEffortChart(allWorkouts, members) {
   if (legendEl) {
     legendEl.innerHTML = `<div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> Effort = skalad belastning (rå score ÷ ${EFFORT_DISPLAY_DIVISOR}), samma som på Din progress.</div>`;
   }
+
+  _renderChartWeekNav('chart-group-effort', allWeekKeys.length, win, () => renderGroupEffortChart(allWorkouts, members));
 }
 
 async function createGroup() {

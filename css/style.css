@@ -1057,6 +1057,51 @@ select option { background: #1a1a2e; color: var(--text); }
 
 /* ── Trends ── */
 .chart-container { position: relative; height: 300px; margin-bottom: 24px; }
+
+/* Per-chart 12-week navigator (prev / range / next / "Senaste") */
+.chart-week-nav {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 4px 0 10px;
+  font-size: 0.82rem;
+  color: var(--text-muted, #888);
+  flex-wrap: wrap;
+}
+.chart-week-nav-btn {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px;
+  background: var(--surface-2, rgba(255,255,255,0.04));
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  color: var(--text, #ddd);
+  font-size: 1rem; line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+.chart-week-nav-btn:hover:not([disabled]) {
+  background: var(--surface-3, rgba(255,255,255,0.08));
+  border-color: var(--accent, #d6639e);
+}
+.chart-week-nav-btn[disabled] { opacity: 0.35; cursor: not-allowed; }
+.chart-week-nav-range {
+  min-width: 130px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.chart-week-nav-latest {
+  background: transparent;
+  border: none;
+  color: var(--accent, #d6639e);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.chart-week-nav-latest:hover { background: rgba(214,99,158,0.10); }
+.chart-week-nav-latest[hidden] { display: none; }
 .toggle-row { display: flex; gap: 8px; margin-bottom: 16px; }
 .toggle-btn {
   padding: 6px 14px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;
