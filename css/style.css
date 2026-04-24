@@ -1707,7 +1707,11 @@ input.code-input {
 .wm-hero {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  /* Wide-and-short banner: ~2.5:1 ratio reads as a panoramic strip rather
+     than a square tile. Capped at 240px so on a wide desktop modal it still
+     stays a header band instead of dominating the viewport. */
+  aspect-ratio: 5 / 2;
+  max-height: 240px;
   overflow: hidden;
   background: rgba(255,255,255,0.03);
   margin-bottom: 8px;
@@ -3889,6 +3893,16 @@ input.code-input {
   font-size: 1.35rem; font-weight: 800; letter-spacing: 0.25em;
   padding: 10px 16px; border-radius: var(--radius-sm);
   background: var(--bg-input); border: 1px solid var(--border);
+}
+
+/* Desktop only: workout-modal default inherits .modal-box max-width: 420px
+   which makes the route map render as a tall portrait sliver. Widen it to
+   roughly the dashboard reading column so the map can become a panoramic
+   banner. Scoped to min-width: 601px so the mobile (<=600px) full-bleed
+   slide-up panel (max-width: none) still wins on phones — without that
+   scope this unscoped rule would clobber it via source order. */
+@media (min-width: 601px) {
+  .workout-modal-panel { max-width: 780px; }
 }
 
 .workout-modal-panel .modal-header {
