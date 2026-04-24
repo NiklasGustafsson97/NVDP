@@ -129,12 +129,15 @@ serve(async (req) => {
     debug.athlete_id = athlete.id;
     debug.token_scope = conn.access_token ? "present" : "missing";
 
-    // TWEAK-5: deep backfills (with `since`) need many more pages than an
-    // incremental sync. 30 pages × 50 = 1500 activities, enough to cover
-    // ~16 months of regular training without a refetch.
-    const maxPages = since ? 30 : 5;
+    // Deep backfills (with `since`) need many more pages than an incremental
+    // sync. 40 pages × 200 (Strava's max per_page) = 8000 activities, which
+    // comfortably covers 3+ years even for very heavy training schedules.
+    // Incremental syncs stay tight (5 × 50 = 250 activities, ample for
+    // anything that's been added since the last sync ≤ 14 days ago).
+    const maxPages = since ? 40 : 5;
+    const perPage = since ? 200 : 50;
     while (page <= maxPages) {
-      const url = `https://www.strava.com/api/v3/athlete/activities?after=${after}&per_page=50&page=${page}`;
+      const url = `https://www.strava.com/api/v3/athlete/activities?after=${after}&per_page=${perPage}&page=${page}`;
       const activitiesRes = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });

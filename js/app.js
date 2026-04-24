@@ -8443,7 +8443,7 @@ function buildStravaSyncMessage(result, deep = false) {
     lines.push('Strava returnerade 0 aktiviteter.');
     lines.push('Möjliga orsaker:');
     lines.push('• Behörigheten saknar "all activities" — koppla från och anslut igen, godkänn alla rutor.');
-    lines.push('• Aktiviteterna är äldre än sökperioden (synk tittar 14 dagar bakåt; använd "Synka allt" för längre).');
+    lines.push('• Aktiviteterna är äldre än sökperioden (vanlig synk tittar 14 dagar bakåt; använd "Synka allt" för 3 år).');
   } else {
     lines.push('Inga nya pass att importera.');
     lines.push(`Hämtade ${fetched} från Strava, men inga var nya.`);
@@ -8497,11 +8497,14 @@ async function syncStrava() {
 
 // TWEAK-5: cutoff for the deep "Synka allt" backfill. We pull from 1 jan
 // of last calendar year — that covers the full current season + the prior
-// year needed for YoY comparisons in season totals, without dragging in
-// ancient data the user no longer cares about.
+// 3 years lookback: enough to populate the long-term trend graphs (which
+// can scroll back through the full history via the chart navigator) without
+// hitting Strava's pagination ceilings. Tied to server-side maxPages /
+// per_page in supabase/functions/strava-sync/index.ts.
 function _deepSyncSinceDate() {
-  const prevYear = new Date().getFullYear() - 1;
-  return `${prevYear}-01-01`;
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 3);
+  return d.toISOString().slice(0, 10);
 }
 
 async function syncStravaAll() {
@@ -8509,7 +8512,7 @@ async function syncStravaAll() {
   const sinceDate = _deepSyncSinceDate();
   const confirmed = await showConfirmModal(
     'Synka allt från Strava',
-    `Detta hämtar alla aktiviteter sedan ${sinceDate} från Strava (täcker nuvarande säsong + förra året för jämförelser). Det tar längre tid än en vanlig synk.\n\nVanlig synk sker automatiskt varje timme.`,
+    `Detta hämtar alla aktiviteter sedan ${sinceDate} från Strava (3 år bakåt — fyller i hela tränings­historiken som syns i graferna). Det tar längre tid än en vanlig synk.\n\nVanlig synk sker automatiskt varje timme.`,
     'Synka allt ändå',
     false
   );
