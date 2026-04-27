@@ -733,6 +733,12 @@ select option { background: #1a1a2e; color: var(--text); }
 
 @media (max-width: 600px) {
   :root { --nav-h: 68px; }
+  /* iOS draws its native scroll indicator outside CSS scrollbar control.
+     Push the scroll edge off-screen; .app { overflow:hidden } clips it. */
+  .content {
+    margin-right: -20px;
+    padding-right: calc(16px + 20px);
+  }
   .side-menu {
     width: min(86vw, 320px);
     padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 16px);
