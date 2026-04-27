@@ -4794,6 +4794,9 @@ body.chat-mode #view-coach { height: 100%; }
 .coach-diff .cc-diff-arrow { font-size: 0.8rem; }
 .coach-diff .cc-diff-reason { margin-top: 8px; font-size: 0.8rem; color: var(--text-muted); line-height: 1.35; }
 .coach-diff .cc-diff-card--single {
+  display: block;
+  width: 100%;
+  min-width: 0;
   padding: 0;
   border: 0;
   background: transparent;
@@ -4804,10 +4807,17 @@ body.chat-mode #view-coach { height: 100%; }
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   margin-bottom: 10px;
   font-size: 0.78rem; font-weight: 700; color: var(--text-muted);
-  text-transform: uppercase; letter-spacing: 0.06em;
+  letter-spacing: 0;
+}
+.cc-edit-topline span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .cc-edit-topline span:last-child {
-  text-transform: none; letter-spacing: 0; font-weight: 650;
+  flex-shrink: 0;
+  font-weight: 650;
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
@@ -4843,12 +4853,16 @@ body.chat-mode #view-coach { height: 100%; }
   font-size: 0.96rem;
   line-height: 1.25;
   margin-bottom: 5px;
+  overflow-wrap: break-word;
 }
 .cc-edit-meta {
   min-height: 18px;
   color: var(--text-muted);
   font-size: 0.82rem;
   line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .cc-edit-desc {
   margin-top: 6px;
@@ -4864,13 +4878,20 @@ body.chat-mode #view-coach { height: 100%; }
   font-size: 1rem;
 }
 .coach-diff-actions {
-  display: flex; justify-content: flex-end; gap: 8px;
+  display: flex; justify-content: flex-end; gap: 10px;
   padding: 10px 12px 12px;
   border-top: 1px solid color-mix(in srgb, var(--text) 6%, transparent);
   background: color-mix(in srgb, var(--bg) 34%, transparent);
   position: sticky; bottom: 0;
 }
-.coach-diff-actions .btn { font-size: 0.85rem; padding: 7px 14px; }
+.coach-diff-actions .btn {
+  min-height: 40px;
+  font-size: 0.85rem;
+  padding: 8px 16px;
+  white-space: nowrap;
+}
+.coach-diff-actions .btn-ghost { flex: 0 0 auto; min-width: 92px; }
+.coach-diff-actions .btn-primary { flex: 1 1 220px; width: auto; }
 .coach-diff-status {
   margin: 0; padding: 12px 14px; border-radius: 0;
   font-size: 0.85rem; text-align: center;
@@ -5086,6 +5107,9 @@ body.chat-mode #view-coach { height: 100%; }
   .coach-diff { margin-right: 0; max-width: 100%; }
   .cc-edit-flow { grid-template-columns: 1fr; }
   .cc-edit-arrow { transform: rotate(90deg); min-height: 18px; }
+  .coach-diff-actions { display: grid; grid-template-columns: 1fr; }
+  .coach-diff-actions .btn-ghost,
+  .coach-diff-actions .btn-primary { width: 100%; min-width: 0; }
 
   .coach-drawer {
     width: 100%;
