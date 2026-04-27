@@ -3417,9 +3417,11 @@ function renderSchemaMonth(ctx) {
       for (const it of visible) {
         const tagHtml = _smcTagHtml(it, d, weekMaxByIso);
         const km = _smcEstimateKm(it);
+        const type = (it.type || '').toLowerCase();
+        const showDuration = type.includes('gym') || type.includes('styrk');
         const distStr = km > 0 ? `${km < 10 ? km.toFixed(1) : Math.round(km)}km` : '';
         const minStr = it.mins ? `${it.mins}'` : '';
-        const meta = [distStr, minStr].filter(Boolean).join(' · ');
+        const meta = showDuration ? minStr : (distStr || minStr);
         lines.push(
           `<div class="smc-pass-line">` +
             `<span class="smc-pass-emoji">${activityEmoji(it.type)}</span>` +
