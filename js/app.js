@@ -1207,7 +1207,27 @@ function formatDate(d) {
   return dt.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
 }
 
-function isDeloadWeek(mondayDate) {
+function activePlanPhaseForWeek(mondayDate) {
+  if (!_activePlan || !Array.isArray(_activePlanWeeks) || _activePlanWeeks.length === 0) return null;
+  const md = mondayDate instanceof Date ? new Date(mondayDate.getTime()) : parseISOWeekKeyLocal(mondayDate);
+  md.setHours(12, 0, 0, 0);
+  const dateStr = isoDate(md);
+  if (dateStr < _activePlan.start_date || dateStr > _activePlan.end_date) return null;
+
+  for (const week of _activePlanWeeks) {
+    const weekStart = new Date(_activePlan.start_date);
+    weekStart.setHours(12, 0, 0, 0);
+    weekStart.setDate(weekStart.getDate() + (week.week_number - 1) * 7);
+    const weekEnd = addDays(weekStart, 6);
+    if (dateStr >= isoDate(weekStart) && dateStr <= isoDate(weekEnd)) {
+      return String(week.phase || '').toLowerCase() || null;
+    }
+  }
+
+  return null;
+}
+
+function isLegacyDeloadWeek(mondayDate) {
   const p1Start = parseISOWeekKeyLocal(P1_START);
   const p2Start = parseISOWeekKeyLocal(P2_START);
   const md = mondayDate instanceof Date ? new Date(mondayDate.getTime()) : parseISOWeekKeyLocal(mondayDate);
@@ -1221,6 +1241,12 @@ function isDeloadWeek(mondayDate) {
     weeksSinceStart = Math.floor((md - p1Start) / (7 * 86400000));
   }
   return weeksSinceStart >= 0 && (weeksSinceStart + 1) % 4 === 0;
+}
+
+function isDeloadWeek(mondayDate) {
+  const planPhase = activePlanPhaseForWeek(mondayDate);
+  if (planPhase) return planPhase === 'deload';
+  return isLegacyDeloadWeek(mondayDate);
 }
 
 /** Måndagsnyckel YYYY-MM-DD → lokalt datum (undviker UTC-förskjutning). */
@@ -4537,6 +4563,10 @@ async function _loadTrends() {
   if (deltaEl) deltaEl.innerHTML = '';
   const wsCard = document.getElementById('weekly-summary-card');
   if (wsCard) wsCard.classList.add('hidden');
+
+  if (PLAN_GENERATION_ENABLED) {
+    await ensureActivePlanLoaded(currentProfile.id);
+  }
 
   // Activity mix stacked bar (extracted so the 12-week navigator can re-render
   // it without re-fetching workouts).
@@ -8188,6 +8218,9 @@ async function _loadGroup() {
   }
 
   // Group weekly chart
+  if (PLAN_GENERATION_ENABLED) {
+    await ensureActivePlanLoaded(currentProfile.id);
+  }
   renderGroupChart(allWorkouts, members);
   renderGroupEffortChart(allWorkouts, members);
 
@@ -10105,6 +10138,20 @@ async function fetchActivePlan(profileId) {
     console.error('Fetch active plan error:', e);
     return null;
   }
+}
+
+async function ensureActivePlanLoaded(profileId) {
+  if (!profileId || !PLAN_GENERATION_ENABLED) return null;
+  if (_activePlan && _activePlan.profile_id === profileId) {
+    if (!_activePlanWeeks || _activePlanWeeks.length === 0) {
+      _activePlanWeeks = await fetchPlanWeeks(_activePlan.id);
+    }
+    return _activePlan;
+  }
+
+  _activePlan = await fetchActivePlan(profileId);
+  _activePlanWeeks = _activePlan ? await fetchPlanWeeks(_activePlan.id) : [];
+  return _activePlan;
 }
 
 function _inferPhaseAfterDuplicateDeload(week, sortedWeeks) {
