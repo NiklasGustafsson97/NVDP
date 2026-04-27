@@ -1249,11 +1249,11 @@ select option { background: #1a1a2e; color: var(--text); }
   position: sticky;
   top: 0;
   z-index: 90;
-  margin: -20px -16px 18px;
-  padding: 8px 16px 0;
+  margin: 0 0 16px;
+  padding: 0;
   background: var(--bg);
   backdrop-filter: blur(12px);
-  box-shadow: 0 8px 18px rgba(0,0,0,0.04);
+  box-shadow: 0 6px 14px rgba(0,0,0,0.04);
 }
 .progress-subnav::-webkit-scrollbar { display: none; }
 .progress-subnav-btn {
