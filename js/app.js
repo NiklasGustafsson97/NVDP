@@ -2118,12 +2118,47 @@ async function _renderDashDayCard(dateStr) {
   const dayPhase = useAiPlan ? _getPhaseForDate(dateStr) : null;
   const isAssessmentWeek = dayPhase === 'assessment';
 
-  let html = `<div class="ddc-header"><span class="ddc-day-label">${dayLabel}</span>`;
+  const dateLabel = `${date.getDate()}/${date.getMonth() + 1}`;
+  const statusText = dayWorkouts.length > 0
+    ? `${dayWorkouts.length} gjort`
+    : (plan?.is_rest ? 'Vila' : (plan ? 'Planerat' : 'Tom dag'));
+  const phaseHtml = plan && !plan.is_rest && dayPhase
+    ? `<span class="ddc-phase phase-${dayPhase}">${PHASE_LABELS[dayPhase] || dayPhase}</span>`
+    : '';
+  const sectionLabel = (label) => `<div class="ddc-zone-label">${label}</div>`;
+  const metricChip = (label, value) => value
+    ? `<span class="ddc-metric-chip"><span class="ddc-metric-label">${label}</span><span class="ddc-metric-value">${value}</span></span>`
+    : '';
+  const workoutMetricChips = (w) => {
+    const chips = [];
+    if (w.duration_minutes) chips.push(metricChip('Tid', `${w.duration_minutes} min`));
+    if (w.distance_km) chips.push(metricChip('Distans', `${Number(w.distance_km).toFixed(2)} km`));
+    if (w.avg_hr) chips.push(metricChip('Puls', `${Math.round(w.avg_hr)} bpm`));
+    if (w.elevation_gain_m) chips.push(metricChip('Höjd', `${Math.round(w.elevation_gain_m)} m`));
+    if (w.avg_speed_kmh) {
+      if (w.activity_type === 'Cykel') {
+        chips.push(metricChip('Fart', `${Number(w.avg_speed_kmh).toFixed(1)} km/h`));
+      } else if (w.activity_type === 'Löpning') {
+        const pace = 60 / Number(w.avg_speed_kmh);
+        const pMin = Math.floor(pace);
+        const pSec = String(Math.round((pace - pMin) * 60)).padStart(2, '0');
+        chips.push(metricChip('Tempo', `${pMin}:${pSec}/km`));
+      }
+    }
+    return chips.filter(Boolean).join('');
+  };
 
-  if (plan && !plan.is_rest && dayPhase) {
-    html += `<span class="ddc-phase phase-${dayPhase}">${PHASE_LABELS[dayPhase] || dayPhase}</span>`;
-  }
-  html += '</div>';
+  let html = `<div class="ddc-shell">
+    <div class="ddc-left">
+      <div class="ddc-day-label">${dayLabel}</div>
+      <div class="ddc-date">${dateLabel}</div>
+      <div class="ddc-status-pill">${statusText}</div>
+    </div>
+    <div class="ddc-main">
+      <div class="ddc-topline">
+        <span class="ddc-topline-title">${isToday ? 'Dagens träning' : 'Vald dag'}</span>
+        ${phaseHtml}
+      </div>`;
 
   if (isAssessmentWeek) {
     html += `<div class="assessment-banner ddc-assessment-banner">
@@ -2132,10 +2167,17 @@ async function _renderDashDayCard(dateStr) {
     </div>`;
   }
 
+  html += '<div class="ddc-zones">';
+
+  html += '<div class="ddc-zone ddc-zone--plan">';
+  html += sectionLabel('Planerat');
   if (plan && plan.is_rest) {
-    html += `<div class="ddc-rest">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-      <span>Vilodag</span>
+    html += `<div class="ddc-pass-card ddc-rest">
+      <div class="ddc-pass-icon">${activityEmoji('Vila')}</div>
+      <div class="ddc-pass-body">
+        <div class="ddc-pass-title">Vilodag</div>
+        <div class="ddc-pass-sub">Planerad återhämtning. Bra dag att hålla belastningen låg.</div>
+      </div>
     </div>`;
   } else if (plan) {
     const label = useAiPlan ? (plan.label || plan.activity_type) : stripDayPrefix(plan.label);
@@ -2144,38 +2186,55 @@ async function _renderDashDayCard(dateStr) {
     const actType = plan.activity_type || '';
 
     const isAssessmentWorkout = isAssessmentWeek && typeof label === 'string' && /^Bedömning/i.test(label);
-    html += `<div class="ddc-plan${isAssessmentWorkout ? ' ddc-plan--assessment' : ''}">`;
-    html += `<div class="ddc-plan-title">`;
-    if (actType) html += `<span class="ddc-activity-icon">${activityEmoji(actType)}</span>`;
-    html += `<span>${label}</span>`;
-    if (isAssessmentWorkout) html += `<span class="day-badge--test">TEST</span>`;
-    if (zone) html += `<span class="zone-badge zone-${zone.toLowerCase()}">${zone}</span>`;
-    html += '</div>';
-
     const kmMatch = desc.match(/(\d+(?:[–\-]\d+)?)\s*km/);
-    const estMin = estimateDurationFromDescription(desc, plan.target_duration_minutes);
-    if (kmMatch || estMin > 0) {
-      html += '<div class="ddc-plan-meta">';
-      if (kmMatch) html += `<span class="ddc-meta-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M18 8h1a4 4 0 010 8h-1M2 8h16v9a4 4 0 01-4 4H6a4 4 0 01-4-4V8z"/></svg>${kmMatch[1]} km</span>`;
-      if (estMin > 0) html += `<span class="ddc-meta-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${estMin} min</span>`;
-      html += '</div>';
-    }
-    if (desc) html += `<div class="ddc-plan-desc">${desc}</div>`;
-    html += '</div>';
+    const estMin = estimateDurationFromDescription(desc, plan.target_duration_minutes || plan.duration_minutes);
+    const planMetrics = [
+      metricChip('Distans', plan.target_distance_km ? `${plan.target_distance_km} km` : (kmMatch ? `${kmMatch[1]} km` : '')),
+      metricChip('Tid', estMin > 0 ? `${estMin} min` : ''),
+    ].filter(Boolean).join('');
+    html += `<div class="ddc-pass-card ddc-plan${isAssessmentWorkout ? ' ddc-plan--assessment' : ''}">
+      <div class="ddc-pass-icon">${activityEmoji(actType)}</div>
+      <div class="ddc-pass-body">
+        <div class="ddc-pass-title">
+          <span>${escapeHTML(label)}</span>
+          ${zone ? `<span class="zone-badge zone-${zone.toLowerCase()}">${zone}</span>` : ''}
+          ${isAssessmentWorkout ? '<span class="day-badge--test">TEST</span>' : ''}
+        </div>
+        ${planMetrics ? `<div class="ddc-metric-row">${planMetrics}</div>` : ''}
+        ${desc ? `<div class="ddc-pass-sub">${escapeHTML(desc)}</div>` : ''}
+      </div>
+    </div>`;
   } else {
-    html += `<div class="ddc-rest"><span>Ingen planerad träning</span></div>`;
+    html += `<div class="ddc-pass-card ddc-rest">
+      <div class="ddc-pass-icon">–</div>
+      <div class="ddc-pass-body">
+        <div class="ddc-pass-title">Ingen planerad träning</div>
+        <div class="ddc-pass-sub">Logga ett pass om du tränar ändå.</div>
+      </div>
+    </div>`;
   }
+  html += '</div>';
 
+  html += '<div class="ddc-zone ddc-zone--actual">';
   if (dayWorkouts.length > 0) {
-    html += '<div class="ddc-done-section">';
-    html += `<div class="ddc-done-label">${dayWorkouts.length > 1 ? dayWorkouts.length + ' genomförda pass' : 'Genomfört'}</div>`;
+    html += sectionLabel(dayWorkouts.length > 1 ? `${dayWorkouts.length} genomförda pass` : 'Genomfört');
     dayWorkouts.forEach(w => {
       // Inline feel-prompt: shown when an auto-synced (Strava etc.) workout has no perceived_exertion yet.
       const isAutoSynced = !!(w.external_source || w.strava_id || w.source === 'strava' || w.source === 'garmin');
       const missingFeel = (w.perceived_exertion === null || w.perceived_exertion === undefined);
       const showFeelPrompt = isAutoSynced && missingFeel;
-      html += `<div class="ddc-done-item clickable" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
-        ${buildWorkoutBody(w)}
+      const scoreChip = workoutScoreChip(w);
+      html += `<div class="ddc-pass-card ddc-pass-card--actual clickable" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})'>
+        <div class="ddc-pass-icon">${activityEmoji(w.activity_type)}</div>
+        <div class="ddc-pass-body">
+          <div class="ddc-pass-title">
+            <span>${escapeHTML(w.activity_type || 'Pass')}</span>
+            ${w.intensity ? `<span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : ''}
+            ${scoreChip}
+          </div>
+          <div class="ddc-metric-row">${workoutMetricChips(w)}</div>
+          ${w.notes && w.notes !== 'Importerad' ? `<div class="ddc-pass-sub">${escapeHTML(w.notes)}</div>` : ''}
+        </div>
       </div>`;
       if (showFeelPrompt) {
         html += `<div class="feel-inline-prompt" id="feel-inline-${w.id}" data-wid="${w.id}" onclick="event.stopPropagation()">
@@ -2186,10 +2245,18 @@ async function _renderDashDayCard(dateStr) {
         </div>`;
       }
     });
-    html += '</div>';
   } else if (isPast && plan && !plan.is_rest) {
-    html += `<div class="ddc-missed">Missat</div>`;
+    html += `${sectionLabel('Genomfört')}<div class="ddc-pass-card ddc-missed">
+      <div class="ddc-pass-icon">!</div>
+      <div class="ddc-pass-body">
+        <div class="ddc-pass-title">Missat</div>
+        <div class="ddc-pass-sub">Planerat pass verkar inte vara loggat.</div>
+      </div>
+    </div>`;
+  } else {
+    html += `${sectionLabel('Genomfört')}<div class="ddc-pass-empty">Inget pass loggat ännu.</div>`;
   }
+  html += '</div></div></div></div>';
 
   el.innerHTML = html;
   requestAnimationFrame(() => initMapThumbnails());
