@@ -5437,215 +5437,243 @@ function _evaluateMilestone(milestone, plan, workouts) {
   return 'off_track';
 }
 
-// Roll a list of milestones up into a single status the primary card
-// can display alongside the headline. Hit-rate ≥ 80 % → on track,
-// ≥ 50 % → mixed, < 50 % → behind.
-function _rollupPlanStatus(plan, workouts, milestones) {
-  if (!plan) return { cls: 'unknown', label: 'Ingen plan' };
-  const considered = (milestones || []).filter((m) => m.metric_type !== 'assessment_baseline');
-  if (considered.length === 0) {
-    return { cls: 'unknown', label: 'Ingen utvärdering ännu' };
-  }
-  let hit = 0, due = 0;
-  for (const m of considered) {
-    const status = _evaluateMilestone(m, plan, workouts);
-    if (status === 'pending') continue;
-    due++;
-    if (status === 'hit' || status === 'on_track' || status === 'completed') hit++;
-  }
-  if (due === 0) return { cls: 'pending', label: 'Inga milstolpar förfallna än' };
-  const ratio = hit / due;
-  if (ratio >= 0.8) return { cls: 'på-väg', label: 'På väg mot målet' };
-  if (ratio >= 0.5) return { cls: 'tufft', label: 'Tufft, men möjligt' };
-  return { cls: 'efter', label: 'Efter — coachen justerar' };
+// SVG probability ring used in the goal-card-v2 hero. cls is one of
+// 'great' | 'good' | 'warn' | 'risk' | 'unknown' (matches the values
+// _computePlanFormProbability and _computeRaceProbability return) and
+// drives the stroke color via .probability-ring--<cls> in CSS. pct
+// renders as the big number in the center; null / non-finite renders
+// as an em-dash.
+function _renderProbabilityRing(pct, cls) {
+  const radius = 52;
+  const circumference = 2 * Math.PI * radius;
+  const safePct = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : 0;
+  const dash = (safePct / 100) * circumference;
+  const remainder = circumference - dash;
+  const display = Number.isFinite(pct) ? String(pct) : '—';
+  const safeCls = cls || 'unknown';
+  return `
+    <svg class="probability-ring probability-ring--${safeCls}" viewBox="0 0 120 120"
+         width="120" height="120" role="img" aria-label="Sannolikhet ${display} procent">
+      <circle class="probability-ring-bg" cx="60" cy="60" r="${radius}" fill="none" stroke-width="10"/>
+      <circle class="probability-ring-fg" cx="60" cy="60" r="${radius}" fill="none" stroke-width="10"
+              stroke-dasharray="${dash} ${remainder}" stroke-linecap="round"
+              transform="rotate(-90 60 60)"/>
+      <text class="probability-ring-num" x="60" y="62" text-anchor="middle" dominant-baseline="middle">${display}</text>
+      <text class="probability-ring-pct" x="60" y="82" text-anchor="middle" dominant-baseline="middle">%</text>
+    </svg>`;
 }
 
-// "Frågor om ditt mål" panel: 2-3 short Q&A items the user might be
-// wondering about, derived from the plan + indicators. Each item has a
-// question, a short answer, and an optional "Justera" CTA that opens
-// the plan-edit modal.
-function _buildGoalQuestions(plan, indicators, milestones, prob) {
-  const items = [];
-  // Q1: am I on pace?
-  if (prob && prob.pct !== null) {
-    items.push({
-      icon: '🎯',
-      q: 'Är jag på pace mot målet?',
-      a: `${prob.label} — ${prob.pct}% sannolikhet baserat på senaste 4 veckorna.`,
-    });
+// Inline SVG glyphs for the assessment-week test chips. Three slots in
+// canonical order: Z2 HR-drift → heart, tempo/threshold → bolt, near-max
+// → flag. currentColor lets CSS theme each chip via the parent class.
+function _miniTestIcon(kind) {
+  const icons = {
+    heart: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
+    bolt: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+    flag: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>',
+  };
+  return icons[kind] || '';
+}
+
+// Distill the old probability + headline + Q&A panels into 2-3 short
+// coach insight lines (max ~10 words each). Returns [{ tone, text }].
+function _buildGoalCoachInsights(plan, indicators, probability, currentWeek, totalWeeks, assessments) {
+  const out = [];
+
+  if (probability && probability.pct !== null) {
+    out.push({ tone: probability.cls || 'unknown', text: `${probability.label} — ${probability.pct} % sannolikhet.` });
   }
-  // Q2: any indicator lagging?
+
   if (indicators?.volume?.status?.cls === 'lagging') {
-    items.push({
-      icon: '📉',
-      q: 'Varför ser min volym tråkig ut?',
-      a: 'Du har loggat mindre volym än de föregående 4 veckorna. Lägg några pratspass på lediga dagar — det räcker långt.',
-      cta: { label: 'Justera schemat', onclick: 'openPlanEditModal()' },
-    });
+    out.push({ tone: 'warn', text: 'Volymen släpar — lägg in fler lugna pass.' });
   } else if (indicators?.consistency?.status?.cls === 'lagging') {
-    items.push({
-      icon: '📅',
-      q: 'Varför sjunker min konsekvens?',
-      a: 'Du missar fler pass än vanligt. Säg till coachen vad som hindrar — så flyttar vi pass eller drar ner.',
-      cta: { label: 'Vecko-avstämning', onclick: 'openCoachCheckin()' },
-    });
+    out.push({ tone: 'warn', text: 'Konsekvensen sjunker — säg till coachen vad som hindrar.' });
+  } else if (indicators?.volume?.status?.cls === 'ahead') {
+    out.push({ tone: 'great', text: 'Volymtrend uppåt — bra tempo.' });
   }
-  // Q3: next milestone
-  const upcoming = (milestones || [])
-    .filter((m) => m.metric_type !== 'assessment_baseline' && m.target_week_number != null)
-    .sort((a, b) => a.target_week_number - b.target_week_number)
-    .find((m) => {
-      if (!plan?.start_date) return true;
-      const t = new Date(plan.start_date + 'T00:00:00');
-      t.setDate(t.getDate() + (m.target_week_number - 1) * 7);
-      return t > new Date();
-    });
+
+  const upcoming = (assessments || []).find((a) => a.wk >= currentWeek);
   if (upcoming) {
-    const t = upcoming.title || 'Nästa milstolpe';
-    const wk = upcoming.target_week_number ? `v${upcoming.target_week_number}` : '';
-    items.push({
-      icon: '📍',
-      q: 'Vad är nästa milstolpe?',
-      a: `${t}${wk ? ` (${wk})` : ''}${upcoming.description ? ' — ' + upcoming.description : ''}`,
-    });
+    if (upcoming.wk === currentWeek) {
+      out.push({ tone: 'good', text: 'Bedömningsvecka pågår — logga alla 3 testpassen.' });
+    } else {
+      const w = upcoming.wk - currentWeek;
+      out.push({ tone: 'good', text: `Nästa bedömning v${upcoming.wk} (om ${w} v).` });
+    }
+  } else if (totalWeeks > 0 && currentWeek >= totalWeeks) {
+    out.push({ tone: 'good', text: 'Du är i sista veckan — gå in skarpt.' });
   }
-  return items.slice(0, 3);
+
+  return out.slice(0, 3);
 }
 
 function renderPlanDerivedGoalCard(goal, workouts, plan) {
   const isRace = goal.goal_type === 'plan_derived_race';
   const milestones = plan ? (_planMilestones[plan.id] || []) : [];
   const indicators = _computeRaceIndicators(workouts);
-  const headline = _rollupPlanStatus(plan, workouts, milestones);
 
   // Probability — race plans get the pace projection, everything else gets
   // the form-based estimate.
   const probability = isRace
     ? _computeRaceProbability(goal, workouts, indicators)
     : _computePlanFormProbability(plan, workouts, milestones, indicators);
+  const pct = (probability && probability.pct !== null) ? probability.pct : null;
+  const probCls = probability?.cls || 'unknown';
 
-  const targetDate = goal.target_date
-    ? new Date(goal.target_date + 'T00:00:00')
-    : (plan?.end_date ? new Date(plan.end_date + 'T00:00:00') : null);
-  const startDate = goal.baseline_date
-    ? new Date(goal.baseline_date + 'T00:00:00')
-    : (plan?.start_date ? new Date(plan.start_date + 'T00:00:00') : new Date(goal.created_at));
-
+  // Plan dimensions
+  const startDate = plan?.start_date
+    ? new Date(plan.start_date + 'T00:00:00')
+    : (goal.baseline_date ? new Date(goal.baseline_date + 'T00:00:00') : new Date(goal.created_at));
+  const endDate = plan?.end_date
+    ? new Date(plan.end_date + 'T00:00:00')
+    : (goal.target_date ? new Date(goal.target_date + 'T00:00:00') : null);
   const now = new Date();
-  let timelineHtml = '';
-  if (targetDate) {
-    const totalDays = Math.max(1, _daysBetween(startDate, targetDate));
-    const elapsedDays = Math.max(0, Math.min(totalDays, _daysBetween(startDate, now)));
-    const pctTime = Math.round((elapsedDays / totalDays) * 100);
-    const daysLeft = Math.max(0, _daysBetween(now, targetDate));
-    const daysLeftTxt = daysLeft === 0 ? 'Idag!' : daysLeft === 1 ? 'Imorgon' : `${daysLeft} dagar kvar`;
-    timelineHtml = `
-      <div class="goal-timeline">
-        <div class="goal-timeline-track">
-          <div class="goal-timeline-fill" style="width:${pctTime}%"></div>
-          <div class="goal-timeline-dot goal-timeline-dot--now" style="left:${pctTime}%" title="Idag"></div>
-        </div>
-        <div class="goal-timeline-labels">
-          <span class="goal-timeline-label">${startDate.toISOString().slice(0, 10)}</span>
-          <span class="goal-timeline-label goal-timeline-label--now">${daysLeftTxt}</span>
-          <span class="goal-timeline-label">${targetDate.toISOString().slice(0, 10)}</span>
-        </div>
-      </div>`;
-  }
+  const totalWeeks = endDate
+    ? Math.max(1, Math.ceil(_daysBetween(startDate, endDate) / 7))
+    : 12;
+  const elapsedDays = Math.max(0, _daysBetween(startDate, now));
+  const currentWeek = Math.min(
+    totalWeeks,
+    Math.max(1, Math.floor(elapsedDays / 7) + 1),
+  );
+  const weeksDone = Math.max(0, currentWeek - 1);
+  const daysLeft = endDate ? Math.max(0, _daysBetween(now, endDate)) : null;
+  const nowPct = totalWeeks > 0
+    ? Math.min(100, Math.max(0, (Math.min(currentWeek, totalWeeks) / totalWeeks) * 100))
+    : 0;
+  const fillPct = totalWeeks > 0
+    ? Math.min(100, Math.max(0, (weeksDone / totalWeeks) * 100))
+    : 0;
 
-  const milestoneTimelineHtml = milestones.length === 0 ? '' : `
-    <div class="milestone-timeline">
-      <div class="milestone-timeline-title">Milstolpar</div>
-      ${milestones.map((m) => {
-        const status = _evaluateMilestone(m, plan, workouts);
-        const isAssess = m.metric_type === 'assessment_baseline';
-        const wk = m.target_week_number != null ? `V${m.target_week_number}` : '—';
-        const cssStatus = ({
-          hit: 'hit',
-          completed: 'hit',
-          on_track: 'on',
-          off_track: 'lag',
-          missed: 'miss',
-          pending: 'pending',
-        })[status] || 'pending';
-        const pillCls = `milestone-status-pill--${cssStatus}`;
-        const pillLabel = ({
-          hit: 'Klart',
-          on_track: 'På väg',
-          off_track: 'Efter',
-          completed: 'Klart',
-          missed: 'Missat',
-          pending: 'Kommande',
-        })[status] || 'Kommande';
-        return `<div class="milestone-row${isAssess ? ' milestone-row--assessment' : ''}">
-          <div class="milestone-week">${wk}</div>
-          <div class="milestone-body">
-            <div class="milestone-title">${_escapeHtml(m.title || 'Milstolpe')}</div>
-            ${m.description ? `<div class="milestone-evidence">${_escapeHtml(m.description)}</div>` : ''}
-          </div>
-          <span class="milestone-status-pill ${pillCls}">${pillLabel}</span>
-        </div>`;
-      }).join('')}
-    </div>`;
+  // Assessment milestones, normalized for the roadmap + cards
+  const assessments = (milestones || [])
+    .filter((m) => m.metric_type === 'assessment_baseline' && m.target_week_number != null)
+    .sort((a, b) => a.target_week_number - b.target_week_number)
+    .map((m) => {
+      const status = _evaluateMilestone(m, plan, workouts);
+      const wk = m.target_week_number;
+      let when;
+      if (wk === currentWeek) when = 'Pågår';
+      else if (wk < currentWeek) when = `För ${currentWeek - wk} v sen`;
+      else when = `Om ${wk - currentWeek} v`;
+      const tests = (m.description || '')
+        .split('·')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 3);
+      return { wk, status, when, tests, title: m.title || `Bedömningsvecka v${wk}` };
+    });
+  const assessmentsTotal = assessments.length;
+  const assessmentsDone = assessments.filter((a) => a.status === 'hit' || a.status === 'completed' || a.status === 'on_track').length;
 
-  // Probability block (re-used from race card — same shape).
-  let probabilityHtml = '';
-  if (probability && probability.pct !== null) {
-    const targetTxt = isRace && goal.target_value
-      ? `Mål: ${_formatSecondsAsPace(Number(goal.target_value))}`
-      : (plan?.goal_text || goal.title || 'Målet');
-    const projTxt = isRace && probability.projection_sec
-      ? `Projicerad tid på racedagen: ${_formatSecondsAsPace(probability.projection_sec)}`
-      : '';
-    probabilityHtml = `<div class="goal-probability goal-probability--${probability.cls}">
-      <div class="gp-pct">${probability.pct}%</div>
-      <div class="gp-text">
-        <div class="gp-label">${probability.label}</div>
-        <div class="gp-detail">${_escapeHtml(targetTxt)}${projTxt ? ` · ${_escapeHtml(projTxt)}` : ''}</div>
-      </div>
-    </div>`;
-  } else if (probability) {
-    probabilityHtml = `<div class="goal-probability goal-probability--unknown">
-      <div class="gp-pct">—</div>
-      <div class="gp-text">
-        <div class="gp-label">${probability.label || 'För lite data'}</div>
-        <div class="gp-detail">Logga några pass så uppdaterar vi sannolikheten.</div>
-      </div>
-    </div>`;
-  }
+  // Logged volume during the plan window → average km / week
+  const inPlan = (workouts || []).filter((w) => {
+    if (!w.workout_date) return false;
+    const d = new Date(w.workout_date + 'T00:00:00');
+    return d >= startDate && d <= now;
+  });
+  const totalKm = inPlan.reduce((s, w) => s + (Number(w.distance_km) || 0), 0);
+  const avgKmPerWeek = weeksDone > 0
+    ? Math.round(totalKm / weeksDone)
+    : Math.round(totalKm);
 
-  const questions = _buildGoalQuestions(plan, indicators, milestones, probability);
-  const questionsHtml = questions.length === 0 ? '' : `
-    <div class="goal-questions">
-      <div class="goal-questions-title">Frågor om ditt mål</div>
-      ${questions.map((q) => `
-        <div class="goal-question">
-          <span class="gq-icon" aria-hidden="true">${q.icon}</span>
-          <div>
-            <div class="gq-q">${_escapeHtml(q.q)}</div>
-            <div class="gq-a">${_escapeHtml(q.a)}</div>
-            ${q.cta ? `<button type="button" class="gq-fix btn btn-ghost btn-sm" onclick="${q.cta.onclick}">${_escapeHtml(q.cta.label)}</button>` : ''}
-          </div>
-        </div>
-      `).join('')}
-    </div>`;
-
-  // Headline class drives the colored chip + accent on the card edge.
-  const headlineCls = `goal-headline--${headline.cls}`;
   const planName = plan?.name || plan?.goal_text || goal.title || 'Ditt mål';
+  const daysLeftTxt = daysLeft === null
+    ? 'Pågående plan'
+    : daysLeft === 0 ? 'Sista dagen!'
+    : daysLeft === 1 ? 'Imorgon'
+    : `${daysLeft} dagar kvar`;
 
-  return `<div class="card goal-card goal-card--race goal-card--primary" data-goal-id="${goal.id}">
-    <div class="goal-card-header">
-      <div class="goal-card-title-wrap">
-        <span class="goal-chip-primary">Huvudmål från din plan</span>
-        <div class="goal-card-title">${_escapeHtml(planName)}</div>
-        <div class="goal-headline ${headlineCls}">${_escapeHtml(headline.label)}</div>
+  // Roadmap: track + fill + assessment nodes + now-marker
+  const nodeCls = (status) => ({
+    hit: 'done',
+    completed: 'done',
+    on_track: 'on',
+    off_track: 'off',
+    missed: 'miss',
+    pending: 'pending',
+  })[status] || 'pending';
+  const assessmentNodesHtml = assessments.map((a) => {
+    const left = totalWeeks > 0
+      ? Math.min(98, Math.max(2, (a.wk / totalWeeks) * 100))
+      : 50;
+    const cls = nodeCls(a.status);
+    return `<div class="goal-roadmap-node goal-roadmap-node--${cls}" style="left:${left}%" title="v${a.wk}">v${a.wk}</div>`;
+  }).join('');
+  const roadmapHtml = totalWeeks > 0 ? `
+    <div class="goal-roadmap">
+      <div class="goal-roadmap-track">
+        <div class="goal-roadmap-fill" style="width:${fillPct}%"></div>
+      </div>
+      ${assessmentNodesHtml}
+      <div class="goal-roadmap-now" style="left:${nowPct}%" title="Just nu (v${currentWeek})"></div>
+    </div>` : '';
+
+  // Assessment-week cards: head row + 3 chip row
+  const iconKinds = ['heart', 'bolt', 'flag'];
+  const statusLabel = (cls) => ({
+    done: 'Klart',
+    on: 'På väg',
+    off: 'Efter',
+    miss: 'Missat',
+    pending: 'Kommande',
+  })[cls] || 'Kommande';
+  const cardsHtml = assessments.map((a) => {
+    const cls = nodeCls(a.status);
+    const chips = a.tests.map((t, i) => {
+      const icon = _miniTestIcon(iconKinds[i] || 'flag');
+      return `<div class="ga-test"><span class="ga-test-icon">${icon}</span><span class="ga-test-label">${_escapeHtml(t)}</span></div>`;
+    }).join('');
+    return `
+      <div class="goal-assessment-card goal-assessment-card--${cls}">
+        <div class="goal-assessment-head">
+          <span class="goal-assessment-week">v${a.wk}</span>
+          <span class="goal-assessment-when">${_escapeHtml(a.when)}</span>
+          <span class="goal-assessment-status">${statusLabel(cls)}</span>
+        </div>
+        <div class="goal-assessment-tests">${chips || '<div class="ga-test ga-test--empty">3 testpass</div>'}</div>
+      </div>`;
+  }).join('');
+  const assessmentsHtml = assessments.length === 0 ? '' : `
+    <div class="goal-section-title">Bedömningar</div>
+    <div class="goal-assessments">${cardsHtml}</div>`;
+
+  // Coach panel — at most 3 short bullets (≤ 10 words each)
+  const insights = _buildGoalCoachInsights(plan, indicators, probability, currentWeek, totalWeeks, assessments);
+  const coachHtml = insights.length === 0 ? '' : `
+    <div class="goal-coach">
+      <span class="goal-coach-eyebrow">Coachen</span>
+      <ul class="goal-coach-points">
+        ${insights.map((i) => `<li class="goal-coach-point goal-coach-point--${i.tone}">${_escapeHtml(i.text)}</li>`).join('')}
+      </ul>
+    </div>`;
+
+  return `<div class="card goal-card-v2" data-goal-id="${goal.id}">
+    <div class="goal-hero">
+      <div class="goal-hero-ring">${_renderProbabilityRing(pct, probCls)}</div>
+      <div class="goal-hero-text">
+        <div class="goal-hero-eyebrow">Din plan</div>
+        <h2 class="goal-hero-title">${_escapeHtml(planName)}</h2>
+        <div class="goal-hero-meta">Vecka ${currentWeek} av ${totalWeeks} · ${_escapeHtml(daysLeftTxt)}</div>
       </div>
     </div>
-    ${probabilityHtml}
-    ${timelineHtml}
-    ${milestoneTimelineHtml}
-    ${questionsHtml}
+    <div class="goal-stats">
+      <div class="goal-stat">
+        <span class="goal-stat-value">${weeksDone}/${totalWeeks}</span>
+        <span class="goal-stat-label">Veckor</span>
+      </div>
+      <div class="goal-stat">
+        <span class="goal-stat-value">${assessmentsDone}/${assessmentsTotal}</span>
+        <span class="goal-stat-label">Bedömningar</span>
+      </div>
+      <div class="goal-stat">
+        <span class="goal-stat-value">${avgKmPerWeek} km</span>
+        <span class="goal-stat-label">Snitt/vecka</span>
+      </div>
+    </div>
+    ${roadmapHtml}
+    ${assessmentsHtml}
+    ${coachHtml}
   </div>`;
 }
 
