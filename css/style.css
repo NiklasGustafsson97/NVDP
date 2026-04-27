@@ -48,7 +48,7 @@
 [data-theme="light"] select option { background: #fff; color: var(--text); }
 [data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); }
 
-html { font-size: 15px; }
+html { font-size: 15px; background: var(--bg); }
 body {
   font-family: var(--font);
   background: var(--bg);
@@ -419,6 +419,18 @@ select option { background: #1a1a2e; color: var(--text); }
   transition: background 0.2s;
 }
 .card:hover { background: var(--bg-card-hover); }
+/* Bare modifier: keeps the .card slot in the layout (so margins/headers
+   still work) but strips the surface so the children — typically a list
+   of .feed-card items — can span the full content width without an extra
+   grey wrapper around them. */
+.card--bare {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-bottom: 16px;
+}
+.card--bare:hover { background: transparent; }
+.card--bare .card-header { padding: 0 4px; margin-bottom: 10px; }
 .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .card-title { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
 .card-help {
@@ -715,6 +727,10 @@ select option { background: #1a1a2e; color: var(--text); }
 
 @media (max-width: 600px) {
   :root { --nav-h: 68px; }
+  /* Touch users don't need a visible scrollbar; hiding it removes the
+     6px sliver that otherwise sits along the right edge of every tab. */
+  .content { scrollbar-width: none; }
+  .content::-webkit-scrollbar { width: 0; height: 0; display: none; }
   .side-menu {
     width: min(86vw, 320px);
     padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 16px);
