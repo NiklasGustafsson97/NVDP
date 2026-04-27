@@ -1208,6 +1208,8 @@ function formatDate(d) {
 }
 
 const PLAN_PHASE_OVERRIDES_BY_ISO_WEEK = {
+  '2026-W13': 'deload',
+  '2026-W14': 'build',
   '2026-W17': 'deload',
   '2026-W18': 'build',
 };
