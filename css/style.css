@@ -83,11 +83,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 }
 
 /* ── Scrollbar ──
-   Hide scrollbars globally. On touch devices (iOS Chrome/Safari) the native
-   overlay scrollbar is unaffected, but on desktop and any element with
-   `overflow: auto` we no longer get the 6px sliver along the right edge. */
-* { scrollbar-width: none; }
-*::-webkit-scrollbar { display: none; width: 0; height: 0; }
+   Keep the RHS footprint as small as CSS allows without fighting native
+   browser behavior. */
+* { scrollbar-width: thin; }
+*::-webkit-scrollbar { width: 1px; height: 1px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: transparent; border-radius: 999px; }
 
 /* ── Auth View ── */
 .auth-container {
@@ -397,7 +398,21 @@ select option { background: #1a1a2e; color: var(--text); }
 /* log button styled like other nav items (no CTA) */
 
 /* ── Content Area ── */
-.content { flex: 1; padding: calc(56px + 20px) 16px calc(var(--nav-h) + 20px); max-width: 1200px; margin: 0 auto; width: 100%; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.content {
+  position: fixed;
+  top: 56px;
+  left: 0;
+  right: 0;
+  bottom: var(--nav-h);
+  padding: 20px 16px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
 
 /* ── View Sections ── */
 .view { display: none; animation: fadeIn 0.3s ease; }
@@ -733,12 +748,6 @@ select option { background: #1a1a2e; color: var(--text); }
 
 @media (max-width: 600px) {
   :root { --nav-h: 68px; }
-  /* iOS draws its native scroll indicator outside CSS scrollbar control.
-     Push the scroll edge off-screen; .app { overflow:hidden } clips it. */
-  .content {
-    margin-right: -20px;
-    padding-right: calc(16px + 20px);
-  }
   .side-menu {
     width: min(86vw, 320px);
     padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 16px);
