@@ -5426,17 +5426,57 @@ body.chat-mode #view-coach { height: 100%; }
   background: linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.005) 100%);
 }
 
-/* ── Hero: progress ring + plan name ────────────────────────────── */
+/* ── Hero: current week + plan name ─────────────────────────────── */
 .goal-hero {
   display: grid;
   grid-template-columns: 120px 1fr;
   gap: 18px;
   align-items: center;
 }
-.goal-hero-ring {
+.goal-plan-position {
   width: 120px;
-  height: 120px;
+  min-height: 104px;
   flex: 0 0 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.03);
+  text-align: center;
+}
+[data-theme="light"] .goal-plan-position {
+  background: rgba(0,0,0,0.025);
+}
+.goal-plan-position-eyebrow {
+  font-size: 0.64rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.9px;
+  color: var(--text-muted);
+}
+.goal-plan-position-value {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  font-size: 2.35rem;
+  font-weight: 850;
+  line-height: 1;
+  color: var(--text);
+}
+.goal-plan-position-total {
+  font-size: 1.2rem;
+  color: var(--text-muted);
+  margin-left: 1px;
+}
+.goal-plan-position-label {
+  font-size: 0.72rem;
+  font-weight: 750;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
 }
 .goal-hero-text {
   display: flex;
@@ -5471,43 +5511,13 @@ body.chat-mode #view-coach { height: 100%; }
   line-height: 1.35;
 }
 
-/* ── Metric ring SVG ────────────────────────────────────────────── */
-.goal-metric-ring { display: block; }
-.goal-metric-ring-bg {
-  stroke: rgba(255,255,255,0.07);
-}
-[data-theme="light"] .goal-metric-ring-bg {
-  stroke: rgba(0,0,0,0.07);
-}
-.goal-metric-ring-fg {
-  transition: stroke-dasharray 0.6s ease-out;
-}
-.goal-metric-ring--progress .goal-metric-ring-fg { stroke: #2E86C1; }
-.goal-metric-ring--great .goal-metric-ring-fg { stroke: #2ECC71; }
-.goal-metric-ring--good  .goal-metric-ring-fg { stroke: #58B9E0; }
-.goal-metric-ring--warn  .goal-metric-ring-fg { stroke: #F39C12; }
-.goal-metric-ring--risk  .goal-metric-ring-fg { stroke: #E74C3C; }
-.goal-metric-ring--unknown .goal-metric-ring-fg { stroke: var(--text-dim); }
-.goal-metric-ring-num {
-  font-size: 28px;
-  font-weight: 800;
-  fill: var(--text);
-  font-family: var(--font);
-}
-.goal-metric-ring-pct {
-  font-size: 12px;
-  font-weight: 600;
-  fill: var(--text-muted);
-  font-family: var(--font);
-}
-
 /* ── Secondary goal status explanation ──────────────────────────── */
 .goal-status {
   display: grid;
-  grid-template-columns: auto minmax(130px, auto) 1fr;
-  gap: 10px 14px;
+  grid-template-columns: auto minmax(185px, auto) 1fr;
+  gap: 10px 16px;
   align-items: center;
-  padding: 10px 12px;
+  padding: 12px 14px;
   background: rgba(255,255,255,0.025);
   border: 1px solid var(--border);
   border-left-width: 3px;
@@ -5522,7 +5532,7 @@ body.chat-mode #view-coach { height: 100%; }
 .goal-status--risk { border-left-color: #E74C3C; }
 .goal-status--unknown { border-left-color: var(--text-dim); }
 .goal-status-score {
-  font-size: 1.35rem;
+  font-size: 1.65rem;
   font-weight: 850;
   color: var(--text);
   line-height: 1;
@@ -5814,8 +5824,9 @@ body.chat-mode #view-coach { height: 100%; }
     grid-template-columns: 92px 1fr;
     gap: 14px;
   }
-  .goal-hero-ring { width: 92px; height: 92px; flex-basis: 92px; }
-  .goal-hero-ring .goal-metric-ring { width: 92px; height: 92px; }
+  .goal-plan-position { width: 92px; min-height: 92px; flex-basis: 92px; }
+  .goal-plan-position-value { font-size: 1.95rem; }
+  .goal-plan-position-total { font-size: 1rem; }
   .goal-hero-title { font-size: 1.2rem; }
   .goal-status {
     grid-template-columns: 1fr;

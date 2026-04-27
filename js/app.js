@@ -5481,32 +5481,6 @@ function _evaluateMilestone(milestone, plan, workouts) {
   return 'off_track';
 }
 
-// SVG metric ring used in the goal-card-v2 hero. The primary card now
-// uses it for plan progress, not goal likelihood, so the aria label is
-// supplied by the caller instead of hard-coded as "sannolikhet".
-function _renderGoalMetricRing(pct, cls, ariaLabel) {
-  const radius = 52;
-  const circumference = 2 * Math.PI * radius;
-  const safePct = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : 0;
-  const dash = (safePct / 100) * circumference;
-  const remainder = circumference - dash;
-  const display = Number.isFinite(pct) ? String(pct) : '—';
-  const safeCls = cls || 'unknown';
-  const aria = Number.isFinite(pct)
-    ? `${ariaLabel || 'Mätvärde'} ${display} procent`
-    : `${ariaLabel || 'Mätvärde'} saknas`;
-  return `
-    <svg class="goal-metric-ring goal-metric-ring--${safeCls}" viewBox="0 0 120 120"
-         width="120" height="120" role="img" aria-label="${_escapeHtml(aria)}">
-      <circle class="goal-metric-ring-bg" cx="60" cy="60" r="${radius}" fill="none" stroke-width="10"/>
-      <circle class="goal-metric-ring-fg" cx="60" cy="60" r="${radius}" fill="none" stroke-width="10"
-              stroke-dasharray="${dash} ${remainder}" stroke-linecap="round"
-              transform="rotate(-90 60 60)"/>
-      <text class="goal-metric-ring-num" x="60" y="62" text-anchor="middle" dominant-baseline="middle">${display}</text>
-      <text class="goal-metric-ring-pct" x="60" y="82" text-anchor="middle" dominant-baseline="middle">%</text>
-    </svg>`;
-}
-
 // Inline SVG glyphs for the assessment-week test chips. Three slots in
 // canonical order: Z2 HR-drift → heart, tempo/threshold → bolt, near-max
 // → flag. currentColor lets CSS theme each chip via the parent class.
@@ -5588,8 +5562,9 @@ function renderPlanDerivedGoalCard(goal, workouts, plan) {
   const fillPct = totalWeeks > 0
     ? Math.min(100, Math.max(0, (weeksDone / totalWeeks) * 100))
     : 0;
-  const planProgressPct = Math.round(fillPct);
-  const completedWeeksText = `${weeksDone} av ${totalWeeks} veckor klara`;
+  const completedWeeksText = weeksDone === 1
+    ? '1 vecka klar'
+    : `${weeksDone} veckor klara`;
 
   // Assessment milestones, normalized for the roadmap + cards
   const assessments = (milestones || [])
@@ -5634,7 +5609,7 @@ function renderPlanDerivedGoalCard(goal, workouts, plan) {
     ? 'Baserat på fartprojektion, volym och kontinuitet.'
     : probability?.is_baseline
       ? 'Baslinje: ungefär 2 av 3 når målet när de följer planen. Justeras med din volym och kontinuitet.'
-      : 'Baserat på milstolpar, volym och kontinuitet.';
+      : 'Beräknat från din nuvarande träning: volym, kontinuitet och milstolpar.';
   const goalStatusPctText = Number.isFinite(goalStatusPct)
     ? `${goalStatusPct} %`
     : '—';
@@ -5642,10 +5617,10 @@ function renderPlanDerivedGoalCard(goal, workouts, plan) {
     <div class="goal-status goal-status--${goalStatusCls}">
       <div class="goal-status-score">${goalStatusPctText}</div>
       <div class="goal-status-main">
-        <span class="goal-status-eyebrow">Målstatus</span>
-        <span class="goal-status-title">${_escapeHtml(goalStatusLabel)}</span>
+        <span class="goal-status-eyebrow">Sannolikhet att nå målet</span>
+        <span class="goal-status-title">Givet nuvarande träning</span>
       </div>
-      <div class="goal-status-copy">${_escapeHtml(goalStatusBasis)}</div>
+      <div class="goal-status-copy"><strong>${_escapeHtml(goalStatusLabel)}.</strong> ${_escapeHtml(goalStatusBasis)}</div>
     </div>`;
 
   // Roadmap: track + fill + assessment nodes + now-marker
@@ -5714,12 +5689,16 @@ function renderPlanDerivedGoalCard(goal, workouts, plan) {
 
   return `<div class="card goal-card-v2" data-goal-id="${goal.id}">
     <div class="goal-hero">
-      <div class="goal-hero-ring">${_renderGoalMetricRing(planProgressPct, 'progress', 'Planprogress')}</div>
+      <div class="goal-plan-position" aria-label="Du är i vecka ${currentWeek} av ${totalWeeks}">
+        <div class="goal-plan-position-eyebrow">Just nu</div>
+        <div class="goal-plan-position-value"><span>${currentWeek}</span><span class="goal-plan-position-total">/${totalWeeks}</span></div>
+        <div class="goal-plan-position-label">vecka</div>
+      </div>
       <div class="goal-hero-text">
-        <div class="goal-hero-eyebrow">Planprogress</div>
+        <div class="goal-hero-eyebrow">Din plan</div>
         <h2 class="goal-hero-title">${_escapeHtml(planName)}</h2>
         <div class="goal-hero-meta">Vecka ${currentWeek} av ${totalWeeks} · ${_escapeHtml(daysLeftTxt)}</div>
-        <div class="goal-hero-submeta">${_escapeHtml(completedWeeksText)}</div>
+        <div class="goal-hero-submeta">${_escapeHtml(completedWeeksText)} · ${weeksDone}/${totalWeeks} veckor avklarade</div>
       </div>
     </div>
     ${goalStatusHtml}
