@@ -1262,6 +1262,8 @@ function isLegacyDeloadWeek(mondayDate) {
 }
 
 function isDeloadWeek(mondayDate) {
+  const overridePhase = planPhaseOverrideForDate(mondayDate);
+  if (overridePhase) return overridePhase === 'deload';
   const planPhase = activePlanPhaseForWeek(mondayDate);
   if (planPhase) return planPhase === 'deload';
   return isLegacyDeloadWeek(mondayDate);
@@ -6361,6 +6363,11 @@ function _effortBandClassify(effortData, isDeload) {
     // inactive gap, re-seed from fresh active weeks instead of carrying a
     // stale baseline forward (the cause of the 180-scale chart bug).
     if (!isActive) {
+      if (deload[i] && prevBaseline !== null) {
+        baseline[i]    = +prevBaseline.toFixed(2);
+        targetLower[i] = +(prevBaseline * (1 - EFFORT_BAND_PCT_DOWN)).toFixed(2);
+        targetUpper[i] = +(prevBaseline * (1 + EFFORT_BAND_PCT_UP)).toFixed(2);
+      }
       if (!deload[i]) inactiveGap++;
       if (inactiveGap >= EFFORT_BAND_RESET_GAP) {
         activeHistory = [];
