@@ -1230,6 +1230,14 @@ select option { background: #1a1a2e; color: var(--text); }
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
 }
+#view-trends .progress-subnav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  margin: 0 -16px 16px;
+  padding: 0 16px;
+  background: var(--bg);
+}
 .progress-subnav::-webkit-scrollbar { display: none; }
 .progress-subnav-btn {
   flex: 0 0 auto;
@@ -3437,8 +3445,8 @@ input.code-input {
   transition: width 0.3s ease;
   overflow: hidden; white-space: nowrap;
 }
-.polarization-seg--easy { background: rgba(46, 204, 113, 0.85); }
-.polarization-seg--hard { background: rgba(231, 76, 60, 0.90); }
+.polarization-seg--easy { background: rgba(123,168,138,0.85); }
+.polarization-seg--hard { background: rgba(201,112,100,0.90); }
 .polarization-legend {
   display: flex; flex-direction: column; gap: 4px;
   margin-top: 10px; font-size: 0.75rem; color: var(--text-dim);
