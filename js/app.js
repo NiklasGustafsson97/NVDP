@@ -3199,12 +3199,22 @@ async function _loadSchemaMonth() {
 }
 
 // ── Month-cell classifier helpers ───────────────────────────────────
-// Builds a Map<isoWeekKey, maxMinutes> across all visible plan + actual
-// workouts so we can mark the longest pass of each week with an "L" tag
-// even when the user hasn't typed "lång" in the label.
+function _smcMinutes(item) {
+  return item?.mins || item?.target_duration_minutes || item?.duration_minutes || 0;
+}
+
+function _smcIsRunOrBike(type) {
+  const t = (type || '').toLowerCase();
+  return t.includes('löp') || t.includes('cyk');
+}
+
+// Builds a Map<isoWeekKey, maxMinutes> across visible run/bike plan + actual
+// workouts so we can mark the longest aerobic pass of each week with an "L"
+// tag even when the user hasn't typed "lång" in the label.
 function _smcWeekMaxMins(workouts, planWorkouts) {
   const max = new Map();
-  const bump = (dateStr, mins) => {
+  const bump = (dateStr, type, mins) => {
+    if (!_smcIsRunOrBike(type)) return;
     if (!mins || mins <= 0) return;
     const key = _isoWeekKey(dateStr);
     if (!key) return;
@@ -3212,9 +3222,9 @@ function _smcWeekMaxMins(workouts, planWorkouts) {
   };
   for (const pw of planWorkouts || []) {
     if (pw.is_rest) continue;
-    bump(pw.workout_date, pw.duration_minutes || 0);
+    bump(pw.workout_date, pw.activity_type, pw.target_duration_minutes || pw.duration_minutes || 0);
   }
-  for (const w of workouts || []) bump(w.workout_date, w.duration_minutes || 0);
+  for (const w of workouts || []) bump(w.workout_date, w.activity_type, w.duration_minutes || 0);
   return max;
 }
 
@@ -3232,23 +3242,39 @@ function _isoWeekKey(dateStr) {
   return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
-// Returns the small letter-tag span for a month-cell item. Priority:
-// long > quality > z2. Strength / non-aerobic falls back to "K" since
-// gym + hyrox sessions are by nature high-intensity. We always emit a
-// tag so every cell carries at-a-glance context.
+function _smcGymTagHtml(item) {
+  const text = `${item.label || ''} ${item.desc || ''}`.toLowerCase();
+  const hasLower = /ben|underkropp|lower body|legs|leg day/.test(text);
+  const hasUpper = /överkropp|overkropp|upper body|bröst|brost|rygg|axlar|armar|push|pull/.test(text);
+  const hasFull = /helkropp|hel kropp|full body|total body|hela kroppen/.test(text) || (hasLower && hasUpper);
+  if (hasFull) return '<span class="smc-pass-tag smc-pass-tag--strength" title="Helkropp">&#127947;</span>';
+  if (hasLower) return '<span class="smc-pass-tag smc-pass-tag--strength" title="Ben">&#129461;</span>';
+  if (hasUpper) return '<span class="smc-pass-tag smc-pass-tag--strength" title="Överkropp">&#128170;</span>';
+  return '<span class="smc-pass-tag smc-pass-tag--strength" title="Styrka">&#127947;</span>';
+}
+
+// Returns the small pass-type span for a month-cell item. Run and bike use
+// L/K/Z2; gym uses split icons so "K" only means a true quality endurance pass.
 function _smcTagHtml(item, dateObj, weekMaxByIso) {
   const text = `${item.label || ''} ${item.desc || ''}`.toLowerCase();
   const zone = (item.zone || '').toLowerCase();
-  const mins = item.mins || 0;
+  const mins = _smcMinutes(item);
   const type = (item.type || '').toLowerCase();
+  const isRunOrBike = _smcIsRunOrBike(item.type);
+
+  if (type.includes('gym') || type.includes('styrk') || /styrka|gym|lyft/.test(text)) {
+    return _smcGymTagHtml(item);
+  }
 
   const isoKey = _isoWeekKey(isoDate(dateObj));
   const weekMax = isoKey ? (weekMaxByIso.get(isoKey) || 0) : 0;
   const isLong =
-    /lång|long|long run|långpass/.test(text) ||
-    (weekMax >= 60 && mins >= weekMax) ||
-    (type.includes('löp') && mins >= 90) ||
-    (type.includes('cyk') && mins >= 120);
+    isRunOrBike && (
+      /lång|long|long run|långpass/.test(text) ||
+      (weekMax >= 60 && mins >= weekMax) ||
+      (type.includes('löp') && mins >= 90) ||
+      (type.includes('cyk') && mins >= 120)
+    );
   if (isLong) return '<span class="smc-pass-tag smc-pass-tag--long" title="Långpass">L</span>';
 
   const isQuality =
@@ -3256,11 +3282,6 @@ function _smcTagHtml(item, dateObj, weekMaxByIso) {
     /intervall|tempo|kvalitet|fartlek|backe|tröskel|threshold|hyrox|wod|crossfit/.test(text) ||
     type.includes('hyrox');
   if (isQuality) return '<span class="smc-pass-tag smc-pass-tag--quality" title="Kvalitetspass">K</span>';
-
-  // Strength / gym always reads as quality stress.
-  if (type.includes('gym') || type.includes('styrk') || /styrka|gym|lyft|crossfit/.test(text)) {
-    return '<span class="smc-pass-tag smc-pass-tag--quality" title="Styrkepass">K</span>';
-  }
 
   // Everything else (explicit z1/z2 OR endurance with no zone) collapses
   // to Z2 — that's the calmest aerobic bucket and the right default for
@@ -3274,7 +3295,7 @@ function _smcTagHtml(item, dateObj, weekMaxByIso) {
 // hand-edit each one.
 function _smcEstimateKm(item) {
   if (item.km && item.km > 0) return item.km;
-  const mins = item.mins || 0;
+  const mins = _smcMinutes(item);
   if (!mins) return 0;
   const type = (item.type || '').toLowerCase();
   const zone = (item.zone || '').toLowerCase();
@@ -3362,7 +3383,7 @@ function renderSchemaMonth(ctx) {
       const items = planForDay.filter(p => !p.is_rest).map(pw => ({
         type: pw.activity_type || 'Löpning',
         zone: pw.intensity_zone || '',
-        mins: pw.duration_minutes || 0,
+        mins: pw.target_duration_minutes || pw.duration_minutes || 0,
         km: pw.target_distance_km || 0,
         label: pw.label || '',
         desc: pw.description || '',

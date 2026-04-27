@@ -2786,9 +2786,13 @@ input.code-input {
 .smc-pass-tag--z2 {
   background: rgba(46, 204, 113, 0.16); color: #58d68d;
 }
+.smc-pass-tag--strength {
+  background: rgba(155, 89, 182, 0.16); color: #bb8fce;
+}
 [data-theme="light"] .smc-pass-tag--long { background: rgba(52, 152, 219, 0.14); color: #2874a6; }
 [data-theme="light"] .smc-pass-tag--quality { background: rgba(231, 76, 60, 0.12); color: #c0392b; }
 [data-theme="light"] .smc-pass-tag--z2 { background: rgba(46, 204, 113, 0.14); color: #1e8449; }
+[data-theme="light"] .smc-pass-tag--strength { background: rgba(155, 89, 182, 0.13); color: #7d3c98; }
 
 .smc-rest-pill {
   font-size: 0.68rem; font-weight: 600; color: var(--text-dim);
