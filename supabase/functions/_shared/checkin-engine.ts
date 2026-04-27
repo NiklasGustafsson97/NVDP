@@ -61,13 +61,19 @@ export interface ProposedChange {
     | "flatten_long_run"
     | "replace_with_crosstrain"
     | "add_rest"
-    | "move_session";
+    | "move_session"
+    | "edit_session";
   params: Record<string, unknown>;
   reason_sv: string;
   current_workout: PlanWorkout | null;
   proposed_workout: Partial<PlanWorkout> | null;
   from_day?: number;
   to_day?: number;
+  // For ad-hoc single-workout edits (action: "edit_session") the apply path
+  // targets this exact plan_workouts.id instead of resolving via day_of_week
+  // primary lookup. Lets the coach edit secondary slots and rows outside
+  // the engine's "next week" window.
+  target_plan_workout_id?: string;
 }
 
 export interface ObjectiveSummary {
@@ -751,6 +757,17 @@ export async function applyChanges(
       await db.from("plan_workouts").update(fromBody).eq("id", to.id);
       Object.assign(from, toBody);
       Object.assign(to, fromBody);
+      continue;
+    }
+    // edit_session targets a specific plan_workouts.id (set by the coach's
+    // propose_workout_edit tool), bypassing the day_of_week primary lookup
+    // so secondary slots (e.g. evening gym) can be edited directly.
+    if (c.action === "edit_session" && c.target_plan_workout_id && c.proposed_workout) {
+      await db.from("plan_workouts")
+        .update(c.proposed_workout)
+        .eq("id", c.target_plan_workout_id);
+      const target = nextWeekPlan.find((w) => w.id === c.target_plan_workout_id);
+      if (target) Object.assign(target, c.proposed_workout);
       continue;
     }
     const target = primary(c.day_of_week);

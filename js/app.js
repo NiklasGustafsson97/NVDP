@@ -13406,6 +13406,7 @@ const _coachToolStatusLabels = {
   get_workout: 'Hämtar passet…',
   get_week_summary: 'Tittar på veckan…',
   propose_plan_changes: 'Förbereder förslag…',
+  propose_workout_edit: 'Förbereder förslag…',
   apply_plan_changes: 'Sparar ändringar…',
   log_workout: 'Loggar passet…',
   update_memory: 'Uppdaterar minnet…',
@@ -13421,7 +13422,8 @@ function _coachToolStatusText(toolCalls) {
   if (!names.length) return null;
   // Prefer the most user-relevant call (proposal > write > read).
   const priority = [
-    'propose_plan_changes', 'apply_plan_changes', 'start_return_to_training',
+    'propose_plan_changes', 'propose_workout_edit', 'apply_plan_changes',
+    'start_return_to_training',
     'predict_race_time', 'log_workout', 'update_memory',
     'get_week_summary', 'get_workout',
   ];
@@ -13436,7 +13438,12 @@ const _coachDiffDecisions = new Map();
 function _coachExtractDiff(m) {
   if (m.role !== 'assistant') return null;
   if (!m.tool_result || !Array.isArray(m.tool_result.calls)) return null;
-  const call = m.tool_result.calls.find(c => c && c.name === 'propose_plan_changes' && c.ok && c.data && c.data.diff_id);
+  const call = m.tool_result.calls.find(c =>
+    c
+    && (c.name === 'propose_plan_changes' || c.name === 'propose_workout_edit')
+    && c.ok && c.data && c.data.diff_id
+    && Array.isArray(c.data.changes) && c.data.changes.length > 0
+  );
   return call ? call.data : null;
 }
 
@@ -13448,9 +13455,7 @@ function _coachDayLabel(dow, isMove, fromDay, toDay) {
 
 function _coachRenderDiffCard(diff, decisionState) {
   const changes = Array.isArray(diff.changes) ? diff.changes : [];
-  if (!changes.length) {
-    return `<div class="coach-diff coach-diff--empty">Inga plan-ändringar att föreslå just nu.</div>`;
-  }
+  if (!changes.length) return '';
   const locked = decisionState === 'applied' || decisionState === 'declined';
   const items = changes.map(c => {
     const cur = c.current || {};
@@ -13480,6 +13485,10 @@ function _coachRenderDiffCard(diff, decisionState) {
 
   const headerIcon = `<span class="coach-diff-header-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>`;
   const countLabel = `${changes.length} ${changes.length === 1 ? 'förslag' : 'förslag'}`;
+  const isSingleEdit = changes.length === 1 && changes[0].action === 'edit_session';
+  const headerTitle = isSingleEdit
+    ? 'Förslag på en justering'
+    : 'Förslag på ändringar i nästa vecka';
 
   let footer = '';
   if (decisionState === 'applied') {
@@ -13500,7 +13509,7 @@ function _coachRenderDiffCard(diff, decisionState) {
     <div class="coach-diff" data-coach-diff="${escapeHTML(diff.diff_id)}">
       <div class="coach-diff-header">
         ${headerIcon}
-        <span class="coach-diff-title">Förslag på ändringar i nästa vecka</span>
+        <span class="coach-diff-title">${escapeHTML(headerTitle)}</span>
         <span class="coach-diff-count">${escapeHTML(countLabel)}</span>
       </div>
       <div class="coach-diff-body">
@@ -13748,16 +13757,25 @@ function declineCoachDiff(diffId) {
 function _coachRenderChips() {
   const el = document.getElementById('coach-chips');
   if (!el) return;
-  // Pull chips from the most recent assistant message.
+  // Pull chips from the most recent assistant message + decide whether they
+  // earn screen real estate. Chips are only useful when the assistant is
+  // explicitly asking something (question mark) or when there's a diff
+  // pending the user's confirm/decline. Steady-state filler chips ("Bra
+  // jobbat!", "Ser fram emot träning") just add visual noise.
   let chips = [];
+  let lastAssistant = null;
   for (let i = _coach.messages.length - 1; i >= 0; i--) {
     const m = _coach.messages[i];
     if (m.role === 'assistant') {
+      lastAssistant = m;
       if (Array.isArray(m.chips)) chips = m.chips.slice(0, 6);
       break;
     }
   }
-  if (!chips.length) { el.innerHTML = ''; return; }
+  if (!chips.length || !lastAssistant) { el.innerHTML = ''; return; }
+  const hasQuestion = typeof lastAssistant.content === 'string' && /\?/.test(lastAssistant.content);
+  const hasPendingDiff = !!_coachExtractDiff(lastAssistant);
+  if (!hasQuestion && !hasPendingDiff) { el.innerHTML = ''; return; }
   el.innerHTML = chips.map((c) =>
     `<button type="button" class="coach-chip" onclick="sendCoachChip(${JSON.stringify(c).replace(/"/g, '&quot;')})">${escapeHTML(c)}</button>`
   ).join('');
@@ -13881,67 +13899,6 @@ function _coachBindComposer() {
   });
 }
 
-// Set to true once per page-load when the user resolves the resume prompt
-// (continue or start new). Prevents nagging on every tab switch.
-let _coachResumeResolved = false;
-
-function _coachThreadHasUserMessages() {
-  return _coach.messages.some((m) => m.role === 'user');
-}
-
-function _coachShowResumePrompt() {
-  const wrap = document.getElementById('coach-messages');
-  if (!wrap) return;
-  // Find the most recent user/assistant message for a preview line.
-  let lastMsg = null;
-  for (let i = _coach.messages.length - 1; i >= 0; i--) {
-    const m = _coach.messages[i];
-    if (m.role === 'user' || m.role === 'assistant') { lastMsg = m; break; }
-  }
-  const previewRaw = (lastMsg?.content || '').replace(/\s+/g, ' ').trim();
-  const preview = previewRaw.length > 140 ? previewRaw.slice(0, 137) + '…' : previewRaw;
-  const when = lastMsg?.created_at ? _coachRelativeTime(lastMsg.created_at) : '';
-
-  wrap.innerHTML = `
-    <div class="coach-resume" id="coach-resume" role="dialog" aria-labelledby="coach-resume-title">
-      <div class="coach-resume-header">
-        <span class="coach-avatar coach-avatar--header" aria-hidden="true">${_coachAvatarSvg}</span>
-        <div>
-          <h3 id="coach-resume-title">Du har en pågående dialog</h3>
-          <p class="coach-resume-meta">${when ? 'Senast aktiv ' + escapeHTML(when) : 'Redan startad'}</p>
-        </div>
-      </div>
-      ${preview ? `<blockquote class="coach-resume-preview">${escapeHTML(preview)}</blockquote>` : ''}
-      <div class="coach-resume-actions">
-        <button type="button" class="btn btn-ghost" id="coach-resume-new">Starta ny avstämning</button>
-        <button type="button" class="btn btn-primary" id="coach-resume-continue">Fortsätt dialogen</button>
-      </div>
-    </div>`;
-
-  const continueBtn = wrap.querySelector('#coach-resume-continue');
-  const newBtn = wrap.querySelector('#coach-resume-new');
-  if (continueBtn) continueBtn.addEventListener('click', () => {
-    _coachResumeResolved = true;
-    _coachRenderMessages();
-    _coachRenderChips();
-  });
-  if (newBtn) newBtn.addEventListener('click', async () => {
-    _coachResumeResolved = true;
-    try {
-      await _coachFetch({ mode: 'archive' });
-    } catch (e) {
-      console.error('coach archive failed', e);
-      showToast('Kunde inte arkivera samtalet');
-      return;
-    }
-    _coach.thread = null;
-    _coach.messages = [];
-    _coach.activeThreadCache = null;
-    // Re-open will create a fresh thread (and possibly an opener).
-    await loadCoach();
-  });
-}
-
 async function loadCoach() {
   if (!currentProfile) return;
   if (_coach.loading) return;
@@ -13958,11 +13915,6 @@ async function loadCoach() {
     _coach.messages = Array.isArray(data.messages) ? data.messages : [];
     _coachUpdateThreadTitle();
     _coachUpdateStatus();
-    if (!_coachResumeResolved && _coachThreadHasUserMessages()) {
-      _coachShowResumePrompt();
-      _coachRenderChips();
-      return;
-    }
     _coachRenderMessages();
     _coachRenderChips();
   } catch (e) {

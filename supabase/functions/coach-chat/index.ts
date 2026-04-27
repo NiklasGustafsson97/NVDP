@@ -78,11 +78,13 @@ function json(status: number, body: unknown, req?: Request) {
 
 const COACH_SYSTEM_PROMPT = `Du är en konservativ, varm uthållighetscoach (skola: Nils van der Poel, polariserad träning). Du pratar svenska. Du är personlig, rak och kortfattad — som en vän som har koll på data men inte hänger upp sig på den.
 
+DU LEDER SAMTALET. Användaren ska aldrig behöva be dig analysera eller föreslå ändringar — du läser context.adherence och kommer själv med konkreta förslag. När du öppnar samtalet eller får ett vagt meddelande ("hej", "tjena", "kollar in") gå direkt på saken: kvittera kort och säg vad du noterar.
+
 Riktlinjer:
 - Svara på svenska. Aldrig fler än 2-3 meningar per turn om användaren inte explicit ber om mer.
 - Var konkret. "Lättare onsdag, längre söndag" är bättre än "kanske skulle vi titta på balansen".
 - Aldrig hype, aldrig emoji-spam (max 1 emoji om det passar).
-- Citera siffror när det stärker poängen (ACWR, completion rate, easy-pace HR), inte bara för att visa.
+- Citera siffror när det stärker poängen (completion rate, ACWR, missade kvalitetspass), inte bara för att visa.
 - Bekräfta ALLTID kort vad användaren just sagt innan du ställer nästa fråga eller byter spår. Exempel: "Förstår, krya på dig — då lägger vi vila mån+tis." Hoppa aldrig direkt till en ny fråga utan att först kvittera.
 - Be ALDRIG användaren betygsätta sig själv på en numerisk skala (1-5 e.dyl.). Tolka tonen själv ur deras text och fyll i strukturerade fält i bakgrunden.
 - Visa ALDRIG dina egna tool-fel, valideringsfel eller intern feldebuggning för användaren. Skriv aldrig saker som "Jag ser att det är problem med att skicka informationen" eller liknande. Om ett verktyg returnerar fel: tolka felet tyst, korrigera dina argument och försök igen — eller, om det inte går, fortsätt samtalet utan att ens nämna problemet. Användaren ska aldrig se dina interna verktygsanrop eller deras felmeddelanden.
@@ -90,10 +92,25 @@ Riktlinjer:
 - Om användaren beskriver smärta eller skada: ta det på allvar, föreslå paus eller kontakt med fysio innan plan-ändring. Om det är mer än en kort nypning (eller flera dagars frånvaro nämns): kör start_return_to_training och följ upp med propose_plan_changes. Om memory.facts.return_to_training redan finns: håll dig till den pågående rampan istället för att starta om.
 - Om användaren är sjuk (förkylning, feber, magsjuka): det är INTE en skada. injury_level=none, men sätt unavailable_days för de dagar de behöver vila och nämn det kort i coach_note ("vila mån+tis pga förkylning, lugnt resten").
 
+KRITISK REGEL — ÄNDRINGAR I SCHEMAT:
+Du får ALDRIG skriva "Planen är nu justerad", "Jag har ändrat schemat", "Klart, schemat är uppdaterat", "Ändringen är sparad" eller liknande formuleringar UTAN att TOOL_RESULT från ett apply_*-anrop med ok=true har kommit tillbaka i historiken. Innan dess säger du bara: "Här är förslaget — godkänn nedan så sparas det." eller motsvarande. Att kalla på propose_plan_changes eller propose_workout_edit ändrar INGENTING i databasen — det skapar bara ett förslag som användaren måste klicka i appen.
+
+PROAKTIV PLAYBOOK (kör detta varje gång du tar fram nya förslag, eller på första turen):
+1) Läs context.adherence.this_week (planned_sessions, logged_sessions, completion_rate, missed[]) och context.adherence.last_week.
+2) Läs context.adherence.acwr / acwr_band och context.adherence.trend.
+3) Identifiera ETT konkret problem eller en bekräftelse:
+   - completion_rate < 0.7 OCH minst ett missat kvalitetspass (Z3/Z4/Z5) → föreslå att flytta eller ersätta nästa kvalitetspass med ett lättare pass.
+   - acwr_band = "danger" eller "caution" → föreslå att korta nästa hårda pass eller byta till Z2.
+   - 1+ missade pass denna vecka och dagar kvar → föreslå att lägga in ett extra lätt pass på en vilodag (propose_workout_edit som byter is_rest=true → Z1/Z2 30-45 min).
+   - Allt på spåret (completion ≥ 0.8, acwr i sweet) → bekräfta KORT och peka på nästa nyckelpass. KÖR INGEN proposer.
+4) När du föreslår en specifik enstaka ändring (byt vilodag → lätt pass, korta måndagens pass, byt zon): kör propose_workout_edit. När det är en helveckas-omplanering (efter söndagscheckin eller skada): kör propose_plan_changes.
+5) Vänta på TOOL_RESULT med ok:true innan du bekräftar någon ändring i text.
+
 Du har tillgång till verktyg:
 - get_workout(date eller workout_id) — slå upp ett specifikt pass (planerat + loggat).
-- get_week_summary(week_start) — volym, zon-mix, completion, ACWR för en vecka.
-- propose_plan_changes(responses) — kör regelmotorn och returnerar förslag på plan-ändringar för nästa vecka. Användaren måste godkänna i appen — du kan ALDRIG kringgå det.
+- get_week_summary(week_start) — volym, zon-mix, completion, ACWR för en vecka. Sällan nödvändigt — context.adherence har redan denna veckan + förra veckan.
+- propose_plan_changes(responses) — kör regelmotorn och returnerar förslag på plan-ändringar för nästa vecka. Använd för helveckas-omplaneringar (söndagscheckin, skada). Användaren måste godkänna i appen — du kan ALDRIG kringgå det.
+- propose_workout_edit({ plan_workout_id eller (workout_date + sort_order), changes: { is_rest?, activity_type?, label?, intensity_zone?, target_duration_minutes?, target_distance_km?, description? }, reason_sv }) — för enskilda pass-ändringar (t.ex. "byt vilodag till lätt 30 min", "korta måndagens pass till 45 min", "byt Z3 till Z2"). Använd när användaren ber om en specifik ändring av ETT pass eller när din proaktiva analys ger en enstaka tweak. Hämta plan_workout_id från context.next_7_days. Servern returnerar en diff_id; appen visar en diff-kort som användaren godkänner. Vänta på TOOL_RESULT med ok:true från apply_plan_changes innan du bekräftar.
 - log_workout(details) — logga ett genomfört pass åt användaren.
 - update_memory(fact_patch) — uppdatera coach_memory.facts (t.ex. niggles, motivators, race_targets).
 - predict_race_time(distance_km, target_date?) — Riegel-prognos på användarens senaste löppass. Cita alltid anchor-passet du fick tillbaka när du presenterar tiden, och nämn caveat om värme/bana.
@@ -288,10 +305,29 @@ interface ContextPack {
     acwr: number | null;
     acwr_band: string | null;
   } | null;
+  // Derived adherence — pre-computed so the coach can lead the conversation
+  // without invoking get_week_summary on every turn. Both this week and last
+  // week, plus a coarse trend label and the latest ACWR band.
+  adherence: {
+    this_week: AdherenceWeek;
+    last_week: AdherenceWeek;
+    trend: "improving" | "steady" | "declining" | "unknown";
+    acwr: number | null;
+    acwr_band: string | null;
+  };
   memory: {
     summary: string | null;
     facts: Record<string, unknown>;
   };
+}
+
+interface AdherenceWeek {
+  week_start: string;
+  planned_sessions: number;
+  logged_sessions: number;
+  completion_rate: number;
+  missed: Array<{ date: string; label: string | null; intensity_zone: string | null }>;
+  upcoming: Array<{ date: string; label: string | null; is_rest: boolean }>;
 }
 
 async function buildContextPack(
@@ -389,6 +425,14 @@ async function buildContextPack(
     };
   }
 
+  const adherence = await buildAdherence(
+    db,
+    profileId,
+    profile.user_max_hr ?? null,
+    activePlan?.id ?? null,
+    today,
+  );
+
   return {
     today: todayStr,
     profile: {
@@ -419,7 +463,97 @@ async function buildContextPack(
       notes: w.notes,
     })),
     latest_weekly_checkin: latestCheckin,
+    adherence,
     memory: { summary: memory.summary, facts: (memory.facts || {}) as Record<string, unknown> },
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+//  Derived adherence — runs buildObjectiveSummary for this week and last week
+//  and assembles the missed/upcoming lists with intensity_zone hints. Used
+//  by the system prompt so the coach can lead with concrete numbers.
+// ────────────────────────────────────────────────────────────────────────────
+async function buildAdherence(
+  db: SupabaseClient,
+  profileId: string,
+  userMaxHr: number | null,
+  planId: string | null,
+  today: Date,
+): Promise<ContextPack["adherence"]> {
+  const todayStr = isoDate(today);
+  const thisMon = mondayOf(today);
+  const lastMon = addDays(thisMon, -7);
+
+  const [thisSummary, lastSummary] = await Promise.all([
+    buildObjectiveSummary(db, profileId, userMaxHr, planId, thisMon, true),
+    buildObjectiveSummary(db, profileId, userMaxHr, planId, lastMon, false),
+  ]);
+
+  // Hydrate intensity_zone + day labels for missed sessions by re-querying
+  // plan_workouts for the two weeks. buildObjectiveSummary returns
+  // { date, label } only; we want zone hints for proactive nudges.
+  const winStart = isoDate(lastMon);
+  const winEnd = isoDate(addDays(thisMon, 6));
+  let zoneByDateLabel = new Map<string, string | null>();
+  let upcomingThisWeek: AdherenceWeek["upcoming"] = [];
+  if (planId) {
+    const { data: weeks } = await db.from("plan_weeks")
+      .select("id, plan_id")
+      .eq("plan_id", planId);
+    const weekIds = (weeks || []).map((w: { id: string }) => w.id);
+    if (weekIds.length > 0) {
+      const { data: pw } = await db.from("plan_workouts")
+        .select("workout_date, label, intensity_zone, is_rest, sort_order, plan_week_id")
+        .in("plan_week_id", weekIds)
+        .gte("workout_date", winStart)
+        .lte("workout_date", winEnd)
+        .order("workout_date", { ascending: true })
+        .order("sort_order", { ascending: true });
+      for (const row of (pw || []) as Array<{ workout_date: string; label: string | null; intensity_zone: string | null; is_rest: boolean }>) {
+        zoneByDateLabel.set(`${row.workout_date}|${row.label || ""}`, row.intensity_zone);
+      }
+      // Upcoming = today's remaining workouts in this week + future days through Sunday.
+      upcomingThisWeek = ((pw || []) as Array<{ workout_date: string; label: string | null; is_rest: boolean }>)
+        .filter((r) => r.workout_date >= todayStr && r.workout_date <= isoDate(addDays(thisMon, 6)))
+        .map((r) => ({ date: r.workout_date, label: r.label, is_rest: !!r.is_rest }));
+    }
+  }
+
+  const hydrateMissed = (week: typeof thisSummary): AdherenceWeek["missed"] =>
+    week.missed_sessions.map((m) => ({
+      date: m.date,
+      label: m.label,
+      intensity_zone: zoneByDateLabel.get(`${m.date}|${m.label || ""}`) ?? null,
+    }));
+
+  const trend: ContextPack["adherence"]["trend"] = (() => {
+    if (lastSummary.planned_sessions === 0 && thisSummary.planned_sessions === 0) return "unknown";
+    const t = thisSummary.completion_rate;
+    const l = lastSummary.completion_rate;
+    if (Math.abs(t - l) < 0.1) return "steady";
+    return t > l ? "improving" : "declining";
+  })();
+
+  return {
+    this_week: {
+      week_start: thisSummary.week_start,
+      planned_sessions: thisSummary.planned_sessions,
+      logged_sessions: thisSummary.logged_sessions,
+      completion_rate: thisSummary.completion_rate,
+      missed: hydrateMissed(thisSummary),
+      upcoming: upcomingThisWeek,
+    },
+    last_week: {
+      week_start: lastSummary.week_start,
+      planned_sessions: lastSummary.planned_sessions,
+      logged_sessions: lastSummary.logged_sessions,
+      completion_rate: lastSummary.completion_rate,
+      missed: hydrateMissed(lastSummary),
+      upcoming: [],
+    },
+    trend,
+    acwr: thisSummary.acwr,
+    acwr_band: thisSummary.acwr_band,
   };
 }
 
@@ -475,7 +609,12 @@ async function callLLM(
   if (isOpener && !userMessage) {
     messages.push({
       role: "user",
-      content: "[SYSTEM: Generera en kort, varm öppnings-greeting på svenska. Föreslå 3-4 chips som hjälper mig komma igång.]",
+      content:
+        "[SYSTEM: Skriv en proaktiv öppning baserat på context.adherence. ANROPA INGA VERKTYG i denna öppning — beskriv bara förslaget i text och låt nästa turn köra verktyget. Följ playbooken i system-prompten:\n" +
+        "- Om completion_rate < 0.7 ELLER missade kvalitetspass (Z3/Z4/Z5) ELLER acwr_band ∈ {caution, danger}: nämn KORT vad du noterar (t.ex. 'såg att du missade tisdagens trösklar') och föreslå EN konkret justering för de närmsta 1-3 dagarna. Avsluta med en kort fråga 'Kör vi på det?'.\n" +
+        "- Om allt ser bra ut (completion ≥ 0.8 och acwr_band = sweet/under): bekräfta i en mening, peka på nästa nyckelpass i context.next_7_days, och sluta.\n" +
+        "- chips: max 4 korta svarsalternativ som speglar förslaget ('Kör på', 'Justera annorlunda', 'Skippar idag', 'Berätta mer'). Inga generiska chips.\n" +
+        "- tool_call: ALLTID null i denna öppning.]",
     });
   } else if (userMessage) {
     messages.push({ role: "user", content: userMessage });
@@ -539,6 +678,7 @@ const ALLOWED_TOOLS = new Set([
   "get_workout",
   "get_week_summary",
   "propose_plan_changes",
+  "propose_workout_edit",
   "apply_plan_changes",
   "log_workout",
   "update_memory",
@@ -727,7 +867,126 @@ async function toolApplyPlanChanges(
   await applyChangesEngine(db, fresh as PlanWorkout[], accepted);
   _diffCache.delete(diffId);
 
+  console.log("coach-chat apply_plan_changes", JSON.stringify({
+    profileId,
+    diff_id: diffId,
+    change_count: accepted.length,
+    actions: accepted.map((c) => c.action),
+  }));
+
   return { ok: true, data: { applied: accepted.length, change_ids: accepted.map((c) => c.id) } };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+//  toolProposeWorkoutEdit — propose an ad-hoc edit of a single plan_workout
+//  (turn a rest day into an easy run, change zone, shorten duration, etc.)
+//  and stash it as a single-row diff that the user must confirm via the
+//  existing apply_plan_changes path.
+// ────────────────────────────────────────────────────────────────────────────
+async function toolProposeWorkoutEdit(
+  db: SupabaseClient,
+  profileId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const planWorkoutId = typeof args.plan_workout_id === "string" ? args.plan_workout_id : null;
+  const workoutDate = typeof args.workout_date === "string" ? args.workout_date : null;
+  const sortOrderRaw = args.sort_order;
+  const sortOrder = (sortOrderRaw === undefined || sortOrderRaw === null)
+    ? 0
+    : Number(sortOrderRaw);
+  const reasonSv = typeof args.reason_sv === "string" && args.reason_sv.trim()
+    ? args.reason_sv.trim().slice(0, 240)
+    : "Justering";
+  const changesIn = (args.changes && typeof args.changes === "object" && !Array.isArray(args.changes))
+    ? args.changes as Record<string, unknown>
+    : null;
+  if (!changesIn) return { ok: false, error: "Need changes object" };
+  if (!planWorkoutId && !workoutDate) {
+    return { ok: false, error: "Need plan_workout_id or workout_date" };
+  }
+
+  // Resolve target row.
+  let row: PlanWorkout | null = null;
+  if (planWorkoutId) {
+    const { data } = await db.from("plan_workouts").select("*").eq("id", planWorkoutId).maybeSingle();
+    row = (data as PlanWorkout) || null;
+  } else if (workoutDate) {
+    const { data } = await db.from("plan_workouts")
+      .select("*")
+      .eq("workout_date", workoutDate)
+      .order("sort_order", { ascending: true });
+    const list = (data || []) as PlanWorkout[];
+    row = list.find((r) => (r.sort_order ?? 0) === sortOrder) || list[0] || null;
+  }
+  if (!row) return { ok: false, error: "plan_workout not found" };
+
+  // Verify ownership via plan_weeks → training_plans.
+  const { data: planWeek } = await db.from("plan_weeks")
+    .select("id, training_plans!inner(profile_id)")
+    .eq("id", row.plan_week_id)
+    .single();
+  // deno-lint-ignore no-explicit-any
+  const tp = (planWeek as any)?.training_plans;
+  if (!tp || tp.profile_id !== profileId) return { ok: false, error: "Forbidden" };
+
+  // Build the proposed_workout patch (only allowed fields).
+  const allowedKeys = [
+    "is_rest", "activity_type", "label", "intensity_zone",
+    "target_duration_minutes", "target_distance_km", "description",
+  ] as const;
+  const patch: Partial<PlanWorkout> = {};
+  for (const k of allowedKeys) {
+    if (k in changesIn) {
+      // deno-lint-ignore no-explicit-any
+      (patch as any)[k] = (changesIn as any)[k];
+    }
+  }
+  if (Object.keys(patch).length === 0) {
+    return { ok: false, error: "changes is empty — pass at least one allowed field" };
+  }
+  // If converting away from a rest day, force is_rest=false unless explicit.
+  if (patch.is_rest === undefined && row.is_rest && (patch.activity_type || patch.intensity_zone || patch.target_duration_minutes)) {
+    patch.is_rest = false;
+  }
+
+  // Compose ProposedChange in the shape the frontend already renders.
+  const change: ProposedChange = {
+    id: crypto.randomUUID(),
+    day_of_week: row.day_of_week,
+    action: "edit_session",
+    params: {},
+    reason_sv: reasonSv,
+    current_workout: row,
+    proposed_workout: { ...row, ...patch },
+    target_plan_workout_id: row.id,
+  };
+
+  const diffId = _stashDiff(profileId, [change], [row]);
+
+  return {
+    ok: true,
+    diff_id: diffId,
+    data: {
+      diff_id: diffId,
+      changes: [{
+        id: change.id,
+        day_of_week: change.day_of_week,
+        action: change.action,
+        reason_sv: change.reason_sv,
+        current: row.is_rest
+          ? { is_rest: true, label: row.label, activity_type: row.activity_type, intensity_zone: row.intensity_zone, target_duration_minutes: row.target_duration_minutes }
+          : { label: row.label, activity_type: row.activity_type, intensity_zone: row.intensity_zone, target_duration_minutes: row.target_duration_minutes },
+        proposed: {
+          is_rest: patch.is_rest ?? row.is_rest,
+          label: patch.label ?? row.label,
+          activity_type: patch.activity_type ?? row.activity_type,
+          intensity_zone: patch.intensity_zone ?? row.intensity_zone,
+          target_duration_minutes: patch.target_duration_minutes ?? row.target_duration_minutes,
+        },
+      }],
+      coach_note: reasonSv,
+    },
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1088,6 +1347,8 @@ async function runTool(
         return await toolGetWeekSummary(db, profileId, userMaxHr, call.arguments || {});
       case "propose_plan_changes":
         return await toolProposePlanChanges(db, profileId, userMaxHr, call.arguments || {});
+      case "propose_workout_edit":
+        return await toolProposeWorkoutEdit(db, profileId, call.arguments || {});
       case "apply_plan_changes":
         return await toolApplyPlanChanges(db, profileId, call.arguments || {});
       case "log_workout":
