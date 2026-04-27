@@ -625,7 +625,7 @@
         <div class="chart-titlebar">
           <div class="chart-titlebar-text">
             <div class="chart-titlebar-title">Intensitetsmix</div>
-            <div class="chart-titlebar-desc">Andel av tiden i låg vs hög intensitet, senaste 4 veckorna.</div>
+            <div class="chart-titlebar-desc">Andel av löptiden i låg vs hög intensitet, senaste 4 veckorna.</div>
           </div>
           <div class="chart-titlebar-actions">
             <button type="button" class="card-warn-btn hidden" id="polarization-proxy-warn"
@@ -641,13 +641,13 @@
           </div>
         </div>
         <div class="pmc-info-popover hidden" id="polarization-info-popover" role="region" aria-label="Intensitetsmix-förklaring">
-          <p><strong>Intensitetsmix</strong> visar hur stor andel av din träningstid de senaste 4 veckorna som varit <strong>låg intensitet</strong> (zon 1–2, lugnt) jämfört med <strong>hög intensitet</strong> (zon 3+, tröskel/intervall/tävling).</p>
+          <p><strong>Intensitetsmix</strong> visar hur stor andel av din löptid de senaste 4 veckorna som varit <strong>låg intensitet</strong> (&lt;75 % av maxpuls) jämfört med <strong>hög intensitet</strong> (&gt;75 % av maxpuls).</p>
           <p>Klassiskt polariserat upplägg (Seiler) siktar på ungefär <strong>80 % lugnt och 20 % hårt</strong>. För mycket "lagom mellan-intensitet" tröttar ner kroppen utan att ge tillräcklig stimulans åt vare sig grundträning eller toppform.</p>
-          <p class="pmc-info-meta">Vi använder pulsdata när det finns och faller tillbaka på en pace-baserad proxy när det inte gör det. När någon del av tiden klassats via proxy syns en gul varningsknapp som förklarar hur stor andel det rör sig om.</p>
+          <p class="pmc-info-meta">Vi använder pulszoner när de finns, annars snittpuls mot maxpuls, och först därefter pace-baserad proxy. Varningsknappen visas bara om mer än hälften av dina senaste löppass saknar användbar pulsdata.</p>
         </div>
         <div class="pmc-info-popover hidden" id="polarization-proxy-popover" role="region" aria-label="Förklaring av pace-proxy">
-          <p><strong>Pulsdata saknas för en del pass.</strong></p>
-          <p>För dessa pass uppskattar vi intensiteten utifrån farten jämfört med din egen snabbaste uthålliga fart de senaste 12 veckorna. Det är en proxy och inte lika exakt som riktiga pulsdata — koppla en pulsmätare för bättre precision.</p>
+          <p><strong>Pulsdata saknas för flera löppass.</strong></p>
+          <p>När både pulszoner och snittpuls saknas uppskattar vi intensiteten utifrån farten jämfört med din egen snabbaste uthålliga fart de senaste 12 veckorna. Det är en proxy och inte lika exakt som riktiga pulsdata.</p>
           <p class="pmc-info-meta" id="polarization-proxy-share-line"></p>
         </div>
         <div class="polarization-bar" id="polarization-bar">

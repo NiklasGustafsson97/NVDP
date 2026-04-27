@@ -1248,15 +1248,17 @@ select option { background: #1a1a2e; color: var(--text); }
 #view-trends .progress-subnav {
   position: sticky;
   top: 0;
-  z-index: 50;
-  margin: 0 -16px 16px;
-  padding: 0 16px;
+  z-index: 90;
+  margin: -20px -16px 18px;
+  padding: 8px 16px 0;
   background: var(--bg);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 18px rgba(0,0,0,0.04);
 }
 .progress-subnav::-webkit-scrollbar { display: none; }
 .progress-subnav-btn {
   flex: 0 0 auto;
-  padding: 10px 14px;
+  padding: 9px 12px;
   background: transparent; border: none;
   color: var(--text-dim);
   font-family: var(--font);

@@ -6084,7 +6084,7 @@ function renderSeasonActivityBars(workouts, mode) {
     const val = mode === 'km' ? byType[t].km : byType[t].hours;
     const pct = Math.round((val / maxVal) * 100);
     const label = mode === 'km' ? val.toFixed(1) + ' km' : val.toFixed(1) + 'h';
-    const color = ACTIVITY_COLORS[t] || '#555';
+    const color = 'rgba(123,168,138,0.90)';
     return `<div class="season-bar-row">
       <span class="season-bar-label">${t}</span>
       <div class="season-bar-track">
@@ -6102,8 +6102,8 @@ function renderSeasonActivityBars(workouts, mode) {
 // historik, inte en progressionsplan.
 //
 // Ny modell:
-//   1. Baslinjen är monotont icke-fallande. En låg vecka kan aldrig
-//      sänka målet nästa vecka.
+//   1. Baslinjen är trög men adaptiv. En låg vecka sänker inte målet, men
+//      flera låga aktiva veckor får bandet att glida ner mot verkligheten.
 //   2. Inbyggd progression: baslinjen ökar som default 5 % per AKTIV
 //      träningsvecka ("expected trend"). Tomma kalenderveckor ska inte
 //      compounda målbandet uppåt. Det matchar världsledande löpcoachers
@@ -6122,6 +6122,9 @@ const EFFORT_BAND_GROWTH   = 0.05;    // expected progression: +5 %/week
 const EFFORT_BAND_GROWTH_CAP = 0.10;  // hard cap on per-week ratchet from a single high week
 const EFFORT_BAND_MIN_ACTIVE_LOAD = 0.25; // ignore zero / near-zero weeks when building the target
 const EFFORT_BAND_RESET_GAP = 3;      // re-seed after 3+ inactive non-deload weeks
+const EFFORT_BAND_DOWN_TRIGGER = 0.85; // recent block <85 % of baseline => adapt down
+const EFFORT_BAND_DOWN_RATE = 0.95;    // max downward move: -5 % per active week
+const EFFORT_BAND_REALITY_CAP = 1.15;  // keep upward target near recent reality
 const EFFORT_BAND_FILL = 'rgba(123,168,138,0.10)';
 const EFFORT_BAR_COLORS = {
   on:      { fill: 'rgba(123,168,138,0.65)', border: 'rgba(123,168,138,0.95)' },
@@ -6151,7 +6154,7 @@ function _effortBandClassify(effortData, isDeload) {
   const targetLower = new Array(n).fill(null);
   const classes    = new Array(n).fill('neutral');
 
-  let prevBaseline = null; // monotont icke-fallande inom ett aktivt träningsblock
+  let prevBaseline = null; // slow-moving baseline within an active training block
   let inactiveGap = 0;
   let activeHistory = []; // active, non-deload weeks since the latest reset
 
@@ -6186,17 +6189,27 @@ function _effortBandClassify(effortData, isDeload) {
     // last calendar weeks. This keeps the target anchored to real training
     // exposure rather than time elapsed since an old block.
     const window = activeHistory.slice(-EFFORT_BAND_LOOKBACK).map((w) => w.value);
+    const recentMean = window.reduce((a, b) => a + b, 0) / window.length;
     let nextBaseline;
     if (prevBaseline === null) {
-      nextBaseline = window.reduce((a, b) => a + b, 0) / window.length;
+      nextBaseline = recentMean;
     } else {
-      // Ratchet one step per ACTIVE week: +5 % expected progression, with a
-      // +10 % cap from demonstrated recent capacity. Low weeks classify as
-      // under but never lower the baseline.
+      // Soft ratchet: progress on active weeks, but avoid floating above
+      // reality forever. One dip is ignored; a sustained lower 3-week block
+      // pulls the baseline down gradually (max -5 % per active week).
       const expectedTrend = prevBaseline * (1 + EFFORT_BAND_GROWTH);
       const recentMax = Math.max.apply(null, window);
       const cappedMax = Math.min(recentMax, prevBaseline * (1 + EFFORT_BAND_GROWTH_CAP));
-      nextBaseline = Math.max(expectedTrend, cappedMax, prevBaseline);
+      const recentAnchor = recentMean * (1 + EFFORT_BAND_GROWTH);
+
+      if (recentMean < prevBaseline * EFFORT_BAND_DOWN_TRIGGER) {
+        nextBaseline = Math.max(recentAnchor, prevBaseline * EFFORT_BAND_DOWN_RATE);
+      } else {
+        nextBaseline = Math.min(
+          Math.max(expectedTrend, cappedMax, prevBaseline),
+          recentAnchor * EFFORT_BAND_REALITY_CAP
+        );
+      }
     }
 
     baseline[i]    = +nextBaseline.toFixed(2);
@@ -7125,7 +7138,7 @@ const _POLARIZATION_BANDS = {
 // data is missing. Indoor / strength / Hyrox don't get pace-based
 // classification — they keep the existing "intensity tag → easy default"
 // fallback.
-const _PACE_PROXY_TYPES = new Set(['Löpning', 'Cykel', 'Vandring', 'Promenad']);
+const _PACE_PROXY_TYPES = new Set(['Löpning']);
 
 // Speed-ratio bands used by _classifyByPace. r = avg_speed_kmh / vT, where
 // vT is the user's own threshold-speed proxy (95th percentile of recent
@@ -7179,15 +7192,43 @@ function _classifyByPace(w, vT) {
   return { easy: 0, mod: seconds, hard: 0 };
 }
 
+function _hasHrZoneSeconds(w) {
+  if (!w || !Array.isArray(w.hr_zone_seconds) || w.hr_zone_seconds.length < 5) return false;
+  return w.hr_zone_seconds.reduce((a, b) => a + (Number(b) || 0), 0) > 0;
+}
+
+function _polarizationMaxHr() {
+  return (currentProfile?.user_max_hr && currentProfile.user_max_hr >= 100)
+    ? currentProfile.user_max_hr
+    : DEFAULT_HRMAX;
+}
+
+function _hasUsableWorkoutHr(w, maxHr) {
+  if (_hasHrZoneSeconds(w)) return true;
+  const avgHr = Number(w?.avg_hr);
+  return avgHr >= 30 && maxHr >= 100;
+}
+
 function _classifyWorkoutIntensity(w, ctx) {
   if (w.activity_type === 'Vila') return null;
-  if (w.hr_zone_seconds && Array.isArray(w.hr_zone_seconds) && w.hr_zone_seconds.length >= 5) {
+  if (_hasHrZoneSeconds(w)) {
     const [z1, z2, z3, z4, z5] = w.hr_zone_seconds;
     return { easy: (z1 || 0) + (z2 || 0), mod: z3 || 0, hard: (z4 || 0) + (z5 || 0), proxy: false };
   }
   const mins = w.duration_minutes || 0;
   if (mins <= 0) return null;
   const seconds = mins * 60;
+
+  // Average HR is still measured HR data. If zone seconds are missing but
+  // avg_hr exists, classify from % of max HR before using pace proxy.
+  const avgHr = Number(w.avg_hr);
+  const maxHr = ctx && ctx.maxHr ? ctx.maxHr : _polarizationMaxHr();
+  if (avgHr >= 30 && maxHr >= 100) {
+    const pctMax = avgHr / maxHr;
+    if (pctMax < 0.75) return { easy: seconds, mod: 0, hard: 0, proxy: false };
+    if (pctMax <= 0.80) return { easy: 0, mod: seconds, hard: 0, proxy: false };
+    return { easy: 0, mod: 0, hard: seconds, proxy: false };
+  }
 
   // Pace-based proxy when HR is missing but we have a per-user threshold
   // speed for this activity type. Slots in BEFORE the logged-intensity
@@ -7219,44 +7260,50 @@ function renderPolarizationCard(workouts) {
   const today = new Date();
   const cutoff = addDays(today, -28);
   const cutoffIso = isoDate(cutoff);
-  const recent = workouts.filter((w) => w.workout_date && w.workout_date >= cutoffIso);
+  const recentRuns = workouts.filter((w) =>
+    w.activity_type === 'Löpning' && w.workout_date && w.workout_date >= cutoffIso
+  );
 
   // Build per-activity threshold-speed proxies from the FULL history we
   // have on hand (not just the last 28 days). A wider window gives a
   // more stable "fastest sustained" reference and avoids the proxy
   // collapsing during a deload week.
   const vTByType = {};
-  for (const at of _PACE_PROXY_TYPES) {
-    const vT = _estimateThresholdSpeedKmh(workouts, at);
-    if (vT) vTByType[at] = vT;
-  }
-  const ctx = { vTByType };
+  const runVT = _estimateThresholdSpeedKmh(workouts, 'Löpning');
+  if (runVT) vTByType['Löpning'] = runVT;
+  const maxHr = _polarizationMaxHr();
+  const ctx = { vTByType, maxHr };
 
   // Polarized model: two buckets — lugnt (<75 % HRmax) vs hårt (>75 % HRmax).
   // Measured HR zones arrive as five buckets from the provider. Z3 is the
   // grey zone around the cutover, so split it 50/50 instead of counting all
   // of it as hard. That better matches how the user experiences controlled
   // aerobic work close to, but not over, threshold.
-  let easy = 0, hard = 0, modSeconds = 0, proxySeconds = 0;
-  for (const w of recent) {
+  let easy = 0, hard = 0, modSeconds = 0, proxySeconds = 0, missingHrRuns = 0, proxyRuns = 0;
+  for (const w of recentRuns) {
+    if (!_hasUsableWorkoutHr(w, maxHr)) missingHrRuns++;
     const cls = _classifyWorkoutIntensity(w, ctx);
     if (!cls) continue;
     easy += cls.easy + 0.5 * cls.mod;
     hard += cls.hard + 0.5 * cls.mod;
     modSeconds += cls.mod;
-    if (cls.proxy) proxySeconds += cls.easy + cls.mod + cls.hard;
+    if (cls.proxy) {
+      proxySeconds += cls.easy + cls.mod + cls.hard;
+      proxyRuns++;
+    }
   }
   const total = easy + hard;
   const proxyShare = total > 0 ? proxySeconds / total : 0;
+  const missingHrShare = recentRuns.length > 0 ? missingHrRuns / recentRuns.length : 0;
 
-  // Toggle the "proxy data" warning icon + popover line. We hide the
-  // icon entirely below 5% so a single HR-less session in an otherwise
-  // HR-rich window doesn't shout at the user.
-  if (warnBtn) warnBtn.classList.toggle('hidden', proxyShare < 0.05);
-  if (proxyPopover && proxyShare < 0.05) proxyPopover.classList.add('hidden');
+  // Only warn when HR is missing on a majority of recent runs. Avg HR counts
+  // as HR data even when detailed zone seconds are absent.
+  const showHrWarning = missingHrShare > 0.5;
+  if (warnBtn) warnBtn.classList.toggle('hidden', !showHrWarning);
+  if (proxyPopover && !showHrWarning) proxyPopover.classList.add('hidden');
   if (proxyShareLine) {
-    proxyShareLine.textContent = proxyShare > 0
-      ? `Cirka ${Math.round(proxyShare * 100)}% av tiden i mätaren är pace-uppskattad.`
+    proxyShareLine.textContent = missingHrRuns > 0
+      ? `${missingHrRuns} av ${recentRuns.length} löppass saknar användbar pulsdata. ${proxyRuns ? `${proxyRuns} pass har pace-uppskattats.` : 'Pass utan puls räknas bara från manuell intensitet om sådan finns.'}`
       : '';
   }
 
@@ -7268,7 +7315,7 @@ function renderPolarizationCard(workouts) {
     _renderChartInsight('polarization-insight', {
       band: 'neutral',
       title: 'För lite data',
-      sub: 'Logga några pass så fylls mätaren.',
+      sub: 'Logga några löppass så fylls mätaren.',
     });
     return;
   }
@@ -7313,7 +7360,7 @@ function renderPolarizationCard(workouts) {
     band = 'warn';
     title = `${Math.round(pMod)}% i Z3 ("gråzonen")`;
     sub = 'Styr mer mot tydligt lugnt (<75 % maxpuls) eller tydligt hårt (>75 %) istället.';
-  } else if (proxyShare >= 0.5) {
+  } else if (showHrWarning && proxyShare >= 0.5) {
     // When most of the displayed time was classified via the pace
     // proxy, soften the headline so users understand the mix is an
     // estimate rather than measured HR-zone time.
