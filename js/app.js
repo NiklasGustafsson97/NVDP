@@ -6309,6 +6309,7 @@ function renderSeasonActivityBars(workouts, mode) {
 const EFFORT_BAND_LOOKBACK = 3;       // weeks of history used to seed and ratchet the band
 const EFFORT_BAND_PCT_DOWN = 0.25;    // band reaches 25 % below the baseline
 const EFFORT_BAND_PCT_UP   = 0.20;    // band reaches 20 % above the baseline
+const EFFORT_BAND_DELOAD_FACTOR = 0.70; // planned deload target: ~30 % below normal baseline
 const EFFORT_BAND_GROWTH   = 0.02;    // expected progression: +2 %/active week
 const EFFORT_BAND_GROWTH_CAP = 0.10;  // hard cap on per-week ratchet from a single high week
 const EFFORT_BAND_MIN_ACTIVE_LOAD = 0.25; // ignore zero / near-zero weeks when building the target
@@ -6364,9 +6365,10 @@ function _effortBandClassify(effortData, isDeload) {
     // stale baseline forward (the cause of the 180-scale chart bug).
     if (!isActive) {
       if (deload[i] && prevBaseline !== null) {
+        const deloadTarget = prevBaseline * EFFORT_BAND_DELOAD_FACTOR;
         baseline[i]    = +prevBaseline.toFixed(2);
-        targetLower[i] = +(prevBaseline * (1 - EFFORT_BAND_PCT_DOWN)).toFixed(2);
-        targetUpper[i] = +(prevBaseline * (1 + EFFORT_BAND_PCT_UP)).toFixed(2);
+        targetLower[i] = +(deloadTarget * (1 - EFFORT_BAND_PCT_DOWN)).toFixed(2);
+        targetUpper[i] = +(deloadTarget * (1 + EFFORT_BAND_PCT_UP)).toFixed(2);
       }
       if (!deload[i]) inactiveGap++;
       if (inactiveGap >= EFFORT_BAND_RESET_GAP) {
@@ -6724,7 +6726,7 @@ function _buildEffortInsight(opts) {
   if (last.deload) {
     title = 'Planerad återhämtning';
     band = 'neutral';
-    sub = `${windowShare}. Håll deloaden lätt även om grafen ser tom ut - poängen är att komma ut fräsch.`;
+    sub = `${windowShare}. Deload-målet ligger ca 30 % under normal baslinje - håll veckan lätt så du kommer ut fräsch.`;
   } else if (last.cls === 'on') {
     title = 'Belastningen är coachbar';
     band = 'ok';
@@ -6961,16 +6963,17 @@ function renderEffortChart(workouts) {
               const lo = targetLower[c.dataIndex];
               const hi = c.parsed.y;
               if (lo === null || hi === null) return null;
+              if (isDeload[c.dataIndex]) return `Deload-band (~30 % lägre): Belastning ${lo.toFixed(1)}–${hi.toFixed(1)}`;
               return `Mål-band: Belastning ${lo.toFixed(1)}–${hi.toFixed(1)}`;
             },
             afterBody: (items) => {
               if (!items.length) return [];
               const i = items[0].dataIndex;
               const cls = classes[i];
-              if (cls === 'neutral') return ['Inget mål-band än (behöver 3 aktiva träningsveckor).'];
               if (isDeload[i]) {
-                if (cls === 'under') return ['Planerad deload — under bandet by design.'];
+                return ['Planerad deload — målbandet är ca 30 % under normal baslinje.'];
               }
+              if (cls === 'neutral') return ['Inget mål-band än (behöver 3 aktiva träningsveckor).'];
               const labelMap = {
                 on: 'Inom mål-bandet',
                 under: 'Under bandet — för låg belastning',
