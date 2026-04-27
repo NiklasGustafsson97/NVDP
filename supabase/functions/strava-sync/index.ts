@@ -51,6 +51,22 @@ interface DetailFetchOutcome {
   error?: string;
 }
 
+async function isServiceRoleRequest(authHeader: string): Promise<boolean> {
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+  if (serviceKey && authHeader === `Bearer ${serviceKey}`) return true;
+
+  const candidate = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!candidate || candidate === SUPABASE_ANON_KEY) return false;
+
+  try {
+    const adminCandidate = createClient(SUPABASE_URL, candidate);
+    const { error } = await adminCandidate.auth.admin.listUsers({ page: 1, perPage: 1 });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 async function buildWorkoutForActivity(
   summary: StravaActivity,
   accessToken: string,
@@ -116,15 +132,12 @@ serve(async (req) => {
       });
     }
 
-    // Service-role bypass: strava-sync-daily (and any other server-side
-    // caller) authenticates with the service-role key and passes the
-    // target user's profile_id in the body. We MUST gate this on an
-    // exact-match of the service-role key -- never trust a body-provided
-    // profile_id from a regular user JWT (that would be a tenancy break,
-    // see the user-JWT branch below for the assertion).
-    const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-    const isServiceRole =
-      !!SERVICE_KEY && authHeader === `Bearer ${SERVICE_KEY}`;
+    // Service-role bypass: strava-sync-daily and admin tools authenticate
+    // with a Supabase service key and pass the target profile_id in the
+    // body. Prefer exact env-secret match, but also accept newer Supabase
+    // Dashboard service keys by proving they can call Auth Admin APIs.
+    // Never trust body.profile_id for a normal user JWT.
+    const isServiceRole = await isServiceRoleRequest(authHeader);
 
     let profile_id: string;
     let since: string | null = null;
