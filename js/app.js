@@ -5227,19 +5227,19 @@ function _computeRaceIndicators(workouts) {
   const recent = workouts.filter((w) => inWin(w, start28, now));
   const earlier = workouts.filter((w) => inWin(w, start56, start28));
 
-  // VDOT: qualifying runs only (HR >= VO2MAX_QUAL_HR_PCT of HRmax, currently
-  // 70 %). Average over the window.
+  // Garmin-style VO2max: qualifying runs only (HR >= VO2MAX_QUAL_HR_PCT of
+  // HRmax, currently 70 %). Average over the window.
   const maxHr = (currentProfile && Number(currentProfile.user_max_hr)) || EF_DEFAULT_MAX_HR;
-  function avgVdot(arr) {
+  function avgVo2max(arr) {
     const vs = arr
-      .filter((w) => _isVdotQualifyingPass(w, maxHr))
-      .map((w) => _vdotFromWorkout(w))
+      .filter((w) => _isVo2maxQualifyingPass(w, maxHr))
+      .map((w) => _vo2maxFromWorkout(w, maxHr))
       .filter((v) => v !== null);
     if (!vs.length) return NaN;
     return vs.reduce((a, b) => a + b, 0) / vs.length;
   }
-  const vdotRecent = avgVdot(recent);
-  const vdotEarlier = avgVdot(earlier);
+  const vo2Recent = avgVo2max(recent);
+  const vo2Earlier = avgVo2max(earlier);
 
   // Weekly volume (hours): normalise by window length so a full 28 d
   // earlier window is comparable to a partial recent window if we ever
@@ -5253,9 +5253,9 @@ function _computeRaceIndicators(workouts) {
 
   return {
     vdot: {
-      status: _goalTrendStatus(vdotRecent, vdotEarlier, { upIsGood: true, neutralPct: 2 }),
-      recent: vdotRecent,
-      earlier: vdotEarlier,
+      status: _goalTrendStatus(vo2Recent, vo2Earlier, { upIsGood: true, neutralPct: 2 }),
+      recent: vo2Recent,
+      earlier: vo2Earlier,
     },
     volume: {
       status: _goalTrendStatus(hoursRecent, hoursEarlier, { upIsGood: true, neutralPct: 10 }),
@@ -7579,13 +7579,13 @@ function renderEasyHrChart(workouts) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  VO2max (estimerad) — Jack Daniels VDOT
-//  Per pass:  v = (km * 1000) / min   (m/min)
-//             VO2 = -4.60 + 0.182258·v + 0.000104·v²
-//             %max = 0.8 + 0.1894393·exp(-0.012778·t) + 0.2989558·exp(-0.1932605·t)
-//             VDOT = VO2 / %max
-//  Bara löppass med duration ≥ 12 min och rimligt VDOT (20-90).
-//  Per vecka visas bästa pass — VDOT speglar aktuell tävlingsform.
+//  VO2max (estimerad) — Garmin/Strava-lik submax-modell
+//  Per pass:  speed -> ACSM running VO2 cost, then adjust by heart-rate
+//             reserve (%HRR ≈ %VO2 reserve). This estimates physiological
+//             VO2max from normal training runs, unlike Daniels VDOT which
+//             assumes the logged pace was a near-maximal race effort.
+//  Race-time projections still use Daniels VDOT below because VDOT is a
+//  performance predictor, not the same thing as wearable-style VO2max.
 // ─────────────────────────────────────────────────────────────
 
 function _vdotFromWorkout(w) {
@@ -7604,7 +7604,48 @@ function _vdotFromWorkout(w) {
   return vdot;
 }
 
-// Minimum % of HRmax for a run to count toward the VDOT trend. Lowered from
+const VO2MAX_DEFAULT_RESTING_HR = 55;
+const VO2MAX_MIN_HRR_PCT = 0.45;
+const VO2MAX_MAX_HRR_PCT = 0.97;
+
+function _vo2maxRestingHr() {
+  const restingHr = currentProfile && Number(currentProfile.user_resting_hr);
+  return restingHr && restingHr >= 35 && restingHr <= 90
+    ? restingHr
+    : VO2MAX_DEFAULT_RESTING_HR;
+}
+
+function _runningVo2CostFromWorkout(w) {
+  const dur = Number(w.duration_minutes);
+  const km = Number(w.distance_km);
+  if (!dur || dur < 12 || !km || km <= 0) return null;
+  const speedMmin = (km * 1000) / dur;
+  if (!Number.isFinite(speedMmin) || speedMmin < 90 || speedMmin > 420) return null;
+  const elevGainM = Number(w.elevation_gain_m ?? w.elevation_m ?? w.total_elevation_gain ?? 0);
+  const grade = km > 0 ? Math.max(0, Math.min(0.06, elevGainM / (km * 1000))) : 0;
+  return 3.5 + 0.2 * speedMmin + 0.9 * speedMmin * grade;
+}
+
+function _vo2maxEstimateFromWorkout(w, hrMax) {
+  if (!w || w.activity_type !== 'Löpning') return null;
+  const vo2Cost = _runningVo2CostFromWorkout(w);
+  const avgHr = Number(w.avg_hr);
+  const maxHr = Number(hrMax);
+  if (!vo2Cost || !avgHr || !maxHr || maxHr < 100) return null;
+  const restingHr = _vo2maxRestingHr();
+  if (maxHr - restingHr < 40 || avgHr <= restingHr) return null;
+  const hrrPct = (avgHr - restingHr) / (maxHr - restingHr);
+  if (hrrPct < VO2MAX_MIN_HRR_PCT || hrrPct > VO2MAX_MAX_HRR_PCT) return null;
+  const value = 3.5 + ((vo2Cost - 3.5) / hrrPct);
+  if (!Number.isFinite(value) || value < 20 || value > 90) return null;
+  return { value, hrrPct, restingHr, vo2Cost };
+}
+
+function _vo2maxFromWorkout(w, hrMax) {
+  return _vo2maxEstimateFromWorkout(w, hrMax)?.value ?? null;
+}
+
+// Minimum % of HRmax for a run to count toward the VO2max trend. Lowered from
 // 0.85 -> 0.70 so we get a Garmin-like density of data points instead of
 // only 3 per ~year (85% gated nearly everything except tempo/threshold/
 // race). The 28-day rolling mean (VO2MAX_SMOOTH_DAYS) absorbs the per-pass
@@ -7625,12 +7666,16 @@ const VO2MAX_SMOOTH_DAYS = 28;
 // starts mid-window.
 const _MS_PER_DAY = 86400000;
 
-function _isVdotQualifyingPass(w, hrMax) {
+function _isVo2maxQualifyingPass(w, hrMax) {
   if (!w || w.activity_type !== 'Löpning') return false;
   if (!w.workout_date || !w.duration_minutes || !w.distance_km) return false;
   if (w.duration_minutes < 12 || w.distance_km <= 0) return false;
   if (!w.avg_hr || !hrMax) return false;
   return w.avg_hr >= VO2MAX_QUAL_HR_PCT * hrMax;
+}
+
+function _isVdotQualifyingPass(w, hrMax) {
+  return _isVo2maxQualifyingPass(w, hrMax);
 }
 
 function renderVo2maxChart(workouts) {
@@ -7644,24 +7689,26 @@ function renderVo2maxChart(workouts) {
 
   // Step 1: collect qualifying runs only — pass with avg_hr above the
   // VO2MAX_QUAL_HR_PCT * HRmax floor (currently 70 %, see constant for
-  // rationale). Recovery jogs below that floor would drag the raw dots
-  // down further than Daniels' formula intends, but the 28 d rolling
-  // mean smooths out individual noise so the trend stays useful.
+  // rationale). The HR-reserve adjustment turns submax training pace into
+  // a Garmin/Strava-like VO2max estimate instead of treating every run as
+  // an all-out Daniels VDOT effort.
   const points = [];
   for (const w of workouts) {
-    if (!_isVdotQualifyingPass(w, hrMax)) continue;
-    const vdot = _vdotFromWorkout(w);
-    if (vdot === null) continue;
+    if (!_isVo2maxQualifyingPass(w, hrMax)) continue;
+    const estimate = _vo2maxEstimateFromWorkout(w, hrMax);
+    if (estimate === null) continue;
     const dateObj = new Date(w.workout_date + 'T00:00:00');
     points.push({
       x: dateObj.valueOf(),
-      y: +vdot.toFixed(1),
+      y: +estimate.value.toFixed(1),
       meta: {
         date: w.workout_date,
         km: Number(w.distance_km),
         min: Number(w.duration_minutes),
         avgHr: Number(w.avg_hr),
         hrPct: Math.round((w.avg_hr / hrMax) * 100),
+        hrrPct: Math.round(estimate.hrrPct * 100),
+        restingHr: Math.round(estimate.restingHr),
         intensity: w.intensity || null,
         label: w.label || w.activity_type,
       },
@@ -7687,7 +7734,7 @@ function renderVo2maxChart(workouts) {
   // Step 2: per-pass 28-day rolling mean. We use a two-pointer sliding
   // window because points is already date-sorted; this keeps the smoothing
   // O(n) and means each smoothed value at date D averages every qualifying
-  // VDOT in [D − 28d, D]. Note we run this over the FULL history so that
+  // VO2max in [D − 28d, D]. Note we run this over the FULL history so that
   // the leftmost dot in the visible window still has a real 28 d lookback
   // behind it, even though we'll clip the display below.
   let lo = 0;
@@ -7819,13 +7866,13 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
   const maxVal = Math.ceil(Math.max(...yValues) * 1.1);
 
   // Two layers:
-  //   1. Faint scattered dots = each individual qualifying pass.
+  //   1. Faint scattered dots = each individual qualifying run estimate.
   //   2. Thick smoothed line = 28-day rolling mean. This is the number
   //      the user should anchor "Är jag i bättre form än för en månad sen?"
   //      on; the dots are there for transparency.
   const datasets = [
     {
-      label: 'Kvalpass (per pass)',
+      label: 'Löppass (HR-justerat)',
       data: points.map((p) => ({ x: p.x, y: p.y, meta: p.meta })),
       parsing: false,
       borderColor: 'rgba(214, 99, 158, 0.4)',
@@ -7880,7 +7927,7 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
                 const cnt = c.raw.windowCount;
                 return `Snittad VO2max: ${c.raw.y.toFixed(1)} (${cnt} pass i fönstret)`;
               }
-              return `VO2max (pass): ${c.raw.y.toFixed(1)}`;
+              return `VO2max-estimat: ${c.raw.y.toFixed(1)}`;
             },
             afterLabel: (c) => {
               if (c.dataset.label && c.dataset.label.startsWith('Snittad')) return '';
@@ -7891,7 +7938,7 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
               const paceSec = Math.round((pace - paceMin) * 60).toString().padStart(2, '0');
               return [
                 `${m.km.toFixed(1)} km · ${m.min} min · ${paceMin}:${paceSec}/km`,
-                `Snittpuls ${m.avgHr} bpm (${m.hrPct}% av HRmax)`,
+                `Snittpuls ${m.avgHr} bpm (${m.hrPct}% av HRmax, ${m.hrrPct}% HR-reserv)`,
                 m.intensity ? `Zon: ${m.intensity}` : '',
               ].filter(Boolean);
             },
