@@ -507,9 +507,7 @@ select option { background: var(--surface-modal); color: var(--text); }
 .dash-day-card {
   margin-bottom: 16px;
   padding: 18px;
-  background:
-    radial-gradient(circle at 0 0, rgba(var(--color-primary-rgb), 0.12), transparent 34%),
-    color-mix(in srgb, var(--bg-card) 74%, var(--bg-input));
+  background: color-mix(in srgb, var(--bg-card) 74%, var(--bg-input));
 }
 .dash-day-card.is-today {
   border-color: rgba(var(--color-primary-rgb), 0.38);
