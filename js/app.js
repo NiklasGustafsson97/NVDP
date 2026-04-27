@@ -7533,7 +7533,8 @@ function renderPolarizationCard(workouts) {
     title = 'Balansen är användbar';
     sub = `${Math.round(pEasy)} % lugnt och ${Math.round(pHard)} % hårt. Nästa steg är att göra de lugna passen ännu lättare.`;
   }
-  _renderChartInsight('polarization-insight', { band, title, sub });
+  const visualBand = (band === 'bad' || band === 'warn') ? 'neutral' : band;
+  _renderChartInsight('polarization-insight', { band: visualBand, title, sub });
 }
 
 // ─────────────────────────────────────────────────────────────
