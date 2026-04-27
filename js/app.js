@@ -14039,12 +14039,14 @@ function _coachRenderMessages() {
     const bubbleClasses = [
       'coach-msg',
       'coach-msg--' + m.role,
-      m.role === 'user' || m.role === 'system' ? 'coach-msg--plain' : '',
+      m.role === 'system' ? 'coach-msg--plain' : '',
     ].filter(Boolean).join(' ');
 
     const bodyHtml = m.role === 'assistant'
       ? `<div class="coach-msg-md">${_coachRenderMarkdown(m.content || '')}</div>`
-      : escapeHTML(m.content || '');
+      : m.role === 'user'
+        ? `<span class="coach-msg-text">${escapeHTML(m.content || '')}</span>`
+        : escapeHTML(m.content || '');
 
     const time = (m.created_at && m.role === 'assistant')
       ? `<span class="coach-msg-time">${_coachFormatTime(m.created_at)}</span>` : '';

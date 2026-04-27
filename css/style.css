@@ -4465,6 +4465,7 @@ body.chat-mode #view-coach { height: 100%; }
   max-width: 100%;
 }
 .coach-msg--plain { white-space: pre-wrap; }
+.coach-msg-text { white-space: pre-wrap; }
 
 /* Assistant: bubble-less. Just text, sits in the avatar gutter. */
 .coach-msg--assistant {
@@ -4777,9 +4778,11 @@ body.chat-mode #view-coach { height: 100%; }
   box-shadow: 0 2px 10px rgba(0,0,0,0.06);
 }
 .coach-composer-inner:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent),
-              0 2px 10px rgba(0,0,0,0.18);
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+}
+[data-theme="light"] .coach-composer-inner:focus-within {
+  box-shadow: 0 2px 10px rgba(0,0,0,0.06);
 }
 .coach-input {
   display: block;
