@@ -1207,6 +1207,21 @@ function formatDate(d) {
   return dt.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
 }
 
+const PLAN_PHASE_OVERRIDES_BY_ISO_WEEK = {
+  '2026-W17': 'deload',
+  '2026-W18': 'build',
+};
+
+function planPhaseOverrideForDate(date) {
+  const dt = date instanceof Date ? new Date(date.getTime()) : parseISOWeekKeyLocal(date);
+  const isoWeek = _isoWeekKey(isoDate(dt));
+  return isoWeek ? (PLAN_PHASE_OVERRIDES_BY_ISO_WEEK[isoWeek] || null) : null;
+}
+
+function applyPlanPhaseOverride(phase, date) {
+  return planPhaseOverrideForDate(date) || phase;
+}
+
 function activePlanPhaseForWeek(mondayDate) {
   if (!_activePlan || !Array.isArray(_activePlanWeeks) || _activePlanWeeks.length === 0) return null;
   const md = mondayDate instanceof Date ? new Date(mondayDate.getTime()) : parseISOWeekKeyLocal(mondayDate);
@@ -1220,7 +1235,8 @@ function activePlanPhaseForWeek(mondayDate) {
     weekStart.setDate(weekStart.getDate() + (week.week_number - 1) * 7);
     const weekEnd = addDays(weekStart, 6);
     if (dateStr >= isoDate(weekStart) && dateStr <= isoDate(weekEnd)) {
-      return String(week.phase || '').toLowerCase() || null;
+      const phase = String(week.phase || '').toLowerCase() || null;
+      return phase ? applyPlanPhaseOverride(phase, md) : null;
     }
   }
 
@@ -2222,14 +2238,7 @@ async function _renderDashDayCard(dateStr) {
 }
 
 function _getPhaseForDate(dateStr) {
-  if (!_activePlan || !_activePlanWeeks) return null;
-  for (const w of _activePlanWeeks) {
-    const ws = new Date(_activePlan.start_date);
-    ws.setDate(ws.getDate() + (w.week_number - 1) * 7);
-    const we = addDays(ws, 6);
-    if (dateStr >= isoDate(ws) && dateStr <= isoDate(we)) return w.phase;
-  }
-  return null;
+  return activePlanPhaseForWeek(dateStr);
 }
 
 function dashCalGoToday() {
@@ -10184,10 +10193,16 @@ function normalizePlanWeekPhases(weeks) {
     normalizedPhaseByNumber.set(weekNumberValue, phase || week.phase);
   }
 
-  return weeks.map(week => ({
-    ...week,
-    phase: normalizedPhaseByNumber.get(Number(week.week_number)) || week.phase,
-  }));
+  return weeks.map(week => {
+    const phase = normalizedPhaseByNumber.get(Number(week.week_number)) || week.phase;
+    const weekStart = _activePlan?.start_date
+      ? addDays(parseISOWeekKeyLocal(_activePlan.start_date), (Number(week.week_number) - 1) * 7)
+      : null;
+    return {
+      ...week,
+      phase: weekStart ? applyPlanPhaseOverride(phase, weekStart) : phase,
+    };
+  });
 }
 
 function normalizePlanWorkoutWeekPhases(planWorkouts) {
