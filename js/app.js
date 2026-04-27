@@ -4777,11 +4777,14 @@ function renderProgressWeekSummary(workouts) {
   const now = new Date();
   const todayDow = (now.getDay() + 6) % 7; // 0 = Mon
   const thisMon = mondayOfWeek(now);
+  thisMon.setHours(0, 0, 0, 0);
   const prevMon = addDays(thisMon, -7);
+  prevMon.setHours(0, 0, 0, 0);
   // For "förra veckan" we compare the same Mon..(today's weekday) slice.
   // Earlier in the week (Mon → small slice) the comparison still makes sense
   // because we're comparing *equivalent days lived*, not a full vs partial.
   const prevSameSlice = addDays(prevMon, todayDow);
+  prevSameSlice.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
 
   function inWindow(w, start, end) {
     if (!w.workout_date) return false;
@@ -6116,12 +6119,12 @@ const EFFORT_BAND_PCT_DOWN = 0.15;    // band reaches 15 % below the baseline
 const EFFORT_BAND_PCT_UP   = 0.25;    // band reaches 25 % above the baseline
 const EFFORT_BAND_GROWTH   = 0.05;    // expected progression: +5 %/week
 const EFFORT_BAND_GROWTH_CAP = 0.10;  // hard cap on per-week ratchet from a single high week
-const EFFORT_BAND_FILL = 'rgba(56,178,124,0.10)';
+const EFFORT_BAND_FILL = 'rgba(123,168,138,0.10)';
 const EFFORT_BAR_COLORS = {
-  on:      { fill: 'rgba(56,178,124,0.55)', border: 'rgba(56,178,124,0.95)' },
-  under:   { fill: 'rgba(243,156,18,0.55)', border: 'rgba(243,156,18,0.95)' },
-  over:    { fill: 'rgba(231,76,60,0.55)',  border: 'rgba(231,76,60,0.95)' },
-  neutral: { fill: 'rgba(214,99,158,0.50)', border: 'rgba(214,99,158,0.85)' },
+  on:      { fill: 'rgba(123,168,138,0.65)', border: 'rgba(123,168,138,0.95)' },
+  under:   { fill: 'rgba(196,165,123,0.65)', border: 'rgba(196,165,123,0.95)' },
+  over:    { fill: 'rgba(201,112,100,0.65)', border: 'rgba(201,112,100,0.95)' },
+  neutral: { fill: 'rgba(138,154,163,0.55)', border: 'rgba(138,154,163,0.85)' },
 };
 
 function _effortBandClassify(effortData, isDeload) {
@@ -7217,16 +7220,17 @@ function renderPolarizationCard(workouts) {
   }
   const ctx = { vTByType };
 
-  // Polarized model: only two buckets — easy (Z1-Z2) vs hard (Z3-Z5).
-  // Z3 ("gråzonen") is folded into hard on purpose so time spent there
-  // counts against the easy share, in line with the principle "Ingen
-  // gråzon — antingen lugnt eller tydligt kvalitet".
+  // Polarized model: two buckets — lugnt (<75 % HRmax) vs hårt (>75 % HRmax).
+  // Measured HR zones arrive as five buckets from the provider. Z3 is the
+  // grey zone around the cutover, so split it 50/50 instead of counting all
+  // of it as hard. That better matches how the user experiences controlled
+  // aerobic work close to, but not over, threshold.
   let easy = 0, hard = 0, modSeconds = 0, proxySeconds = 0;
   for (const w of recent) {
     const cls = _classifyWorkoutIntensity(w, ctx);
     if (!cls) continue;
-    easy += cls.easy;
-    hard += cls.hard + cls.mod;
+    easy += cls.easy + 0.5 * cls.mod;
+    hard += cls.hard + 0.5 * cls.mod;
     modSeconds += cls.mod;
     if (cls.proxy) proxySeconds += cls.easy + cls.mod + cls.hard;
   }
@@ -7268,8 +7272,8 @@ function renderPolarizationCard(workouts) {
 
   const fmt = (sec) => (sec / 3600).toFixed(1) + ' h';
   legendEl.innerHTML = `
-    <div class="polarization-legend-item"><span class="pol-dot pol-dot--easy"></span>Easy (Z1-Z2) — ${fmt(easy)} · ${Math.round(pEasy)}%</div>
-    <div class="polarization-legend-item"><span class="pol-dot pol-dot--hard"></span>Hårt (Z3-Z5) — ${fmt(hard)} · ${Math.round(pHard)}%</div>
+    <div class="polarization-legend-item"><span class="pol-dot pol-dot--easy"></span>Lugnt (&lt;75 % av maxpuls) — ${fmt(easy)} · ${Math.round(pEasy)}%</div>
+    <div class="polarization-legend-item"><span class="pol-dot pol-dot--hard"></span>Hårt (&gt;75 % av maxpuls) — ${fmt(hard)} · ${Math.round(pHard)}%</div>
   `;
 
   // Z3-time is still tracked separately so we can warn when "hard" is
@@ -7280,11 +7284,11 @@ function renderPolarizationCard(workouts) {
   if (pEasy >= 75 && pHard >= 10 && pHard <= 25) {
     band = 'ok';
     title = `Polariserad mix (${Math.round(pEasy)}/${Math.round(pHard)})`;
-    sub = 'Exakt där du ska vara — mål ~80% easy, ~20% hårt.';
+    sub = 'Exakt där du ska vara — mål ~80% lugnt, ~20% hårt.';
   } else if (pEasy < 70) {
     band = 'bad';
-    title = `Bara ${Math.round(pEasy)}% easy`;
-    sub = 'För lite lågintensivt — bygg mer aerob bas i Z1-Z2.';
+    title = `Bara ${Math.round(pEasy)}% lugnt`;
+    sub = 'För lite lågintensivt — bygg mer tid under ~75 % av maxpuls.';
   } else if (pHard > 25) {
     band = 'bad';
     title = `${Math.round(pHard)}% hårt`;
@@ -7296,7 +7300,7 @@ function renderPolarizationCard(workouts) {
   } else if (z3DominantHard) {
     band = 'warn';
     title = `${Math.round(pMod)}% i Z3 ("gråzonen")`;
-    sub = 'Styr mer mot Z2 (lugnt) eller Z4 (tydligt hårt) istället.';
+    sub = 'Styr mer mot tydligt lugnt (<75 % maxpuls) eller tydligt hårt (>75 %) istället.';
   } else if (proxyShare >= 0.5) {
     // When most of the displayed time was classified via the pace
     // proxy, soften the headline so users understand the mix is an
@@ -7307,7 +7311,7 @@ function renderPolarizationCard(workouts) {
   } else {
     band = 'neutral';
     title = `Mix: ${Math.round(pEasy)}/${Math.round(pHard)}`;
-    sub = 'OK balans — mål ~80% easy, ~20% hårt.';
+    sub = 'OK balans — mål ~80% lugnt, ~20% hårt.';
   }
   _renderChartInsight('polarization-insight', { band, title, sub });
 }
