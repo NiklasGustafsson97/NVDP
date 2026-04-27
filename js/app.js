@@ -121,11 +121,20 @@ function themeMemberPalette() {
   return [
     themeColor('--color-primary', '#2F80ED'),
     themeColor('--color-secondary', '#14B8A6'),
-    themeColor('--color-success', '#22C55E'),
     themeColor('--color-recovery', '#8B5CF6'),
-    themeColor('--color-warning', '#F59E0B'),
     themeColor('--color-info', '#38BDF8'),
+    themeColor('--color-warning', '#F59E0B'),
+    themeColor('--color-neutral', '#94A3B8'),
   ];
+}
+function themeChartColor(name, fallback) {
+  return themeColor(`--chart-${name}`, fallback);
+}
+function themeChartRgba(name, alpha, fallback) {
+  return themeRgba(`--chart-${name}-rgb`, alpha, fallback);
+}
+function themeTextDim() {
+  return getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || themeColor('--text-dim', '#64748B');
 }
 
 // ── Init ──
@@ -218,7 +227,7 @@ function _initLeafletMap(el) {
     });
     L.tileLayer(getMapTileUrl(), { maxZoom: 18 }).addTo(map);
     const line = L.polyline(coords, {
-      color: themeColor('--color-primary', '#2F80ED'), weight: 3.5, opacity: 0.9,
+      color: themeChartColor('route', '#2F80ED'), weight: 3.5, opacity: 0.9,
       lineCap: 'round', lineJoin: 'round'
     }).addTo(map);
     map.fitBounds(line.getBounds(), { padding: [4, 4], animate: false });
@@ -2592,7 +2601,7 @@ async function openWorkoutModal(w) {
           });
           L.tileLayer(getMapTileUrl(), { maxZoom: 18 }).addTo(map);
           L.polyline(coords, { color: '#000', weight: 7, opacity: 0.15, lineCap: 'round', lineJoin: 'round' }).addTo(map);
-          L.polyline(coords, { color: themeColor('--color-primary', '#2F80ED'), weight: 4, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+          L.polyline(coords, { color: themeChartColor('route', '#2F80ED'), weight: 4, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(map);
           map.fitBounds(bounds, { padding: [20, 20], animate: false });
           _wmMapInstance = map;
           setTimeout(() => { try { map.invalidateSize(); map.fitBounds(bounds, { padding: [20, 20], animate: false }); } catch (e) { /* ignore */ } }, 320);
@@ -2617,7 +2626,7 @@ async function openWorkoutModal(w) {
         cum += (s.elevation_difference || 0);
         return Math.round(cum);
       });
-      const textDim = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
+      const textDim = themeTextDim();
       try {
         window._wmElevChart = new Chart(canvas.getContext('2d'), {
           type: 'line',
@@ -2625,8 +2634,8 @@ async function openWorkoutModal(w) {
             labels,
             datasets: [{
               data,
-              borderColor: themeColor('--color-recovery', '#8B5CF6'),
-              backgroundColor: themeRgba('--color-recovery-rgb', 0.18, 'rgba(139,92,246,0.18)'),
+              borderColor: themeChartColor('elevation', '#8B5CF6'),
+              backgroundColor: themeChartRgba('elevation', 0.18, 'rgba(139,92,246,0.18)'),
               borderWidth: 2,
               fill: true,
               tension: 0.35,
@@ -6124,7 +6133,7 @@ function renderSeasonActivityBars(workouts, mode) {
     const val = mode === 'km' ? byType[t].km : byType[t].hours;
     const pct = Math.round((val / maxVal) * 100);
     const label = mode === 'km' ? val.toFixed(1) + ' km' : val.toFixed(1) + 'h';
-    const color = themeRgba('--color-success-rgb', 0.90, 'rgba(34,197,94,0.90)');
+    const color = themeActivityColor(t);
     return `<div class="season-bar-row">
       <span class="season-bar-label">${t}</span>
       <div class="season-bar-track">
@@ -6162,12 +6171,12 @@ const EFFORT_BAND_REANCHOR_STREAK = 4; // after 4 active weeks outside band, tru
 const EFFORT_BAND_REANCHOR_BLEND = 0.70; // blend 70 % toward recent volume when re-anchoring
 const EFFORT_BAND_MAX_UP_STEP = 1.06;  // normal smoothing cap: max +6 % per active week
 const EFFORT_BAND_MAX_DOWN_STEP = 0.92; // normal smoothing cap: max -8 % per active week
-const EFFORT_BAND_FILL = themeRgba('--color-success-rgb', 0.10, 'rgba(34,197,94,0.10)');
+const EFFORT_BAND_FILL = themeChartRgba('load', 0.10, 'rgba(37,99,235,0.10)');
 const EFFORT_BAR_COLORS = {
-  on:      { fill: themeRgba('--color-success-rgb', 0.65, 'rgba(34,197,94,0.65)'), border: themeRgba('--color-success-rgb', 0.95, 'rgba(34,197,94,0.95)') },
-  under:   { fill: themeRgba('--color-warning-rgb', 0.65, 'rgba(245,158,11,0.65)'), border: themeRgba('--color-warning-rgb', 0.95, 'rgba(245,158,11,0.95)') },
-  over:    { fill: themeRgba('--color-danger-rgb', 0.65, 'rgba(239,68,68,0.65)'), border: themeRgba('--color-danger-rgb', 0.95, 'rgba(239,68,68,0.95)') },
-  neutral: { fill: themeRgba('--color-neutral-rgb', 0.55, 'rgba(148,163,184,0.55)'), border: themeRgba('--color-neutral-rgb', 0.85, 'rgba(148,163,184,0.85)') },
+  on:      { fill: themeChartRgba('load', 0.62, 'rgba(37,99,235,0.62)'), border: themeChartRgba('load', 0.86, 'rgba(37,99,235,0.86)') },
+  under:   { fill: themeChartRgba('load', 0.62, 'rgba(37,99,235,0.62)'), border: themeChartRgba('load', 0.86, 'rgba(37,99,235,0.86)') },
+  over:    { fill: themeChartRgba('load', 0.62, 'rgba(37,99,235,0.62)'), border: themeChartRgba('load', 0.86, 'rgba(37,99,235,0.86)') },
+  neutral: { fill: themeChartRgba('load', 0.34, 'rgba(37,99,235,0.34)'), border: themeChartRgba('load', 0.52, 'rgba(37,99,235,0.52)') },
 };
 
 function _effortBandClassify(effortData, isDeload) {
@@ -6595,6 +6604,7 @@ function renderMixChart(workouts) {
   if (!mixCanvas) return;
   if (chartMixPersonal) chartMixPersonal.destroy();
 
+  const textColor = themeTextDim();
   const isNorm = effortMode === 'normalized';
   const yUnit = isNorm ? ' belastning' : 'h';
   const mixIsKm = _mixUnit === 'km';
@@ -6657,12 +6667,12 @@ function renderMixChart(workouts) {
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'bottom', labels: { color: '#aaa', usePointStyle: true, boxWidth: 12 } },
+        legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, boxWidth: 12 } },
         tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)}${mixYUnit}` } }
       },
       scales: {
-        y: { stacked: true, beginAtZero: true, grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') }, ticks: { color: '#888', callback: v => v.toFixed(1) + mixYUnit } },
-        x: { stacked: true, grid: { display: false }, ticks: { color: '#888' } }
+        y: { stacked: true, beginAtZero: true, grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') }, ticks: { color: textColor, callback: v => v.toFixed(1) + mixYUnit } },
+        x: { stacked: true, grid: { display: false }, ticks: { color: textColor } }
       }
     }
   });
@@ -6727,7 +6737,7 @@ function renderEffortChart(workouts) {
   const barFills = classes.map((c) => EFFORT_BAR_COLORS[c].fill);
   const barBorders = classes.map((c) => EFFORT_BAR_COLORS[c].border);
 
-  const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
+  const textColor = themeTextDim();
 
   window._chartEffort = new Chart(effortCanvas.getContext('2d'), {
     type: 'bar',
@@ -6754,7 +6764,7 @@ function renderEffortChart(workouts) {
           label: 'Mål-band',
           data: targetUpper,
           type: 'line',
-          borderColor: themeRgba('--color-success-rgb', 0.45, 'rgba(34,197,94,0.45)'),
+          borderColor: themeChartRgba('load', 0.35, 'rgba(37,99,235,0.35)'),
           backgroundColor: EFFORT_BAND_FILL,
           borderWidth: 1,
           borderDash: [4, 3],
@@ -6767,7 +6777,7 @@ function renderEffortChart(workouts) {
           label: '_band-lower',
           data: targetLower,
           type: 'line',
-          borderColor: themeRgba('--color-success-rgb', 0.45, 'rgba(34,197,94,0.45)'),
+          borderColor: themeChartRgba('load', 0.35, 'rgba(37,99,235,0.35)'),
           borderWidth: 1,
           borderDash: [4, 3],
           pointRadius: 0,
@@ -6851,10 +6861,8 @@ function renderEffortChart(workouts) {
       ? EFFORT_DISPLAY_DIVISOR
       : 600;
     legendEl.innerHTML = `
-      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.on.border}"></span> Inom bandet — i fas med din progression.</div>
-      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.over.border}"></span> Över bandet (>+${pctUp} %) — bevakad signal: kolla återhämtning före nästa hårda pass.</div>
-      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.under.border}"></span> Under bandet (&lt;−${pctDown} %) — låg vecka. OK om planerad deload, annars höj volym/intensitet.</div>
-      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.neutral.border}"></span> Ej graderad — färre än ${EFFORT_BAND_LOOKBACK + 1} aktiva träningsveckor, längre inaktiv lucka eller planerad deload.</div>
+      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.on.border}"></span> Staplarna visar skalad träningsbelastning.</div>
+      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${themeChartRgba('load', 0.25, 'rgba(37,99,235,0.25)')}"></span> Målspannet visar normal progression; staplar utanför spannet behöver inte extra färgkodning.</div>
       <div class="effort-legend-item effort-legend-meta">Staplar och mål-band visar normaliserad belastning (rå score ÷ ${effortDivisor}). Mål-bandet är -${pctDown} % / +${pctUp} % runt en aktiv baslinje som följer din senaste träningsnivå, växer lugnt (~+${growthPct} % per aktiv vecka) och re-ankras om flera veckor ligger utanför bandet.</div>
     `;
   }
@@ -7036,8 +7044,8 @@ function renderPmcChart(workouts) {
     return e ? e.sum / e.count : null;
   });
 
-  const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
-  const ctlColor = themeRgba('--color-primary-rgb', 0.9, 'rgba(47,128,237,0.9)');
+  const textColor = themeTextDim();
+  const ctlColor = themeChartRgba('fitness', 0.9, 'rgba(3,105,161,0.9)');
 
   // Personal fitness score on #pmc-ctl-card. Either ratio (if we have a
   // baseline) or raw CTL fallback (if user is still building history).
@@ -7060,7 +7068,7 @@ function renderPmcChart(workouts) {
           label: 'Fitness-score',
           data: fitnessData,
           borderColor: ctlColor,
-          backgroundColor: themeRgba('--color-primary-rgb', 0.15, 'rgba(47,128,237,0.15)'),
+          backgroundColor: themeChartRgba('fitness', 0.15, 'rgba(3,105,161,0.15)'),
           borderWidth: 2,
           pointRadius: 3,
           pointHoverRadius: 5,
@@ -7575,7 +7583,7 @@ function renderEasyHrChart(workouts) {
     return +(gap / hr * 100).toFixed(2);
   });
 
-  const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
+  const textColor = themeTextDim();
   window._chartEasyHr = new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: {
@@ -7583,8 +7591,8 @@ function renderEasyHrChart(workouts) {
       datasets: [{
         label: 'EF (GAP km/h ÷ HR × 100)',
         data: efData,
-        borderColor: 'rgba(56, 178, 124, 0.95)',
-        backgroundColor: 'rgba(56, 178, 124, 0.12)',
+        borderColor: themeChartRgba('aerobic', 0.95, 'rgba(15,118,110,0.95)'),
+        backgroundColor: themeChartRgba('aerobic', 0.12, 'rgba(15,118,110,0.12)'),
         borderWidth: 2.5,
         pointRadius: 3,
         pointHoverRadius: 5,
@@ -7947,7 +7955,7 @@ function renderVo2maxChart(workouts) {
 }
 
 function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
-  const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
+  const textColor = themeTextDim();
   const yValues = points.map((p) => p.y);
   if (withTrend) {
     for (const p of points) yValues.push(p.smoothed);
@@ -7967,8 +7975,8 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
       label: 'Löppass (HR-justerat)',
       data: points.map((p) => ({ x: p.x, y: p.y, meta: p.meta })),
       parsing: false,
-      borderColor: 'rgba(214, 99, 158, 0.4)',
-      backgroundColor: 'rgba(214, 99, 158, 0.4)',
+      borderColor: themeChartRgba('vo2', 0.38, 'rgba(124,58,237,0.38)'),
+      backgroundColor: themeChartRgba('vo2', 0.38, 'rgba(124,58,237,0.38)'),
       pointRadius: 2.5,
       pointHoverRadius: 5,
       showLine: false,
@@ -7981,8 +7989,8 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
       label: `Snittad VO2max (${VO2MAX_SMOOTH_DAYS}d)`,
       data: points.map((p) => ({ x: p.x, y: p.smoothed, meta: p.meta, windowCount: p.windowCount })),
       parsing: false,
-      borderColor: 'rgba(214, 99, 158, 0.95)',
-      backgroundColor: 'rgba(214, 99, 158, 0.12)',
+      borderColor: themeChartRgba('vo2', 0.95, 'rgba(124,58,237,0.95)'),
+      backgroundColor: themeChartRgba('vo2', 0.12, 'rgba(124,58,237,0.12)'),
       borderWidth: 3,
       pointRadius: 0,
       pointHoverRadius: 4,
@@ -8211,6 +8219,7 @@ function setGrpEffortMode(mode) {
 
 function renderGroupChart(allWorkouts, members) {
   const colors = themeMemberPalette();
+  const textColor = themeTextDim();
   const isGrpNorm = grpEffortMode === 'normalized';
   const gUnit = isGrpNorm ? ' belastning' : 'h';
   const weekData = {};
@@ -8258,12 +8267,12 @@ function renderGroupChart(allWorkouts, members) {
       responsive: true, maintainAspectRatio: false,
       interaction: { intersect: false, mode: 'index' },
       plugins: {
-        legend: { position: 'bottom', labels: { color: '#aaa', usePointStyle: true, padding: 16 } },
+        legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, padding: 16 } },
         tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)}${gUnit}` } }
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') }, ticks: { color: '#888', callback: v => v.toFixed(1) + gUnit } },
-        x: { grid: { display: false }, ticks: { color: '#888' } }
+        y: { beginAtZero: true, grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') }, ticks: { color: textColor, callback: v => v.toFixed(1) + gUnit } },
+        x: { grid: { display: false }, ticks: { color: textColor } }
       }
     }
   });
@@ -8333,7 +8342,7 @@ function renderGroupEffortChart(allWorkouts, members) {
     const wn = weekNumber(mon);
     return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
   });
-  const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
+  const textColor = themeTextDim();
 
   const datasets = members.map((m, i) => ({
     label: m.name.split(' ')[0],
@@ -8362,7 +8371,7 @@ function renderGroupEffortChart(allWorkouts, members) {
 
   const legendEl = document.getElementById('group-effort-legend');
   if (legendEl) {
-    legendEl.innerHTML = `<div class="effort-legend-item"><span class="effort-legend-dot" style="background:${themeRgba('--color-primary-rgb', 0.8, 'rgba(47,128,237,0.8)')}"></span> Belastning = skalad träningsbelastning (rå score ÷ ${EFFORT_DISPLAY_DIVISOR}), samma som på Din progress.</div>`;
+    legendEl.innerHTML = `<div class="effort-legend-item"><span class="effort-legend-dot" style="background:${themeChartRgba('load', 0.86, 'rgba(37,99,235,0.86)')}"></span> Belastning = skalad träningsbelastning (rå score ÷ ${EFFORT_DISPLAY_DIVISOR}), samma som på Din progress.</div>`;
   }
 
   _renderChartWeekNav('chart-group-effort', allWeekKeys.length, win, () => renderGroupEffortChart(allWorkouts, members));
@@ -8764,7 +8773,7 @@ function _polylineToSvg(polyline, opts) {
   if (!coords || coords.length < 2) return '';
   const w = (opts && opts.width) || 320;
   const h = (opts && opts.height) || 180;
-  const stroke = (opts && opts.stroke) || themeColor('--color-primary', '#2F80ED');
+  const stroke = (opts && opts.stroke) || themeChartColor('route', '#2F80ED');
   const pad = 6;
   let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
   for (const [lat, lng] of coords) {

@@ -18,19 +18,19 @@ const ACTIVITY_TYPES = [
 ];
 
 const ACTIVITY_COLORS = {
-  Löpning: '#2F80ED',
-  Cykel: '#14B8A6',
-  Gym: '#8B5CF6',
-  Annat: '#94A3B8',
-  Hyrox: '#EF4444',
-  Stakmaskin: '#22C55E',
-  Längdskidor: '#38BDF8',
-  Vila: '#94A3B8',
+  Löpning: '#2563EB',
+  Cykel: '#0F766E',
+  Gym: '#7C3AED',
+  Annat: '#D97706',
+  Hyrox: '#BE123C',
+  Stakmaskin: '#0891B2',
+  Längdskidor: '#4F46E5',
+  Vila: '#64748B',
 };
 
 const PERSON_COLORS = {
-  Niklas: '#2F80ED',
-  Love: '#14B8A6',
+  Niklas: '#2563EB',
+  Love: '#0F766E',
 };
 
 // Original training-group profiles for whom the legacy `period_plans`
