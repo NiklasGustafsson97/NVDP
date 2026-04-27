@@ -5504,7 +5504,7 @@ body.chat-mode #view-coach { height: 100%; }
 /* ── Secondary goal status explanation ──────────────────────────── */
 .goal-status {
   display: grid;
-  grid-template-columns: minmax(0, auto) 1fr;
+  grid-template-columns: auto minmax(130px, auto) 1fr;
   gap: 10px 14px;
   align-items: center;
   padding: 10px 12px;
@@ -5521,6 +5521,13 @@ body.chat-mode #view-coach { height: 100%; }
 .goal-status--warn { border-left-color: #F39C12; }
 .goal-status--risk { border-left-color: #E74C3C; }
 .goal-status--unknown { border-left-color: var(--text-dim); }
+.goal-status-score {
+  font-size: 1.35rem;
+  font-weight: 850;
+  color: var(--text);
+  line-height: 1;
+  white-space: nowrap;
+}
 .goal-status-main {
   display: flex;
   flex-direction: column;

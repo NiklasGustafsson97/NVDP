@@ -5418,8 +5418,9 @@ function _computePlanFormProbability(plan, workouts, milestones, indicators) {
   if (!plan) return { pct: null, label: 'Ingen plan', cls: 'unknown', projection_sec: null };
 
   // Base score: how many milestones we've hit so far vs. how many should
-  // already be evaluated by today (target_week_number passed). A user who
-  // is mid-plan with no completed milestones is at neutral 50 %.
+  // already be evaluated by today (target_week_number passed). Before the
+  // user has enough plan-specific evidence, start from an optimistic prior:
+  // roughly 2 out of 3 users reach their goals when they follow the plan.
   const today = new Date();
   let hit = 0, due = 0;
   if (Array.isArray(milestones) && plan.start_date) {
@@ -5434,7 +5435,8 @@ function _computePlanFormProbability(plan, workouts, milestones, indicators) {
       if (m.status === 'on_track' || m.status === 'completed' || m.status === 'hit') hit++;
     }
   }
-  let score = due > 0 ? hit / due : 0.55;
+  const hasDueMilestones = due > 0;
+  let score = hasDueMilestones ? hit / due : 0.67;
 
   // Indicators trim the score toward the truth: lagging volume or
   // consistency drops it; positive trend lifts it.
@@ -5452,7 +5454,7 @@ function _computePlanFormProbability(plan, workouts, milestones, indicators) {
   else if (pctRounded >= 50) { label = 'Troligt om du håller i'; cls = 'good'; }
   else if (pctRounded >= 30) { label = 'Tufft just nu'; cls = 'warn'; }
   else { label = 'Långt efter'; cls = 'risk'; }
-  return { pct: pctRounded, label, cls, projection_sec: null };
+  return { pct: pctRounded, label, cls, projection_sec: null, is_baseline: !hasDueMilestones };
 }
 
 // Evaluate a single milestone against logged workouts.
@@ -5628,15 +5630,18 @@ function renderPlanDerivedGoalCard(goal, workouts, plan) {
   const goalStatusLabel = probability?.label || 'För lite data';
   const goalStatusBasis = isRace
     ? 'Baserat på fartprojektion, volym och kontinuitet.'
-    : 'Baserat på milstolpar, volym och kontinuitet.';
+    : probability?.is_baseline
+      ? 'Baslinje: ungefär 2 av 3 når målet när de följer planen. Justeras med din volym och kontinuitet.'
+      : 'Baserat på milstolpar, volym och kontinuitet.';
   const goalStatusPctText = Number.isFinite(goalStatusPct)
-    ? ` (${goalStatusPct} %)`
-    : '';
+    ? `${goalStatusPct} %`
+    : '—';
   const goalStatusHtml = `
     <div class="goal-status goal-status--${goalStatusCls}">
+      <div class="goal-status-score">${goalStatusPctText}</div>
       <div class="goal-status-main">
         <span class="goal-status-eyebrow">Målstatus</span>
-        <span class="goal-status-title">${_escapeHtml(goalStatusLabel)}${goalStatusPctText}</span>
+        <span class="goal-status-title">${_escapeHtml(goalStatusLabel)}</span>
       </div>
       <div class="goal-status-copy">${_escapeHtml(goalStatusBasis)}</div>
     </div>`;
