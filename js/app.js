@@ -10107,12 +10107,73 @@ async function fetchActivePlan(profileId) {
   }
 }
 
+function _inferPhaseAfterDuplicateDeload(week, sortedWeeks) {
+  const weekNumberValue = Number(week?.week_number);
+  const maxWeek = sortedWeeks.reduce((max, w) => Math.max(max, Number(w.week_number) || 0), 0);
+  const nextWeek = sortedWeeks.find(w => Number(w.week_number) === weekNumberValue + 1);
+  const nextPhase = String(nextWeek?.phase || '').toLowerCase();
+
+  if (nextPhase && nextPhase !== 'deload' && nextPhase !== 'assessment') return nextPhase;
+  if (weekNumberValue === maxWeek && (_activePlan?.goal_type === 'race' || _activePlan?.goal_date)) return 'taper';
+  return 'build';
+}
+
+function normalizePlanWeekPhases(weeks) {
+  if (!Array.isArray(weeks) || weeks.length === 0) return [];
+
+  const sorted = weeks
+    .slice()
+    .sort((a, b) => (Number(a.week_number) || 0) - (Number(b.week_number) || 0));
+  const normalizedPhaseByNumber = new Map();
+
+  for (const week of sorted) {
+    const weekNumberValue = Number(week.week_number);
+    let phase = String(week.phase || '').toLowerCase();
+    if (phase === 'deload' && normalizedPhaseByNumber.get(weekNumberValue - 1) === 'deload') {
+      // Deload is a one-week dip. If persisted data says two weeks in a row,
+      // keep the first label and treat the second as the surrounding build/taper phase.
+      phase = _inferPhaseAfterDuplicateDeload(week, sorted);
+    }
+    normalizedPhaseByNumber.set(weekNumberValue, phase || week.phase);
+  }
+
+  return weeks.map(week => ({
+    ...week,
+    phase: normalizedPhaseByNumber.get(Number(week.week_number)) || week.phase,
+  }));
+}
+
+function normalizePlanWorkoutWeekPhases(planWorkouts) {
+  if (!Array.isArray(planWorkouts) || planWorkouts.length === 0) return [];
+  if (!Array.isArray(_activePlanWeeks) || _activePlanWeeks.length === 0) return planWorkouts;
+
+  const weekById = new Map(_activePlanWeeks.map(week => [week.id, week]));
+  const phaseByWeekNumber = new Map(_activePlanWeeks.map(week => [Number(week.week_number), week.phase]));
+
+  return planWorkouts.map(workout => {
+    const week = workout.plan_weeks;
+    if (!week) return workout;
+
+    const normalizedWeek = (week.id && weekById.get(week.id)) || null;
+    const normalizedPhase = normalizedWeek?.phase || phaseByWeekNumber.get(Number(week.week_number));
+    if (!normalizedPhase || normalizedPhase === week.phase) return workout;
+
+    return {
+      ...workout,
+      plan_weeks: {
+        ...week,
+        phase: normalizedPhase,
+      },
+    };
+  });
+}
+
 async function fetchPlanWeeks(planId) {
   const { data } = await sb.from('plan_weeks')
     .select('*')
     .eq('plan_id', planId)
     .order('week_number');
-  return data || [];
+  return normalizePlanWeekPhases(data || []);
 }
 
 async function fetchPlanWorkoutsForWeek(weekId) {
@@ -10125,12 +10186,12 @@ async function fetchPlanWorkoutsForWeek(weekId) {
 
 async function fetchPlanWorkoutsByDate(planId, startDate, endDate) {
   const { data } = await sb.from('plan_workouts')
-    .select('*, plan_weeks!inner(plan_id, week_number, phase, notes)')
+    .select('*, plan_weeks!inner(id, plan_id, week_number, phase, notes)')
     .eq('plan_weeks.plan_id', planId)
     .gte('workout_date', startDate)
     .lte('workout_date', endDate)
     .order('workout_date');
-  return data || [];
+  return normalizePlanWorkoutWeekPhases(data || []);
 }
 
 // ── Edit mode toggle ──
