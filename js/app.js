@@ -5698,11 +5698,11 @@ function renderPlanDerivedGoalCard(goal, workouts, plan) {
   );
   const weeksDone = Math.max(0, currentWeek - 1);
   const daysLeft = endDate ? Math.max(0, _daysBetween(now, endDate)) : null;
-  const nowPct = totalWeeks > 0
-    ? Math.min(100, Math.max(0, (Math.min(currentWeek, totalWeeks) / totalWeeks) * 100))
-    : 0;
-  const fillPct = totalWeeks > 0
-    ? Math.min(100, Math.max(0, (weeksDone / totalWeeks) * 100))
+  const totalPlanDays = endDate ? Math.max(1, _daysBetween(startDate, endDate)) : totalWeeks * 7;
+  const elapsedPlanDays = Math.min(totalPlanDays, Math.max(0, elapsedDays));
+  const currentPlanDay = Math.min(totalPlanDays, elapsedPlanDays + 1);
+  const dayProgressPct = totalPlanDays > 0
+    ? Math.min(100, Math.max(0, (elapsedPlanDays / totalPlanDays) * 100))
     : 0;
   const completedWeeksText = weeksDone === 1
     ? '1 vecka klar'
@@ -5775,8 +5775,9 @@ function renderPlanDerivedGoalCard(goal, workouts, plan) {
     pending: 'pending',
   })[status] || 'pending';
   const assessmentNodesHtml = assessments.map((a) => {
-    const left = totalWeeks > 0
-      ? Math.min(98, Math.max(2, (a.wk / totalWeeks) * 100))
+    const assessmentDayOffset = Math.max(0, (a.wk - 1) * 7);
+    const left = totalPlanDays > 0
+      ? Math.min(98, Math.max(2, (assessmentDayOffset / totalPlanDays) * 100))
       : 50;
     const cls = nodeCls(a.status);
     return `<div class="goal-roadmap-node goal-roadmap-node--${cls}" style="left:${left}%" title="Bedömning vecka ${a.wk}">
@@ -5793,16 +5794,16 @@ function renderPlanDerivedGoalCard(goal, workouts, plan) {
       <div class="goal-roadmap-header">
         <div>
           <div class="goal-section-title">Planens tidslinje</div>
-          <div class="goal-roadmap-summary">Start v1 · nu v${currentWeek} · mål v${totalWeeks}</div>
+          <div class="goal-roadmap-summary">Dag ${currentPlanDay} av ${totalPlanDays} · nu v${currentWeek} · mål v${totalWeeks}</div>
         </div>
         <div class="goal-roadmap-count">${roadmapSummary}</div>
       </div>
       <div class="goal-roadmap-track-wrap">
         <div class="goal-roadmap-track">
-          <div class="goal-roadmap-fill" style="width:${fillPct}%"></div>
+          <div class="goal-roadmap-fill" style="width:${dayProgressPct}%"></div>
         </div>
         ${assessmentNodesHtml}
-        <div class="goal-roadmap-now" style="left:${nowPct}%" title="Just nu (vecka ${currentWeek})">
+        <div class="goal-roadmap-now" style="left:${dayProgressPct}%" title="Just nu (dag ${currentPlanDay}, vecka ${currentWeek})">
           <span class="goal-roadmap-marker-line"></span>
           <span class="goal-roadmap-marker-dot"></span>
           <span class="goal-roadmap-marker-label">Nu v${currentWeek}</span>
