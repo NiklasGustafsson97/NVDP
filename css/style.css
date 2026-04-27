@@ -1531,6 +1531,20 @@ select option { background: var(--surface-modal); color: var(--text); }
   display: flex; justify-content: flex-end;
   margin: 0 0 12px;
 }
+.goals-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 20px 4px 8px;
+}
+.goals-section-header .goals-section-label {
+  margin: 0;
+}
+.goals-section-header #goal-add-btn {
+  width: auto;
+  flex: 0 0 auto;
+}
 .goals-section-label {
   display: block;
   font-size: 0.72rem; font-weight: 700;
@@ -1538,8 +1552,8 @@ select option { background: var(--surface-modal); color: var(--text); }
   color: var(--text-dim);
   margin: 16px 4px 8px;
 }
-#goals-race-section:not([hidden]) + #goals-custom-section .goals-section-label {
-  margin-top: 20px;
+#goals-race-section:not([hidden]) + #goals-custom-section .goals-section-header {
+  margin-top: 22px;
 }
 
 .goal-card { padding: 14px 16px; }
@@ -3121,7 +3135,7 @@ input.code-input {
   margin: 0 0 12px;
 }
 .plan-coaching-icon {
-  flex: 0 0 auto; font-size: 1.1rem; line-height: 1.2;
+  flex: 0 0 auto;
 }
 .plan-coaching-text {
   font-size: 0.86rem;
@@ -3516,6 +3530,24 @@ input.code-input {
   .chart-titlebar-desc { font-size: 0.74rem; }
 }
 
+.coach-takeaway-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 30px;
+  background: rgba(var(--color-primary-rgb), 0.14);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(var(--color-primary-rgb), 0.18);
+}
+.coach-takeaway-icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
 /* ── Unified chart insight box ──
  * Lives BELOW every weekly trend chart so the "this is what the graph
  * tells you" callout looks identical across cards (Effort, Formtopp,
@@ -3534,9 +3566,7 @@ input.code-input {
 }
 .chart-insight:empty { display: none; }
 .chart-insight-badge {
-  width: 12px; height: 12px; border-radius: 50%;
-  flex-shrink: 0;
-  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 18%, transparent);
+  margin-top: -2px;
 }
 .chart-insight-text { flex: 1 1 220px; min-width: 0; }
 .chart-insight-title {
@@ -3574,15 +3604,15 @@ input.code-input {
 .chart-insight--bad     { background: color-mix(in srgb, var(--red) 9%, var(--bg-card-hover));
                           border-color: color-mix(in srgb, var(--red) 32%, var(--border)); }
 .chart-insight--neutral { background: var(--bg-card-hover); border-color: var(--border); }
-.chart-insight--ok      .chart-insight-badge { background: var(--chart-load); color: var(--chart-load); }
-.chart-insight--warn    .chart-insight-badge { background: var(--amber); color: var(--amber); }
-.chart-insight--bad     .chart-insight-badge { background: var(--red);   color: var(--red); }
-.chart-insight--neutral .chart-insight-badge { background: var(--text-muted); color: var(--text-muted); }
+.chart-insight--ok      .chart-insight-badge { background: color-mix(in srgb, var(--chart-load) 15%, transparent); color: var(--chart-load); }
+.chart-insight--warn    .chart-insight-badge { background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); }
+.chart-insight--bad     .chart-insight-badge { background: color-mix(in srgb, var(--red) 16%, transparent); color: var(--red); }
+.chart-insight--neutral .chart-insight-badge { background: rgba(var(--color-primary-rgb), 0.12); color: var(--accent); }
 @media (max-width: 480px) {
   .chart-insight { gap: 10px; padding: 10px 12px; }
   .chart-insight-headline {
-    width: calc(100% - 22px);
-    margin-left: 22px;
+    width: calc(100% - 40px);
+    margin-left: 40px;
     padding: 8px 0 0;
     border-left: 0;
     border-top: 1px solid var(--border);
@@ -4369,9 +4399,12 @@ input.code-input {
 /* ── Diff overview screen ─────────────────────────────────────────────── */
 .cc-diff-header { margin-bottom: 14px; }
 .cc-coach-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   margin-top: 8px; padding: 12px 14px; border-radius: 10px;
   background: rgba(var(--color-success-rgb), 0.10);
-  border-left: 3px solid var(--green);
+  border: 1px solid rgba(var(--color-success-rgb), 0.26);
   font-size: 0.88rem; line-height: 1.45; color: var(--text);
 }
 .cc-diff-list { display: flex; flex-direction: column; gap: 10px; }
@@ -5273,8 +5306,8 @@ body.chat-mode #view-coach { height: 100%; }
 /* Inline banner used by dashboard cards, schema header, plan preview to
    call out that the upcoming/current week is a calibration week. */
 .assessment-banner {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px;
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px;
   margin: 6px 0 10px;
   background: rgba(var(--color-warning-rgb), 0.10);
   border: 1px solid rgba(var(--color-warning-rgb), 0.35);
@@ -5283,7 +5316,18 @@ body.chat-mode #view-coach { height: 100%; }
   color: var(--color-warning);
   font-weight: 600;
 }
-.assessment-banner .ab-icon { font-size: 1.05em; }
+.assessment-banner .ab-icon {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+  color: var(--color-warning);
+  background: rgba(var(--color-warning-rgb), 0.13);
+  box-shadow: 0 0 0 1px rgba(var(--color-warning-rgb), 0.18);
+}
+.assessment-banner .ab-icon svg {
+  width: 15px;
+  height: 15px;
+}
 .assessment-banner .ab-text { line-height: 1.35; font-weight: 500; color: var(--text); }
 .assessment-banner .ab-text strong { color: var(--color-warning); font-weight: 700; }
 
@@ -5320,7 +5364,17 @@ body.chat-mode #view-coach { height: 100%; }
   color: var(--color-warning);
   margin-bottom: 4px;
 }
-.cc-horizon-icon { font-size: 1.05em; }
+.cc-horizon-icon {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+  color: var(--color-warning);
+  background: rgba(var(--color-warning-rgb), 0.13);
+}
+.cc-horizon-icon svg {
+  width: 15px;
+  height: 15px;
+}
 .cc-horizon-sub {
   margin: 0 0 6px;
   font-size: 0.85rem;
@@ -5359,11 +5413,21 @@ body.chat-mode #view-coach { height: 100%; }
 .wiz-assessment-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 0.92rem;
   color: var(--color-warning);
 }
-.wiz-assessment-icon { font-size: 1.05em; }
+.wiz-assessment-icon {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+  color: var(--color-warning);
+  background: rgba(var(--color-warning-rgb), 0.13);
+}
+.wiz-assessment-icon svg {
+  width: 15px;
+  height: 15px;
+}
 .wiz-assessment-check {
   display: flex;
   align-items: flex-start;
@@ -5622,17 +5686,17 @@ body.chat-mode #view-coach { height: 100%; }
    ════════════════════════════════════════════════════════════════════ */
 
 .goal-card-v2 {
-  padding: 18px 18px 16px;
-  border: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(255,255,255,0.045) 0%, rgba(255,255,255,0.015) 100%);
+  padding: 20px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  background: linear-gradient(180deg, rgba(var(--color-primary-rgb), 0.08) 0%, rgba(255,255,255,0.015) 45%, rgba(255,255,255,0.01) 100%);
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
   position: relative;
   overflow: hidden;
 }
 [data-theme="light"] .goal-card-v2 {
-  background: linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.005) 100%);
+  background: linear-gradient(180deg, rgba(var(--color-primary-rgb), 0.05) 0%, rgba(0,0,0,0.006) 55%, rgba(0,0,0,0.004) 100%);
 }
 
 /* ── Hero: current week + plan name ─────────────────────────────── */
@@ -5641,6 +5705,7 @@ body.chat-mode #view-coach { height: 100%; }
   grid-template-columns: 120px 1fr;
   gap: 18px;
   align-items: center;
+  padding: 6px 2px 2px;
 }
 .goal-plan-position {
   width: 120px;
@@ -5651,10 +5716,11 @@ body.chat-mode #view-coach { height: 100%; }
   align-items: center;
   justify-content: center;
   gap: 2px;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
   border-radius: var(--radius-sm);
   background: rgba(255,255,255,0.03);
   text-align: center;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
 }
 [data-theme="light"] .goal-plan-position {
   background: rgba(0,0,0,0.025);
@@ -5819,68 +5885,160 @@ body.chat-mode #view-coach { height: 100%; }
 
 /* ── Roadmap: track + fill + assessment nodes + now-marker ──────── */
 .goal-roadmap {
+  padding: 14px 14px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.025);
+}
+[data-theme="light"] .goal-roadmap {
+  background: rgba(0,0,0,0.018);
+}
+.goal-roadmap-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+.goal-roadmap .goal-section-title {
+  margin: 0;
+}
+.goal-roadmap-summary {
+  margin-top: 3px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+.goal-roadmap-count {
+  flex: 0 0 auto;
+  max-width: 190px;
+  text-align: right;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+.goal-roadmap-track-wrap {
   position: relative;
-  height: 36px;
+  height: 66px;
+  margin-top: 12px;
   padding: 0 8px;
 }
 .goal-roadmap-track {
   position: absolute;
-  top: 16px;
+  top: 24px;
   left: 8px;
   right: 8px;
-  height: 4px;
-  background: rgba(255,255,255,0.07);
-  border-radius: 2px;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 999px;
   overflow: hidden;
 }
 [data-theme="light"] .goal-roadmap-track {
-  background: rgba(0,0,0,0.07);
+  background: rgba(0,0,0,0.08);
 }
 .goal-roadmap-fill {
   height: 100%;
   background: linear-gradient(90deg, var(--color-primary) 0%, var(--color-secondary) 100%);
-  border-radius: 2px;
+  border-radius: 999px;
   transition: width 0.4s ease-out;
 }
-.goal-roadmap-node {
-  position: absolute;
-  top: 4px;
-  transform: translateX(-50%);
-  min-width: 28px;
-  height: 28px;
-  padding: 0 6px;
-  border-radius: 14px;
-  font-size: 0.68rem;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg);
-  border: 2px solid var(--text-dim);
-  color: var(--text-muted);
-  line-height: 1;
-  user-select: none;
-  cursor: default;
-  z-index: 2;
-}
-.goal-roadmap-node--done    { border-color: var(--color-success); color: var(--color-success); background: rgba(var(--color-success-rgb), 0.10); }
-.goal-roadmap-node--on      { border-color: var(--color-info); color: var(--color-info); background: rgba(88,185,224,0.10); }
-.goal-roadmap-node--off     { border-color: var(--color-warning); color: var(--color-warning); background: rgba(var(--color-warning-rgb), 0.10); }
-.goal-roadmap-node--miss    { border-color: var(--color-danger); color: var(--color-danger); background: rgba(var(--color-danger-rgb), 0.10); }
-.goal-roadmap-node--pending { border-color: var(--text-dim); color: var(--text-muted); }
+.goal-roadmap-node,
 .goal-roadmap-now {
   position: absolute;
-  top: 8px;
-  width: 4px;
-  height: 20px;
-  background: var(--accent);
+  top: 0;
   transform: translateX(-50%);
-  border-radius: 2px;
-  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.20);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 86px;
+  z-index: 2;
+  pointer-events: none;
+}
+.goal-roadmap-now {
   z-index: 3;
+}
+.goal-roadmap-marker-line {
+  width: 2px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--text-dim);
+  opacity: 0.7;
+}
+.goal-roadmap-marker-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 3px solid var(--text-dim);
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
+}
+.goal-roadmap-marker-label {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+.goal-roadmap-node--done .goal-roadmap-marker-dot,
+.goal-roadmap-node--done .goal-roadmap-marker-line { border-color: var(--color-success); background: var(--color-success); color: var(--color-success); }
+.goal-roadmap-node--on .goal-roadmap-marker-dot,
+.goal-roadmap-node--on .goal-roadmap-marker-line { border-color: var(--color-info); background: var(--color-info); color: var(--color-info); }
+.goal-roadmap-node--off .goal-roadmap-marker-dot,
+.goal-roadmap-node--off .goal-roadmap-marker-line { border-color: var(--color-warning); background: var(--color-warning); color: var(--color-warning); }
+.goal-roadmap-node--miss .goal-roadmap-marker-dot,
+.goal-roadmap-node--miss .goal-roadmap-marker-line { border-color: var(--color-danger); background: var(--color-danger); color: var(--color-danger); }
+.goal-roadmap-node--done .goal-roadmap-marker-label { color: var(--color-success); }
+.goal-roadmap-node--on .goal-roadmap-marker-label { color: var(--color-info); }
+.goal-roadmap-node--off .goal-roadmap-marker-label { color: var(--color-warning); }
+.goal-roadmap-node--miss .goal-roadmap-marker-label { color: var(--color-danger); }
+.goal-roadmap-now .goal-roadmap-marker-line,
+.goal-roadmap-now .goal-roadmap-marker-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.goal-roadmap-now .goal-roadmap-marker-label {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+.goal-roadmap-endpoints {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: -2px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+.goal-roadmap-endpoints span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.goal-roadmap-endpoints span:last-child {
+  text-align: right;
+  align-items: flex-end;
+}
+.goal-roadmap-endpoints strong {
+  color: var(--text);
+  font-size: 0.76rem;
+}
+.goal-roadmap-endpoints em {
+  font-style: normal;
 }
 
 /* ── Assessment-week cards (one per assessment, 3 chips inside) ─── */
+.goal-assessment-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.goal-assessment-section .goal-section-title {
+  margin: 0;
+}
 .goal-assessments {
   display: flex;
   flex-direction: column;
@@ -5980,17 +6138,30 @@ body.chat-mode #view-coach { height: 100%; }
 /* ── Compact coach insights panel ───────────────────────────────── */
 .goal-coach {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  background: rgba(255,255,255,0.025);
-  border-left: 3px solid var(--accent);
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
 [data-theme="light"] .goal-coach {
-  background: rgba(0,0,0,0.02);
+  background: rgba(0,0,0,0.018);
+}
+.coach-takeaway--great { border-color: rgba(var(--color-success-rgb), 0.35); }
+.coach-takeaway--good { border-color: rgba(var(--color-info-rgb), 0.32); }
+.coach-takeaway--warn { border-color: rgba(var(--color-warning-rgb), 0.35); }
+.coach-takeaway--risk { border-color: rgba(var(--color-danger-rgb), 0.35); }
+.goal-coach-icon {
+  margin-top: 1px;
+}
+.coach-takeaway-body {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 .goal-coach-eyebrow {
+  display: block;
+  margin-bottom: 6px;
   font-size: 0.68rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -6009,7 +6180,7 @@ body.chat-mode #view-coach { height: 100%; }
   font-size: 0.86rem;
   line-height: 1.35;
   color: var(--text);
-  padding-left: 14px;
+  padding-left: 13px;
   position: relative;
 }
 .goal-coach-point::before {
@@ -6030,10 +6201,10 @@ body.chat-mode #view-coach { height: 100%; }
 /* ── Mobile tightening ─────────────────────────────────────────── */
 @media (max-width: 480px) {
   .goal-hero {
-    grid-template-columns: 92px 1fr;
+    grid-template-columns: 1fr;
     gap: 14px;
   }
-  .goal-plan-position { width: 92px; min-height: 92px; flex-basis: 92px; }
+  .goal-plan-position { width: 100%; min-height: 84px; flex-basis: auto; }
   .goal-plan-position-value { font-size: 1.95rem; }
   .goal-plan-position-total { font-size: 1rem; }
   .goal-hero-title { font-size: 1.2rem; }
@@ -6041,5 +6212,9 @@ body.chat-mode #view-coach { height: 100%; }
     grid-template-columns: 1fr;
   }
   .goal-stat-value { font-size: 1rem; }
-  .goal-roadmap-node { min-width: 26px; height: 26px; font-size: 0.64rem; }
+  .goal-roadmap-header { flex-direction: column; gap: 6px; }
+  .goal-roadmap-count { max-width: none; text-align: left; }
+  .goal-roadmap-node,
+  .goal-roadmap-now { min-width: 68px; }
+  .goal-roadmap-marker-label { font-size: 0.62rem; padding-inline: 5px; }
 }

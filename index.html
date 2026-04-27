@@ -761,15 +761,15 @@
       </div><!-- /progress-subtab-allman -->
 
       <div class="progress-subtab" id="progress-subtab-mal" role="tabpanel" aria-labelledby="progress-subtab-mal-btn" hidden>
-        <div class="goals-toolbar">
-          <button type="button" class="btn btn-primary btn-sm" id="goal-add-btn" onclick="openAddGoalSheet()">+ Lägg till mål</button>
-        </div>
         <div id="goals-race-section" hidden>
           <div class="goals-section-label" id="goals-race-label">Mål från ditt schema</div>
           <div id="goals-race-cards"></div>
         </div>
         <div id="goals-custom-section">
-          <div class="goals-section-label" id="goals-custom-label" hidden>Dina mål</div>
+          <div class="goals-section-header">
+            <div class="goals-section-label" id="goals-custom-label" hidden>Övriga mål</div>
+            <button type="button" class="btn btn-outline btn-sm" id="goal-add-btn" onclick="openAddGoalSheet()">+ Lägg till mål</button>
+          </div>
           <div id="goals-custom-cards"></div>
         </div>
       </div>
@@ -1313,7 +1313,7 @@
            the per-day diff list. -->
       <div id="cc-horizon-panel" class="cc-horizon-panel hidden">
         <div class="cc-horizon-head">
-          <span class="cc-horizon-icon" aria-hidden="true">⚑</span>
+          <span class="cc-horizon-icon coach-takeaway-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M9 13v2"/><path d="M15 13v2"/></svg></span>
           <strong id="cc-horizon-title">Coachen har räknat om kommande veckor</strong>
         </div>
         <p class="cc-horizon-sub" id="cc-horizon-sub"></p>
@@ -1487,7 +1487,7 @@
       <div class="wiz-section-divider"></div>
       <div class="wiz-assessment-callout" id="wiz-assessment-callout">
         <div class="wiz-assessment-head">
-          <span class="wiz-assessment-icon" aria-hidden="true">⚑</span>
+          <span class="wiz-assessment-icon coach-takeaway-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M9 13v2"/><path d="M15 13v2"/></svg></span>
           <strong>Osäker på dina värden?</strong>
         </div>
         <label class="wiz-assessment-check">

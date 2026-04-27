@@ -1467,6 +1467,8 @@ function _renderChartWeekNav(chartId, totalWeeks, windowInfo, rerender) {
   if (latestBtn) { latestBtn.onclick = handler(0, true); }
 }
 
+const _coachAvatarSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M9 13v2"/><path d="M15 13v2"/></svg>`;
+
 /** Render the unified "this is what the graph tells you" callout below a
  *  chart card. Every weekly trend chart targets one of these slots so the
  *  insight format (badge + title + sub + optional headline) looks identical
@@ -1488,7 +1490,7 @@ function _renderChartInsight(slotId, opts) {
   }
   el.className = `chart-insight chart-insight--${band}`;
   el.innerHTML = `
-    <span class="chart-insight-badge" aria-hidden="true"></span>
+    <span class="chart-insight-badge coach-takeaway-icon" aria-hidden="true">${_coachAvatarSvg}</span>
     <div class="chart-insight-text">
       ${title ? `<div class="chart-insight-title">${escapeHTML(title)}</div>` : ''}
       ${sub ? `<div class="chart-insight-sub">${escapeHTML(sub)}</div>` : ''}
@@ -2206,7 +2208,7 @@ async function _renderDashDayCard(dateStr) {
 
   if (isAssessmentWeek) {
     html += `<div class="assessment-banner ddc-assessment-banner">
-      <span class="ab-icon" aria-hidden="true">⚑</span>
+      <span class="ab-icon coach-takeaway-icon" aria-hidden="true">${_coachAvatarSvg}</span>
       <span class="ab-text"><strong>Bedömningsvecka.</strong> Vi kalibrerar puls och tempo — kör testpassen så friska som möjligt och logga puls/tempo.</span>
     </div>`;
   }
@@ -4081,7 +4083,7 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
   let html = '';
   if (isAssessmentWeek) {
     html += `<div class="assessment-banner schema-assessment-banner">
-      <span class="ab-icon" aria-hidden="true">⚑</span>
+      <span class="ab-icon coach-takeaway-icon" aria-hidden="true">${_coachAvatarSvg}</span>
       <span class="ab-text"><strong>Bedömningsvecka.</strong> Tre testpass kalibrerar puls, tröskel och 5&nbsp;km — resterande veckor anpassas efter resultaten.</span>
     </div>`;
   }
@@ -5237,7 +5239,7 @@ function renderGoals(workouts) {
     customLabel.hidden = true;
   } else if (custom.length === 0) {
     customCards.innerHTML = '';
-    customLabel.hidden = true;
+    customLabel.hidden = false;
   } else {
     customLabel.hidden = false;
     customCards.innerHTML = custom.map((g) => renderCustomGoalCard(g, workouts)).join('');
@@ -5763,7 +5765,7 @@ function renderPlanDerivedGoalCard(goal, workouts, plan) {
       <div class="goal-status-copy"><strong>${_escapeHtml(goalStatusLabel)}.</strong> ${_escapeHtml(goalStatusBasis)}</div>
     </div>`;
 
-  // Roadmap: track + fill + assessment nodes + now-marker
+  // Roadmap: track + fill + labelled assessment nodes + now-marker
   const nodeCls = (status) => ({
     hit: 'done',
     completed: 'done',
@@ -5777,15 +5779,39 @@ function renderPlanDerivedGoalCard(goal, workouts, plan) {
       ? Math.min(98, Math.max(2, (a.wk / totalWeeks) * 100))
       : 50;
     const cls = nodeCls(a.status);
-    return `<div class="goal-roadmap-node goal-roadmap-node--${cls}" style="left:${left}%" title="v${a.wk}">v${a.wk}</div>`;
+    return `<div class="goal-roadmap-node goal-roadmap-node--${cls}" style="left:${left}%" title="Bedömning vecka ${a.wk}">
+      <span class="goal-roadmap-marker-line"></span>
+      <span class="goal-roadmap-marker-dot"></span>
+      <span class="goal-roadmap-marker-label">Bedömning v${a.wk}</span>
+    </div>`;
   }).join('');
+  const roadmapSummary = assessments.length
+    ? `${assessments.length} bedömning${assessments.length === 1 ? '' : 'ar'} under planen`
+    : 'Inga bedömningsveckor i planen';
   const roadmapHtml = totalWeeks > 0 ? `
     <div class="goal-roadmap">
-      <div class="goal-roadmap-track">
-        <div class="goal-roadmap-fill" style="width:${fillPct}%"></div>
+      <div class="goal-roadmap-header">
+        <div>
+          <div class="goal-section-title">Planens tidslinje</div>
+          <div class="goal-roadmap-summary">Start v1 · nu v${currentWeek} · mål v${totalWeeks}</div>
+        </div>
+        <div class="goal-roadmap-count">${roadmapSummary}</div>
       </div>
-      ${assessmentNodesHtml}
-      <div class="goal-roadmap-now" style="left:${nowPct}%" title="Just nu (v${currentWeek})"></div>
+      <div class="goal-roadmap-track-wrap">
+        <div class="goal-roadmap-track">
+          <div class="goal-roadmap-fill" style="width:${fillPct}%"></div>
+        </div>
+        ${assessmentNodesHtml}
+        <div class="goal-roadmap-now" style="left:${nowPct}%" title="Just nu (vecka ${currentWeek})">
+          <span class="goal-roadmap-marker-line"></span>
+          <span class="goal-roadmap-marker-dot"></span>
+          <span class="goal-roadmap-marker-label">Nu v${currentWeek}</span>
+        </div>
+      </div>
+      <div class="goal-roadmap-endpoints">
+        <span><strong>Start</strong><em>v1</em></span>
+        <span><strong>Mål</strong><em>v${totalWeeks}</em></span>
+      </div>
     </div>` : '';
 
   // Assessment-week cards: head row + 3 chip row
@@ -5814,17 +5840,22 @@ function renderPlanDerivedGoalCard(goal, workouts, plan) {
       </div>`;
   }).join('');
   const assessmentsHtml = assessments.length === 0 ? '' : `
-    <div class="goal-section-title">Bedömningar</div>
-    <div class="goal-assessments">${cardsHtml}</div>`;
+    <div class="goal-assessment-section">
+      <div class="goal-section-title">Bedömningar</div>
+      <div class="goal-assessments">${cardsHtml}</div>
+    </div>`;
 
   // Coach panel — at most 3 short bullets (≤ 10 words each)
   const insights = _buildGoalCoachInsights(plan, indicators, probability, currentWeek, totalWeeks, assessments);
   const coachHtml = insights.length === 0 ? '' : `
-    <div class="goal-coach">
-      <span class="goal-coach-eyebrow">Coachen</span>
-      <ul class="goal-coach-points">
-        ${insights.map((i) => `<li class="goal-coach-point goal-coach-point--${i.tone}">${_escapeHtml(i.text)}</li>`).join('')}
-      </ul>
+    <div class="goal-coach coach-takeaway coach-takeaway--${goalStatusCls}">
+      <span class="coach-takeaway-icon goal-coach-icon" aria-hidden="true">${_coachAvatarSvg}</span>
+      <div class="coach-takeaway-body">
+        <span class="goal-coach-eyebrow">Coachen</span>
+        <ul class="goal-coach-points">
+          ${insights.map((i) => `<li class="goal-coach-point goal-coach-point--${i.tone}">${_escapeHtml(i.text)}</li>`).join('')}
+        </ul>
+      </div>
     </div>`;
 
   return `<div class="card goal-card-v2" data-goal-id="${goal.id}">
@@ -11377,12 +11408,12 @@ function buildPlanPreviewHTML(plan, preview, weekIdx) {
   // user is reminded what the realism check said when revisiting the plan.
   const summaryText = (plan.summary || '').trim();
   const summaryCallout = summaryText
-    ? `<div class="plan-coaching-callout"><div class="plan-coaching-icon">💡</div><div class="plan-coaching-text">${escapeHTML(summaryText)}</div></div>`
+    ? `<div class="plan-coaching-callout coach-takeaway"><div class="plan-coaching-icon coach-takeaway-icon" aria-hidden="true">${_coachAvatarSvg}</div><div class="plan-coaching-text">${escapeHTML(summaryText)}</div></div>`
     : '';
 
   const assessmentBanner = isAssessmentWeek
     ? `<div class="assessment-banner pm-assessment-banner">
-        <span class="ab-icon" aria-hidden="true">⚑</span>
+        <span class="ab-icon coach-takeaway-icon" aria-hidden="true">${_coachAvatarSvg}</span>
         <span class="ab-text"><strong>Bedömningsvecka.</strong> Tre testpass kalibrerar puls och tempo.</span>
       </div>`
     : '';
@@ -12258,7 +12289,7 @@ function renderProposalPreview() {
       <button class="pe-nav-arrow" onclick="pePreviewWeek(1)" ${weekIdx >= newWeeks.length - 1 ? 'disabled' : ''} aria-label="Nästa vecka">›</button>
     </div>
     ${isAssessmentWeek ? `<div class="assessment-banner pe-assessment-banner">
-      <span class="ab-icon" aria-hidden="true">⚑</span>
+      <span class="ab-icon coach-takeaway-icon" aria-hidden="true">${_coachAvatarSvg}</span>
       <span class="ab-text"><strong>Bedömningsvecka.</strong> Tre testpass kalibrerar puls och tempo.</span>
     </div>` : ''}
     <div class="pe-preview-grid">${cards}</div>
@@ -13766,7 +13797,10 @@ function _ccRenderDiff() {
 
   const diffEl = document.getElementById('cc-step-diff');
   diffEl.style.display = 'block';
-  document.getElementById('cc-coach-note').textContent = _ccCheckin.coach_note || '';
+  const coachNoteEl = document.getElementById('cc-coach-note');
+  if (coachNoteEl) {
+    coachNoteEl.innerHTML = `<span class="coach-takeaway-icon" aria-hidden="true">${_coachAvatarSvg}</span><span>${escapeHTML(_ccCheckin.coach_note || '')}</span>`;
+  }
 
   _ccRenderHorizonPanel(_ccCheckin);
 
@@ -14153,8 +14187,6 @@ function _coachRenderMarkdown(raw) {
     return escapeHTML(String(raw)).replace(/\n/g, '<br>');
   }
 }
-
-const _coachAvatarSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M9 13v2"/><path d="M15 13v2"/></svg>`;
 
 const _coachToolStatusLabels = {
   get_workout: 'Hämtar passet…',
