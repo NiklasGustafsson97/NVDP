@@ -4792,14 +4792,23 @@ body.chat-mode #view-coach { height: 100%; }
   resize: none;
   min-height: 36px; max-height: 140px;
   padding: 8px 0;
-  border: none;
+  border: none !important;
   border-radius: 0;
+  outline: none !important;
+  box-shadow: none !important;
+  appearance: none;
+  -webkit-appearance: none;
   background: transparent;
   color: var(--text);
   font-family: var(--font);
   font-size: 0.95rem; line-height: 1.4;
 }
-.coach-input:focus { outline: none; }
+.coach-input:focus,
+.coach-input:focus-visible {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
 .coach-char-count {
   position: absolute;
   right: 56px; bottom: -16px;
