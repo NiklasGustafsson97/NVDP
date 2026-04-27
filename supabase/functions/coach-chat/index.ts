@@ -119,6 +119,12 @@ Du har tillgång till verktyg:
 
 Använd verktyg när det är rätt verktyg för jobbet. Annars svara direkt.
 
+Planerade dag-ändringar:
+- Om användaren säger "kör lördag som planerat", "behåll passet", "ingen ändring" eller liknande: kör INGET proposer-verktyg. Bekräfta bara kort att vi håller planen.
+- Om användaren ber om att ändra ett befintligt planerat pass på en dag ("gör lördagens pass till 18 km", "korta lördag", "byt måndag till lätt"): slå först upp passet via context.next_7_days eller get_workout(date), och kör sedan propose_workout_edit med plan_workout_id. Servern kan också förstå svenska veckodagar i workout_date, t.ex. "lördag", men plan_workout_id är säkrast.
+- Skriv aldrig "jag kan inte justera passet just nu" bara för att ett verktygsanrop misslyckas. Om propose_workout_edit returnerar recoverable/needs=workout_lookup: försök igen med get_workout(date) eller plan_workout_id. Om inget pass finns på dagen, säg specifikt "Jag hittar inget planerat pass på lördag" och erbjud att lägga ett förslag, inte ett vagt tekniskt fel.
+- När du redan vet vilken ändring du vill föreslå: kör propose_workout_edit direkt. Fråga inte "vill du att jag ska föreslå det?" — diff-kortet är själva bekräftelsen.
+
 Veckoavstämning (söndag): Om första meddelandet i tråden är ditt eget söndagsnudge "Söndag — dags för veckoavstämning" ansvarar du för att genomföra den i chatten — ersätter den gamla guiden. Arbetssätt:
 1) Läs användarens första svar (helhetskänsla). Bekräfta det kort.
 2) Ställ ETT kort uppföljningsfragment i taget, totalt max 3 frågor. Täck när det är relevant: (a) ev. skada/nypning eller sjukdom, (b) känsla på tuffaste passet eller långpass, (c) dagar nästa vecka där användaren inte kan träna (resa, jobb, event, vilodagar pga sjukdom). Bekräfta ALLTID svaret kort innan nästa fråga ("Förstår, krya på dig — finns det något pass nästa vecka du redan vet känns tungt?").
@@ -687,6 +693,130 @@ const ALLOWED_TOOLS = new Set([
   "move_plan_workout",
 ]);
 
+type ActivePlanScope = { planId: string | null; weekIds: string[] };
+
+function parseISODateArg(raw: string | null): string | null {
+  if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const d = new Date(raw + "T00:00:00Z");
+  return Number.isNaN(d.getTime()) ? null : raw;
+}
+
+function weekdayFromText(raw: string | null): number | null {
+  if (!raw) return null;
+  const s = raw.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+  const entries: Array<[string, number]> = [
+    ["sondag", 0], ["son", 0],
+    ["mandag", 1], ["man", 1],
+    ["tisdag", 2], ["tis", 2],
+    ["onsdag", 3], ["ons", 3],
+    ["torsdag", 4], ["tor", 4],
+    ["fredag", 5], ["fre", 5],
+    ["lordag", 6], ["lor", 6],
+  ];
+  const hit = entries.find(([key]) => s.includes(key));
+  return hit ? hit[1] : null;
+}
+
+async function getActivePlanScope(db: SupabaseClient, profileId: string): Promise<ActivePlanScope> {
+  const { data: plan } = await db.from("training_plans")
+    .select("id")
+    .eq("profile_id", profileId)
+    .eq("status", "active")
+    .order("start_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const planId = plan?.id ?? null;
+  if (!planId) return { planId: null, weekIds: [] };
+  const { data: weeks } = await db.from("plan_weeks")
+    .select("id")
+    .eq("plan_id", planId);
+  return {
+    planId,
+    weekIds: (weeks || []).map((w: { id: string }) => w.id),
+  };
+}
+
+async function findActivePlanWorkoutsForDateLike(
+  db: SupabaseClient,
+  profileId: string,
+  workoutDateArg: string,
+): Promise<{ rows: PlanWorkout[]; resolvedDate: string | null; error?: string }> {
+  const scope = await getActivePlanScope(db, profileId);
+  if (!scope.planId) return { rows: [], resolvedDate: null, error: "active_plan_not_found" };
+  if (scope.weekIds.length === 0) return { rows: [], resolvedDate: null, error: "active_plan_has_no_weeks" };
+
+  const iso = parseISODateArg(workoutDateArg);
+  if (iso) {
+    const { data } = await db.from("plan_workouts")
+      .select("*")
+      .in("plan_week_id", scope.weekIds)
+      .eq("workout_date", iso)
+      .order("sort_order", { ascending: true });
+    return { rows: (data || []) as PlanWorkout[], resolvedDate: iso };
+  }
+
+  const targetJsDay = weekdayFromText(workoutDateArg);
+  if (targetJsDay === null) {
+    return { rows: [], resolvedDate: null, error: "invalid_workout_date" };
+  }
+
+  const today = isoDate(new Date());
+  const { data } = await db.from("plan_workouts")
+    .select("*")
+    .in("plan_week_id", scope.weekIds)
+    .gte("workout_date", today)
+    .order("workout_date", { ascending: true })
+    .order("sort_order", { ascending: true });
+
+  const all = (data || []) as PlanWorkout[];
+  const matching = all.filter((w) => {
+    const d = new Date(w.workout_date + "T00:00:00Z");
+    return d.getUTCDay() === targetJsDay;
+  });
+  return {
+    rows: matching,
+    resolvedDate: matching[0]?.workout_date ?? null,
+    error: matching.length ? undefined : "plan_workout_not_found_for_weekday",
+  };
+}
+
+async function verifyPlanWorkoutAccess(
+  db: SupabaseClient,
+  profileId: string,
+  row: PlanWorkout,
+): Promise<boolean> {
+  const { data: planWeek } = await db.from("plan_weeks")
+    .select("id, training_plans!inner(profile_id)")
+    .eq("id", row.plan_week_id)
+    .single();
+  // deno-lint-ignore no-explicit-any
+  const tp = (planWeek as any)?.training_plans;
+  return !!tp && tp.profile_id === profileId;
+}
+
+function logProposeWorkoutEditFailure(
+  profileId: string,
+  args: Record<string, unknown>,
+  error: string,
+  extra: Record<string, unknown> = {},
+): ToolResult {
+  console.log("coach-chat propose_workout_edit failed", JSON.stringify({
+    profileId,
+    error,
+    args,
+    ...extra,
+  }));
+  return {
+    ok: false,
+    error,
+    data: {
+      recoverable: true,
+      needs: "workout_lookup",
+      ...extra,
+    },
+  };
+}
+
 async function toolGetWorkout(
   db: SupabaseClient,
   profileId: string,
@@ -713,11 +843,8 @@ async function toolGetWorkout(
     logged = data || [];
   }
   if (date) {
-    const { data: pw } = await db.from("plan_workouts")
-      .select("id, workout_date, day_of_week, sort_order, activity_type, label, description, intensity_zone, target_duration_minutes, target_distance_km, is_rest, plan_week_id")
-      .eq("workout_date", date)
-      .order("sort_order", { ascending: true });
-    planned = (pw || []).map((r: Record<string, unknown>) => ({
+    const resolved = await findActivePlanWorkoutsForDateLike(db, profileId, date);
+    planned = resolved.rows.map((r) => ({
       plan_workout_id: r.id,
       ...r,
     }));
@@ -900,34 +1027,43 @@ async function toolProposeWorkoutEdit(
   const changesIn = (args.changes && typeof args.changes === "object" && !Array.isArray(args.changes))
     ? args.changes as Record<string, unknown>
     : null;
-  if (!changesIn) return { ok: false, error: "Need changes object" };
+  if (!changesIn) {
+    return logProposeWorkoutEditFailure(profileId, args, "Need changes object");
+  }
   if (!planWorkoutId && !workoutDate) {
-    return { ok: false, error: "Need plan_workout_id or workout_date" };
+    return logProposeWorkoutEditFailure(profileId, args, "Need plan_workout_id or workout_date");
   }
 
-  // Resolve target row.
+  // Resolve target row. Date-only lookups are scoped to the caller's active
+  // plan, and workout_date may be either ISO ("2026-04-25") or a Swedish
+  // weekday ("lördag"). This keeps the model from failing when the user says
+  // "lördagens pass" and avoids accidentally selecting rows outside the plan.
   let row: PlanWorkout | null = null;
   if (planWorkoutId) {
     const { data } = await db.from("plan_workouts").select("*").eq("id", planWorkoutId).maybeSingle();
     row = (data as PlanWorkout) || null;
   } else if (workoutDate) {
-    const { data } = await db.from("plan_workouts")
-      .select("*")
-      .eq("workout_date", workoutDate)
-      .order("sort_order", { ascending: true });
-    const list = (data || []) as PlanWorkout[];
-    row = list.find((r) => (r.sort_order ?? 0) === sortOrder) || list[0] || null;
+    const resolved = await findActivePlanWorkoutsForDateLike(db, profileId, workoutDate);
+    if (resolved.error && resolved.rows.length === 0) {
+      return logProposeWorkoutEditFailure(profileId, args, resolved.error, {
+        workout_date: workoutDate,
+        resolved_date: resolved.resolvedDate,
+      });
+    }
+    row = resolved.rows.find((r) => (r.sort_order ?? 0) === sortOrder) || resolved.rows[0] || null;
   }
-  if (!row) return { ok: false, error: "plan_workout not found" };
+  if (!row) {
+    return logProposeWorkoutEditFailure(profileId, args, "plan_workout not found");
+  }
 
   // Verify ownership via plan_weeks → training_plans.
-  const { data: planWeek } = await db.from("plan_weeks")
-    .select("id, training_plans!inner(profile_id)")
-    .eq("id", row.plan_week_id)
-    .single();
-  // deno-lint-ignore no-explicit-any
-  const tp = (planWeek as any)?.training_plans;
-  if (!tp || tp.profile_id !== profileId) return { ok: false, error: "Forbidden" };
+  const hasAccess = await verifyPlanWorkoutAccess(db, profileId, row);
+  if (!hasAccess) {
+    return logProposeWorkoutEditFailure(profileId, args, "Forbidden", {
+      plan_workout_id: row.id,
+      plan_week_id: row.plan_week_id,
+    });
+  }
 
   // Build the proposed_workout patch (only allowed fields).
   const allowedKeys = [
@@ -942,7 +1078,9 @@ async function toolProposeWorkoutEdit(
     }
   }
   if (Object.keys(patch).length === 0) {
-    return { ok: false, error: "changes is empty — pass at least one allowed field" };
+    return logProposeWorkoutEditFailure(profileId, args, "changes is empty — pass at least one allowed field", {
+      plan_workout_id: row.id,
+    });
   }
   // If converting away from a rest day, force is_rest=false unless explicit.
   if (patch.is_rest === undefined && row.is_rest && (patch.activity_type || patch.intensity_zone || patch.target_duration_minutes)) {
