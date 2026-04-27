@@ -14046,7 +14046,7 @@ function _coachRenderMessages() {
       ? `<div class="coach-msg-md">${_coachRenderMarkdown(m.content || '')}</div>`
       : escapeHTML(m.content || '');
 
-    const time = (m.created_at && m.role !== 'system')
+    const time = (m.created_at && m.role === 'assistant')
       ? `<span class="coach-msg-time">${_coachFormatTime(m.created_at)}</span>` : '';
 
     const diff = _coachExtractDiff(m);

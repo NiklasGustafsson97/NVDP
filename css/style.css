@@ -4479,6 +4479,8 @@ body.chat-mode #view-coach { height: 100%; }
 /* User: subtle accent-tinted card on the right. */
 .coach-msg--user {
   display: inline-block;
+  align-self: flex-start;
+  box-sizing: border-box;
   width: fit-content;
   max-width: min(78%, 620px);
   min-height: 0;
@@ -4750,9 +4752,8 @@ body.chat-mode #view-coach { height: 100%; }
 }
 
 /* Composer ──────────────────────────────────────────────────────── */
-/* Floating "island" composer — sits inside the page bg with its own
-   shadow + rounded surface. The send button is absolutely positioned
-   inside the input shell so the input fills the row visually. */
+/* Floating "island" composer — the send button is part of the same flex
+   pill as the textarea, so it stays visually inside the input shell. */
 .coach-composer {
   display: flex; align-items: flex-end; gap: 0;
   padding: 8px 12px max(12px, env(safe-area-inset-bottom));
