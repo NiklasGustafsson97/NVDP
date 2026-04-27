@@ -32,7 +32,7 @@
   --color-recovery-rgb: 139, 92, 246;
   --color-neutral: #94A3B8;
   --color-neutral-rgb: 148, 163, 184;
-  --on-color: var(--on-color);
+  --on-color: #FFFFFF;
   --accent: var(--color-primary);
   --accent-hover: var(--color-primary-hover);
   --accent-light: var(--color-secondary);
