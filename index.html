@@ -569,6 +569,13 @@
             <div class="chart-titlebar-desc">Träningsbelastning (TSS) per vecka, staplad efter pass-typ.</div>
           </div>
           <div class="chart-titlebar-actions">
+            <div class="ios-toggle-row" style="margin:0;gap:6px;" title="Visa eller dölj timmar-linjen">
+              <span class="ios-toggle-label" style="font-size:0.75rem;">Timmar</span>
+              <label class="ios-switch ios-switch-sm" id="effort-hours-toggle">
+                <input type="checkbox" onchange="setEffortHoursVisible(this.checked)">
+                <span class="ios-slider"></span>
+              </label>
+            </div>
             <button type="button" class="chart-titlebar-info" id="effort-info-btn"
                     onclick="toggleInfoPopover('effort-info-popover','effort-info-btn')"
                     aria-label="Visa förklaring" aria-expanded="false">
