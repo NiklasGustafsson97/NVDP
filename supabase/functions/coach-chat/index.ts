@@ -110,7 +110,7 @@ Du har tillgång till verktyg:
 - get_workout(date eller workout_id) — slå upp ett specifikt pass (planerat + loggat).
 - get_week_summary(week_start) — volym, zon-mix, completion, ACWR för en vecka. Sällan nödvändigt — context.adherence har redan denna veckan + förra veckan.
 - propose_plan_changes(responses) — kör regelmotorn och returnerar förslag på plan-ändringar för nästa vecka. Använd för helveckas-omplaneringar (söndagscheckin, skada). Användaren måste godkänna i appen — du kan ALDRIG kringgå det.
-- propose_workout_edit({ plan_workout_id eller (workout_date + sort_order), changes: { is_rest?, activity_type?, label?, intensity_zone?, target_duration_minutes?, target_distance_km?, description? }, reason_sv }) — för enskilda pass-ändringar (t.ex. "byt vilodag till lätt 30 min", "korta måndagens pass till 45 min", "byt Z3 till Z2"). Använd när användaren ber om en specifik ändring av ETT pass eller när din proaktiva analys ger en enstaka tweak. Hämta plan_workout_id från context.next_7_days. Servern returnerar en diff_id; appen visar en diff-kort som användaren godkänner. Vänta på TOOL_RESULT med ok:true från apply_plan_changes innan du bekräftar.
+- propose_workout_edit({ plan_workout_id och gärna workout_date, eller (workout_date + sort_order), changes: { is_rest?, activity_type?, label?, intensity_zone?, target_duration_minutes?, target_distance_km?, description? }, reason_sv }) — för enskilda pass-ändringar (t.ex. "byt vilodag till lätt 30 min", "korta måndagens pass till 45 min", "byt Z3 till Z2"). Använd när användaren ber om en specifik ändring av ETT pass eller när din proaktiva analys ger en enstaka tweak. Hämta plan_workout_id + workout_date från context.next_7_days. Om användaren säger en veckodag måste workout_date matcha den veckodagen; servern stoppar annars förslaget och returnerar kandidater. Servern returnerar en diff_id; appen visar ett diff-kort som användaren godkänner. Vänta på TOOL_RESULT med ok:true från apply_plan_changes innan du bekräftar.
 - log_workout(details) — logga ett genomfört pass åt användaren.
 - update_memory(fact_patch) — uppdatera coach_memory.facts (t.ex. niggles, motivators, race_targets).
 - predict_race_time(distance_km, target_date?) — Riegel-prognos på användarens senaste löppass. Cita alltid anchor-passet du fick tillbaka när du presenterar tiden, och nämn caveat om värme/bana.
@@ -121,8 +121,9 @@ Använd verktyg när det är rätt verktyg för jobbet. Annars svara direkt.
 
 Planerade dag-ändringar:
 - Om användaren säger "kör lördag som planerat", "behåll passet", "ingen ändring" eller liknande: kör INGET proposer-verktyg. Bekräfta bara kort att vi håller planen.
-- Om användaren ber om att ändra ett befintligt planerat pass på en dag ("gör lördagens pass till 18 km", "korta lördag", "byt måndag till lätt"): slå först upp passet via context.next_7_days eller get_workout(date), och kör sedan propose_workout_edit med plan_workout_id. Servern kan också förstå svenska veckodagar i workout_date, t.ex. "lördag", men plan_workout_id är säkrast.
-- Skriv aldrig "jag kan inte justera passet just nu" bara för att ett verktygsanrop misslyckas. Om propose_workout_edit returnerar recoverable/needs=workout_lookup: försök igen med get_workout(date) eller plan_workout_id. Om inget pass finns på dagen, säg specifikt "Jag hittar inget planerat pass på lördag" och erbjud att lägga ett förslag, inte ett vagt tekniskt fel.
+- Om användaren ber om att ändra ett befintligt planerat pass på en dag ("gör lördagens pass till 18 km", "korta lördag", "byt måndag till lätt"): slå först upp passet via context.next_7_days eller get_workout(date), och kör sedan propose_workout_edit med både plan_workout_id och workout_date från samma rad. Skicka aldrig ett id från en annan dag än den användaren nämnde.
+- Om propose_workout_edit returnerar plan_workout_date_conflict eller needs=use_candidate_plan_workout_id: använd candidates från TOOL_RESULT, välj kandidaten som matchar användarens dag/avsikt och kör propose_workout_edit igen med dess plan_workout_id. Fortsätt aldrig med selected_workout om den ligger på fel dag.
+- Skriv aldrig "jag kan inte justera passet just nu" bara för att ett verktygsanrop misslyckas. Om propose_workout_edit returnerar recoverable/needs=workout_lookup eller kandidater: försök igen med get_workout(date) eller kandidatens plan_workout_id. Om inget pass finns på dagen, säg specifikt "Jag hittar inget planerat pass på lördag" och erbjud att lägga ett förslag, inte ett vagt tekniskt fel.
 - När du redan vet vilken ändring du vill föreslå: kör propose_workout_edit direkt. Fråga inte "vill du att jag ska föreslå det?" — diff-kortet är själva bekräftelsen.
 
 Veckoavstämning (söndag): Om första meddelandet i tråden är ditt eget söndagsnudge "Söndag — dags för veckoavstämning" ansvarar du för att genomföra den i chatten — ersätter den gamla guiden. Arbetssätt:
@@ -290,6 +291,7 @@ interface ContextPack {
     label: string | null;
     intensity_zone: string | null;
     target_duration_minutes: number | null;
+    target_distance_km: number | null;
     is_rest: boolean;
     description: string | null;
   }>;
@@ -374,7 +376,7 @@ async function buildContextPack(
   let next7: ContextPack["next_7_days"] = [];
   if (activePlan) {
     const { data: pw } = await db.from("plan_workouts")
-      .select("id, workout_date, day_of_week, sort_order, activity_type, label, intensity_zone, target_duration_minutes, is_rest, description, plan_week_id")
+      .select("id, workout_date, day_of_week, sort_order, activity_type, label, intensity_zone, target_duration_minutes, target_distance_km, is_rest, description, plan_week_id")
       .gte("workout_date", todayStr)
       .lte("workout_date", in7)
       .order("workout_date", { ascending: true })
@@ -401,6 +403,7 @@ async function buildContextPack(
           label: r.label,
           intensity_zone: r.intensity_zone,
           target_duration_minutes: r.target_duration_minutes,
+          target_distance_km: r.target_distance_km,
           is_rest: r.is_rest,
           description: r.description,
         }));
@@ -736,6 +739,21 @@ async function getActivePlanScope(db: SupabaseClient, profileId: string): Promis
   };
 }
 
+function planWorkoutCandidate(row: PlanWorkout): Record<string, unknown> {
+  return {
+    plan_workout_id: row.id,
+    workout_date: row.workout_date,
+    day_of_week: row.day_of_week,
+    sort_order: row.sort_order ?? 0,
+    activity_type: row.activity_type,
+    label: row.label,
+    intensity_zone: row.intensity_zone,
+    target_duration_minutes: row.target_duration_minutes,
+    target_distance_km: row.target_distance_km,
+    is_rest: row.is_rest,
+  };
+}
+
 async function findActivePlanWorkoutsForDateLike(
   db: SupabaseClient,
   profileId: string,
@@ -773,10 +791,14 @@ async function findActivePlanWorkoutsForDateLike(
     const d = new Date(w.workout_date + "T00:00:00Z");
     return d.getUTCDay() === targetJsDay;
   });
+  const resolvedDate = matching[0]?.workout_date ?? null;
+  const nearestDateRows = resolvedDate
+    ? matching.filter((w) => w.workout_date === resolvedDate)
+    : [];
   return {
-    rows: matching,
-    resolvedDate: matching[0]?.workout_date ?? null,
-    error: matching.length ? undefined : "plan_workout_not_found_for_weekday",
+    rows: nearestDateRows,
+    resolvedDate,
+    error: nearestDateRows.length ? undefined : "plan_workout_not_found_for_weekday",
   };
 }
 
@@ -785,6 +807,8 @@ async function verifyPlanWorkoutAccess(
   profileId: string,
   row: PlanWorkout,
 ): Promise<boolean> {
+  const scope = await getActivePlanScope(db, profileId);
+  if (!scope.weekIds.includes(row.plan_week_id)) return false;
   const { data: planWeek } = await db.from("plan_weeks")
     .select("id, training_plans!inner(profile_id)")
     .eq("id", row.plan_week_id)
@@ -1018,9 +1042,14 @@ async function toolProposeWorkoutEdit(
   const planWorkoutId = typeof args.plan_workout_id === "string" ? args.plan_workout_id : null;
   const workoutDate = typeof args.workout_date === "string" ? args.workout_date : null;
   const sortOrderRaw = args.sort_order;
-  const sortOrder = (sortOrderRaw === undefined || sortOrderRaw === null)
-    ? 0
-    : Number(sortOrderRaw);
+  const hasSortOrder = sortOrderRaw !== undefined && sortOrderRaw !== null && sortOrderRaw !== "";
+  const sortOrder = hasSortOrder
+    ? Number(sortOrderRaw)
+    : null;
+  if (hasSortOrder && (!Number.isInteger(sortOrder) || (sortOrder as number) < 0)) {
+    return logProposeWorkoutEditFailure(profileId, args, "Invalid sort_order");
+  }
+  const requestedSortOrder = sortOrder as number | null;
   const reasonSv = typeof args.reason_sv === "string" && args.reason_sv.trim()
     ? args.reason_sv.trim().slice(0, 240)
     : "Justering";
@@ -1034,23 +1063,61 @@ async function toolProposeWorkoutEdit(
     return logProposeWorkoutEditFailure(profileId, args, "Need plan_workout_id or workout_date");
   }
 
-  // Resolve target row. Date-only lookups are scoped to the caller's active
-  // plan, and workout_date may be either ISO ("2026-04-25") or a Swedish
-  // weekday ("lördag"). This keeps the model from failing when the user says
-  // "lördagens pass" and avoids accidentally selecting rows outside the plan.
+  // Resolve target row. If both id and date are supplied, the date is treated
+  // as the user's intent and the id must belong to that same planned day.
   let row: PlanWorkout | null = null;
-  if (planWorkoutId) {
-    const { data } = await db.from("plan_workouts").select("*").eq("id", planWorkoutId).maybeSingle();
-    row = (data as PlanWorkout) || null;
-  } else if (workoutDate) {
+  let resolvedDate: string | null = null;
+  let resolvedRows: PlanWorkout[] = [];
+  if (workoutDate) {
     const resolved = await findActivePlanWorkoutsForDateLike(db, profileId, workoutDate);
+    resolvedDate = resolved.resolvedDate;
+    resolvedRows = resolved.rows;
     if (resolved.error && resolved.rows.length === 0) {
       return logProposeWorkoutEditFailure(profileId, args, resolved.error, {
         workout_date: workoutDate,
         resolved_date: resolved.resolvedDate,
+        candidates: [],
       });
     }
-    row = resolved.rows.find((r) => (r.sort_order ?? 0) === sortOrder) || resolved.rows[0] || null;
+  }
+  if (planWorkoutId) {
+    const { data } = await db.from("plan_workouts").select("*").eq("id", planWorkoutId).maybeSingle();
+    row = (data as PlanWorkout) || null;
+    if (row && workoutDate && !resolvedRows.some((candidate) => candidate.id === row?.id)) {
+      return logProposeWorkoutEditFailure(profileId, args, "plan_workout_date_conflict", {
+        workout_date: workoutDate,
+        resolved_date: resolvedDate,
+        selected_workout: planWorkoutCandidate(row),
+        candidates: resolvedRows.map(planWorkoutCandidate),
+        needs: "use_candidate_plan_workout_id",
+      });
+    }
+  } else if (workoutDate) {
+    if (requestedSortOrder !== null) {
+      row = resolvedRows.find((r) => (r.sort_order ?? 0) === requestedSortOrder) || null;
+      if (!row) {
+        return logProposeWorkoutEditFailure(profileId, args, "plan_workout_not_found_for_sort_order", {
+          workout_date: workoutDate,
+          resolved_date: resolvedDate,
+          sort_order: requestedSortOrder,
+          candidates: resolvedRows.map(planWorkoutCandidate),
+        });
+      }
+    } else {
+      const activeRows = resolvedRows.filter((r) => !r.is_rest);
+      if (activeRows.length === 1) {
+        row = activeRows[0];
+      } else if (activeRows.length > 1) {
+        return logProposeWorkoutEditFailure(profileId, args, "ambiguous_plan_workout_for_date", {
+          workout_date: workoutDate,
+          resolved_date: resolvedDate,
+          candidates: resolvedRows.map(planWorkoutCandidate),
+          needs: "plan_workout_id_or_sort_order",
+        });
+      } else {
+        row = resolvedRows.find((r) => (r.sort_order ?? 0) === 0) || resolvedRows[0] || null;
+      }
+    }
   }
   if (!row) {
     return logProposeWorkoutEditFailure(profileId, args, "plan_workout not found");
@@ -1108,18 +1175,29 @@ async function toolProposeWorkoutEdit(
       diff_id: diffId,
       changes: [{
         id: change.id,
+        plan_workout_id: row.id,
+        workout_date: row.workout_date,
+        sort_order: row.sort_order ?? 0,
         day_of_week: change.day_of_week,
         action: change.action,
         reason_sv: change.reason_sv,
-        current: row.is_rest
-          ? { is_rest: true, label: row.label, activity_type: row.activity_type, intensity_zone: row.intensity_zone, target_duration_minutes: row.target_duration_minutes }
-          : { label: row.label, activity_type: row.activity_type, intensity_zone: row.intensity_zone, target_duration_minutes: row.target_duration_minutes },
+        current: {
+          is_rest: row.is_rest,
+          label: row.label,
+          activity_type: row.activity_type,
+          intensity_zone: row.intensity_zone,
+          target_duration_minutes: row.target_duration_minutes,
+          target_distance_km: row.target_distance_km,
+          description: row.description,
+        },
         proposed: {
           is_rest: patch.is_rest ?? row.is_rest,
           label: patch.label ?? row.label,
           activity_type: patch.activity_type ?? row.activity_type,
           intensity_zone: patch.intensity_zone ?? row.intensity_zone,
           target_duration_minutes: patch.target_duration_minutes ?? row.target_duration_minutes,
+          target_distance_km: patch.target_distance_km ?? row.target_distance_km,
+          description: patch.description ?? row.description,
         },
       }],
       coach_note: reasonSv,

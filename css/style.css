@@ -4699,33 +4699,33 @@ body.chat-mode #view-coach { height: 100%; }
 /* Diff cards inside chat ────────────────────────────────────────── */
 /* Standalone card, left accent stripe instead of a tinted header. */
 .coach-diff {
-  margin-top: 14px;
-  margin-right: 16px;
+  margin-top: 12px;
+  margin-right: 12px;
   padding: 0;
-  border-radius: 10px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  box-shadow: inset 3px 0 0 var(--accent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-card) 88%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  box-shadow: 0 12px 30px rgba(0,0,0,0.18);
   white-space: normal;
   overflow: hidden;
-  max-width: 560px;
+  max-width: 620px;
 }
 .coach-diff-header {
   display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px 8px 16px;
-  background: transparent;
-  border-bottom: 1px solid color-mix(in srgb, var(--text) 6%, transparent);
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
 }
 .coach-diff-header-icon {
-  width: 22px; height: 22px; border-radius: 6px;
+  width: 26px; height: 26px; border-radius: 8px;
   display: inline-flex; align-items: center; justify-content: center;
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent);
+  background: var(--accent);
+  color: #fff;
   flex-shrink: 0;
 }
-.coach-diff-header-icon svg { width: 12px; height: 12px; }
+.coach-diff-header-icon svg { width: 14px; height: 14px; }
 .coach-diff-title {
-  font-size: 0.9rem; font-weight: 700; color: var(--text);
+  font-size: 0.94rem; font-weight: 750; color: var(--text);
   flex: 1;
   letter-spacing: -0.01em;
 }
@@ -4735,7 +4735,7 @@ body.chat-mode #view-coach { height: 100%; }
   padding: 2px 8px; border-radius: 999px;
   border: none;
 }
-.coach-diff-body { padding: 10px 12px 12px 14px; }
+.coach-diff-body { padding: 12px; }
 .coach-diff .cc-diff-list { margin-bottom: 0; gap: 6px; display: flex; flex-direction: column; }
 .coach-diff .cc-diff-card {
   padding: 8px 10px;
@@ -4753,12 +4753,82 @@ body.chat-mode #view-coach { height: 100%; }
 .coach-diff .cc-diff-current,
 .coach-diff .cc-diff-proposed { font-size: 0.86rem; gap: 6px; }
 .coach-diff .cc-diff-arrow { font-size: 0.8rem; }
-.coach-diff .cc-diff-reason { margin-top: 2px; font-size: 0.76rem; }
+.coach-diff .cc-diff-reason { margin-top: 8px; font-size: 0.8rem; color: var(--text-muted); line-height: 1.35; }
+.coach-diff .cc-diff-card--single {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+.coach-diff .cc-diff-card--single:hover { border-color: transparent; }
+.cc-edit-topline {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 10px;
+  font-size: 0.78rem; font-weight: 700; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.cc-edit-topline span:last-child {
+  text-transform: none; letter-spacing: 0; font-weight: 650;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+.cc-edit-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+.cc-edit-panel {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
+  border-radius: 12px;
+  padding: 11px;
+  background: color-mix(in srgb, var(--bg-card-hover) 70%, transparent);
+}
+.cc-edit-panel--proposed {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-card));
+}
+.cc-edit-label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 0.7rem; font-weight: 750; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.cc-edit-panel strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.96rem;
+  line-height: 1.25;
+  margin-bottom: 5px;
+}
+.cc-edit-meta {
+  min-height: 18px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+.cc-edit-desc {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+.cc-edit-panel .zone-badge { margin-top: 8px; }
+.cc-edit-arrow {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 1rem;
+}
 .coach-diff-actions {
   display: flex; justify-content: flex-end; gap: 8px;
-  padding: 8px 12px 10px;
+  padding: 10px 12px 12px;
   border-top: 1px solid color-mix(in srgb, var(--text) 6%, transparent);
-  background: transparent;
+  background: color-mix(in srgb, var(--bg) 34%, transparent);
   position: sticky; bottom: 0;
 }
 .coach-diff-actions .btn { font-size: 0.85rem; padding: 7px 14px; }
@@ -4974,6 +5044,9 @@ body.chat-mode #view-coach { height: 100%; }
   .coach-messages { padding: 14px 12px 10px; }
   .coach-composer { padding: 6px 8px max(10px, env(safe-area-inset-bottom)); }
   .coach-composer-inner { padding-left: 14px; gap: 6px; }
+  .coach-diff { margin-right: 0; max-width: 100%; }
+  .cc-edit-flow { grid-template-columns: 1fr; }
+  .cc-edit-arrow { transform: rotate(90deg); min-height: 18px; }
 
   .coach-drawer {
     width: 100%;

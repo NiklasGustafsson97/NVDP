@@ -13983,19 +13983,81 @@ function _coachDayLabel(dow, isMove, fromDay, toDay) {
   return dayNames[dow] || '';
 }
 
+function _coachFormatPlanDate(iso, fallbackDow) {
+  const dayNames = ['Måndag', 'Tisdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lördag', 'Söndag'];
+  if (!iso) return dayNames[fallbackDow] || '';
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return dayNames[fallbackDow] || iso;
+  const mondayFirst = (d.getUTCDay() + 6) % 7;
+  const date = d.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  return `${dayNames[mondayFirst]} ${date}`;
+}
+
+function _coachWorkoutTitle(w) {
+  if (!w || w.is_rest) return 'Vila';
+  return (w.label || w.activity_type || 'Pass').trim();
+}
+
+function _coachWorkoutMeta(w) {
+  if (!w || w.is_rest) return '';
+  const parts = [];
+  if (w.target_duration_minutes) parts.push(`${w.target_duration_minutes} min`);
+  if (w.target_distance_km) parts.push(`${Number(w.target_distance_km).toLocaleString('sv-SE', { maximumFractionDigits: 1 })} km`);
+  if (w.activity_type) parts.push(w.activity_type);
+  return parts.join(' · ');
+}
+
+function _coachRenderZoneBadge(zone) {
+  return zone ? `<span class="zone-badge zone-${escapeHTML(zone)}">${escapeHTML(zone)}</span>` : '';
+}
+
 function _coachRenderDiffCard(diff, decisionState) {
   const changes = Array.isArray(diff.changes) ? diff.changes : [];
   if (!changes.length) return '';
   const locked = decisionState === 'applied' || decisionState === 'declined';
+  const isSingleEdit = changes.length === 1 && changes[0].action === 'edit_session';
   const items = changes.map(c => {
     const cur = c.current || {};
     const prop = c.proposed || {};
     const isMove = c.action === 'move_session';
     const dayLabel = _coachDayLabel(c.day_of_week, isMove, c.from_day, c.to_day);
+    if (isSingleEdit) {
+      const dateLabel = _coachFormatPlanDate(c.workout_date, c.day_of_week);
+      const slotLabel = Number.isInteger(c.sort_order) && c.sort_order > 0 ? `Pass ${c.sort_order + 1}` : 'Planerat pass';
+      const curMeta = _coachWorkoutMeta(cur);
+      const propMeta = _coachWorkoutMeta(prop);
+      const curDesc = cur.description ? `<div class="cc-edit-desc">${escapeHTML(cur.description)}</div>` : '';
+      const propDesc = prop.description ? `<div class="cc-edit-desc">${escapeHTML(prop.description)}</div>` : '';
+      return `
+        <div class="cc-diff-card cc-diff-card--single" data-change-id="${escapeHTML(c.id)}">
+          <div class="cc-edit-topline">
+            <span>${escapeHTML(dateLabel)}</span>
+            <span>${escapeHTML(slotLabel)}</span>
+          </div>
+          <div class="cc-edit-flow">
+            <div class="cc-edit-panel">
+              <span class="cc-edit-label">Nu</span>
+              <strong>${escapeHTML(_coachWorkoutTitle(cur))}</strong>
+              <div class="cc-edit-meta">${curMeta ? escapeHTML(curMeta) : 'Ingen belastning'}</div>
+              ${curDesc}
+              ${_coachRenderZoneBadge(cur.intensity_zone)}
+            </div>
+            <div class="cc-edit-arrow" aria-hidden="true">→</div>
+            <div class="cc-edit-panel cc-edit-panel--proposed">
+              <span class="cc-edit-label">Förslag</span>
+              <strong>${escapeHTML(_coachWorkoutTitle(prop))}</strong>
+              <div class="cc-edit-meta">${propMeta ? escapeHTML(propMeta) : 'Ingen belastning'}</div>
+              ${propDesc}
+              ${_coachRenderZoneBadge(prop.intensity_zone)}
+            </div>
+          </div>
+          <div class="cc-diff-reason">${escapeHTML(c.reason_sv || '')}</div>
+        </div>`;
+    }
     const curLabel = cur.is_rest ? 'Vila' : `${cur.label || cur.activity_type || ''}${cur.target_duration_minutes ? ' ' + cur.target_duration_minutes + ' min' : ''}`.trim();
     const propLabel = prop.is_rest ? 'Vila' : `${prop.label || prop.activity_type || ''}${prop.target_duration_minutes ? ' ' + prop.target_duration_minutes + ' min' : ''}`.trim();
-    const curZone = cur.intensity_zone ? `<span class="zone-badge zone-${escapeHTML(cur.intensity_zone)}">${escapeHTML(cur.intensity_zone)}</span>` : '';
-    const propZone = prop.intensity_zone ? `<span class="zone-badge zone-${escapeHTML(prop.intensity_zone)}">${escapeHTML(prop.intensity_zone)}</span>` : '';
+    const curZone = _coachRenderZoneBadge(cur.intensity_zone);
+    const propZone = _coachRenderZoneBadge(prop.intensity_zone);
     const disabled = locked ? 'disabled' : '';
     const checked = locked ? (decisionState === 'applied' ? 'checked' : '') : 'checked';
     return `
@@ -14015,9 +14077,8 @@ function _coachRenderDiffCard(diff, decisionState) {
 
   const headerIcon = `<span class="coach-diff-header-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>`;
   const countLabel = `${changes.length} ${changes.length === 1 ? 'förslag' : 'förslag'}`;
-  const isSingleEdit = changes.length === 1 && changes[0].action === 'edit_session';
   const headerTitle = isSingleEdit
-    ? 'Förslag på en justering'
+    ? 'Bekräfta ändring i passet'
     : 'Förslag på ändringar i nästa vecka';
 
   let footer = '';
@@ -14248,7 +14309,10 @@ async function applyCoachDiff(diffId) {
   const card = wrap?.querySelector(`[data-coach-diff="${CSS.escape(diffId)}"]`);
   const acceptedIds = card
     ? [...card.querySelectorAll('.cc-diff-card')]
-        .filter(el => el.querySelector('.cc-diff-check')?.checked)
+        .filter(el => {
+          const checkbox = el.querySelector('.cc-diff-check');
+          return !checkbox || checkbox.checked;
+        })
         .map(el => el.dataset.changeId)
     : [];
   if (acceptedIds.length === 0) {
