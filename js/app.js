@@ -4327,10 +4327,21 @@ function _renderPlanCard(planWo, opts) {
     : '';
 
   const editable = _schemaEditMode && planWo && !planWo.is_rest;
+  const invitePlan = planWo ? {
+    plan_workout_id: planWo.id,
+    activity_type: planWo.activity_type,
+    label: planWo.label,
+    description: planWo.description,
+    target_duration_minutes: planWo.target_duration_minutes,
+    target_distance_km: planWo.target_distance_km,
+    intensity_zone: planWo.intensity_zone,
+    is_rest: planWo.is_rest,
+    day_of_week: planWo.day_of_week,
+  } : {};
   const clickAttr = editable
     ? ` onclick="openPlanWorkoutEdit(${escapeHTML(JSON.stringify(planWo)).replace(/"/g, '&quot;')})" style="cursor:pointer;"`
     : (isOwnSchema && (isFuture || isToday) && !planWo.is_rest
-        ? ` onclick="openPlanModal('${dayStr}', ${JSON.stringify({ label: planWo.label, description: planWo.description, is_rest: planWo.is_rest, day_of_week: planWo.day_of_week, plan_workout_id: planWo.id }).replace(/"/g, '&quot;')}, '${DAY_NAMES_FULL[dayOfWeek]}')" style="cursor:pointer;"`
+        ? ` onclick="openPlanModal('${dayStr}', ${JSON.stringify(invitePlan).replace(/"/g, '&quot;')}, '${DAY_NAMES_FULL[dayOfWeek]}')" style="cursor:pointer;"`
         : '');
 
   const isAssessmentWorkout = !planWo.is_rest && typeof planWo.label === 'string' && /^Bedömning/i.test(planWo.label);
@@ -4611,6 +4622,24 @@ let _pendingInvitePlan = null;
 let _inviteTargetDate = null;
 let _inviteSelectedUser = null;
 
+function _clearInviteState() {
+  _pendingInvitePlan = null;
+  _inviteTargetDate = null;
+  _inviteSelectedUser = null;
+}
+
+function _inviteDuration(plan) {
+  return Number(plan?.target_duration_minutes) || parseDuration(plan?.description) || '';
+}
+
+function _inviteIntensity(plan) {
+  return plan?.intensity_zone || parseIntensity(plan?.description || plan?.label || '');
+}
+
+function _inviteActivity(plan) {
+  return plan?.activity_type || (plan?.label ? stripDayPrefix(plan.label) : '');
+}
+
 async function fetchInvitationsForWeek(profileId, startDate, endDate) {
   if (!profileId) return [];
   try {
@@ -4638,6 +4667,12 @@ function openPlanModal(dateStr, plan, dayName) {
   if (plan && plan.label) {
     body += `<div class="modal-detail-row"><span class="mdr-label">Aktivitet</span><span class="mdr-value">${escapeHTML(stripDayPrefix(plan.label))}</span></div>`;
   }
+  if (plan && plan.target_duration_minutes) {
+    body += `<div class="modal-detail-row"><span class="mdr-label">Tid</span><span class="mdr-value">${escapeHTML(String(plan.target_duration_minutes))} min</span></div>`;
+  }
+  if (plan && plan.intensity_zone) {
+    body += `<div class="modal-detail-row"><span class="mdr-label">Zon</span><span class="mdr-value">${escapeHTML(plan.intensity_zone)}</span></div>`;
+  }
   if (plan && plan.description) {
     body += `<div class="modal-detail-row"><span class="mdr-label">Beskrivning</span><span class="mdr-value">${escapeHTML(plan.description)}</span></div>`;
   }
@@ -4655,15 +4690,18 @@ function openPlanModal(dateStr, plan, dayName) {
   document.getElementById('plan-modal').classList.remove('hidden');
 }
 
-function closePlanModal() {
+function closePlanModal(options = {}) {
   document.getElementById('plan-modal').classList.add('hidden');
-  _pendingInvitePlan = null;
-  _inviteTargetDate = null;
+  if (!options.preserveInvite) _clearInviteState();
 }
 
 function openInvitePicker() {
   try {
-    closePlanModal();
+    if (!_inviteTargetDate || !_pendingInvitePlan) {
+      showAlertModal('Saknar pass', 'Öppna ett planerat pass och välj Bjud in igen.');
+      return;
+    }
+    closePlanModal({ preserveInvite: true });
     _inviteSelectedUser = null;
     document.getElementById('invite-form').classList.add('hidden');
     document.getElementById('invite-search').value = '';
@@ -4679,7 +4717,7 @@ function openInvitePicker() {
 
 function closeInvitePicker() {
   document.getElementById('invite-picker').classList.add('hidden');
-  _inviteSelectedUser = null;
+  _clearInviteState();
 }
 
 function filterInviteUsers() {
@@ -4719,10 +4757,9 @@ function selectInviteUser(userId) {
   document.getElementById('invite-search').classList.add('hidden');
 
   const plan = _pendingInvitePlan || {};
-  const label = plan.label ? stripDayPrefix(plan.label) : '';
-  document.getElementById('invite-activity').value = label || '';
-  document.getElementById('invite-duration').value = parseDuration(plan.description) || '';
-  document.getElementById('invite-intensity').value = parseIntensity(plan.description || plan.label) || '';
+  document.getElementById('invite-activity').value = _inviteActivity(plan) || '';
+  document.getElementById('invite-duration').value = _inviteDuration(plan);
+  document.getElementById('invite-intensity').value = _inviteIntensity(plan) || '';
   document.getElementById('invite-desc').value = plan.description || '';
   document.getElementById('invite-form').classList.remove('hidden');
 }
@@ -4740,7 +4777,10 @@ function parseIntensity(text) {
 }
 
 async function confirmSendInvitation() {
-  if (!_inviteSelectedUser || !_inviteTargetDate) return;
+  if (!_inviteSelectedUser || !_inviteTargetDate) {
+    await showAlertModal('Saknar val', 'Välj mottagare och pass innan du skickar inbjudan.');
+    return;
+  }
 
   const activity = document.getElementById('invite-activity').value.trim();
   if (!activity) {
@@ -4751,18 +4791,25 @@ async function confirmSendInvitation() {
   const dur = parseInt(document.getElementById('invite-duration').value) || null;
   const intensity = document.getElementById('invite-intensity').value.trim() || null;
   const desc = document.getElementById('invite-desc').value.trim() || null;
+  const inviteeName = _inviteSelectedUser.name;
+  const plan = _pendingInvitePlan || {};
 
   try {
-    const { error } = await sb.from('workout_invitations').insert({
+    const { data: invitation, error } = await sb.from('workout_invitations').insert({
       sender_id: currentProfile.id,
       receiver_id: _inviteSelectedUser.id,
       workout_date: _inviteTargetDate,
       activity_type: activity,
+      label: plan.label || activity,
       duration_minutes: dur,
+      target_duration_minutes: dur,
+      target_distance_km: plan.target_distance_km || null,
       intensity: intensity,
+      intensity_zone: intensity,
       description: desc,
+      sender_plan_workout_id: plan.plan_workout_id || null,
       status: 'pending'
-    });
+    }).select('id').single();
     if (error) throw error;
 
     const dateObj = new Date(_inviteTargetDate);
@@ -4772,11 +4819,11 @@ async function confirmSendInvitation() {
       receiver_id: _inviteSelectedUser.id,
       message: `${currentProfile.name} bjöd in dig till ${activity} den ${dateLabel}`,
       type: 'invitation',
-      reference_id: null
+      reference_id: invitation.id
     });
 
     closeInvitePicker();
-    await showAlertModal('Skickat', `Inbjudan skickad till ${_inviteSelectedUser.name}!`);
+    await showAlertModal('Skickat', `Inbjudan skickad till ${inviteeName}!`);
     loadSchema();
   } catch (e) {
     console.error('Send invitation error:', e);
@@ -4788,47 +4835,78 @@ async function confirmSendInvitation() {
   }
 }
 
-async function respondToInvitation(invitationId, accept) {
-  const newStatus = accept ? 'accepted' : 'declined';
-  try {
-    const { data: inv, error: fetchErr } = await sb.from('workout_invitations')
-      .select('*').eq('id', invitationId).single();
-    if (fetchErr) throw fetchErr;
+function _formatPlanWorkoutChoice(wo) {
+  const label = wo.label || wo.activity_type || 'Pass';
+  const dur = wo.target_duration_minutes ? ` · ${wo.target_duration_minutes} min` : '';
+  const zone = wo.intensity_zone ? ` · ${wo.intensity_zone}` : '';
+  return `${label}${dur}${zone}`;
+}
 
-    const { error } = await sb.from('workout_invitations')
-      .update({ status: newStatus }).eq('id', invitationId);
-    if (error) throw error;
+async function _fetchMyPlanWorkoutsForDate(dateStr) {
+  const activePlan = await ensureActivePlanLoaded(currentProfile.id);
+  if (!activePlan) return [];
+  const rows = await fetchPlanWorkoutsByDate(activePlan.id, dateStr, dateStr);
+  return rows
+    .slice()
+    .sort((a, b) => (a.day_of_week - b.day_of_week) || ((a.sort_order ?? 0) - (b.sort_order ?? 0)));
+}
 
-    const sender = allProfiles.find(p => p.id === inv.sender_id);
-    const senderName = sender ? sender.name : 'Någon';
-    const receiverName = currentProfile.name;
-    const dateObj = new Date(inv.workout_date);
+function showInvitationAcceptChoice(invitation, planWorkouts) {
+  return new Promise(resolve => {
+    _confirmResolve = resolve;
+    const dateObj = new Date(invitation.workout_date);
     const dateLabel = `${dateObj.getDate()}/${dateObj.getMonth() + 1}`;
+    const invitedLabel = invitation.label || invitation.activity_type || 'passet';
 
-    if (accept) {
-      await sb.from('nudges').insert({
-        sender_id: currentProfile.id,
-        receiver_id: inv.sender_id,
-        message: `${receiverName} accepterade din inbjudan till ${inv.activity_type} den ${dateLabel}`,
-        type: 'invitation_accepted',
-        reference_id: invitationId
-      });
-    } else {
-      await sb.from('nudges').insert({
-        sender_id: currentProfile.id,
-        receiver_id: inv.sender_id,
-        message: `${receiverName} avböjde din inbjudan till ${inv.activity_type} den ${dateLabel}`,
-        type: 'invitation_declined',
-        reference_id: invitationId
-      });
+    document.getElementById('confirm-title').textContent = 'Acceptera inbjudan';
+    document.getElementById('confirm-message').textContent =
+      `Vill du lägga in ${invitedLabel} den ${dateLabel}? Välj vilket pass som ska ersättas, eller lägg till som extra pass.`;
+
+    const replaceButtons = (planWorkouts || []).map(wo => `
+      <button class="btn btn-outline btn-sm" onclick="closeConfirmModal({ replace_plan_workout_id: '${wo.id}' })">
+        Ersätt: ${escapeHTML(_formatPlanWorkoutChoice(wo))}
+      </button>`).join('');
+
+    document.getElementById('confirm-actions').innerHTML = `
+      <button class="btn btn-ghost btn-sm" onclick="closeConfirmModal(null)">Avbryt</button>
+      ${replaceButtons}
+      <button class="btn btn-primary btn-sm" onclick="closeConfirmModal({ add_as_extra: true })">Lägg till som extra pass</button>`;
+    document.getElementById('confirm-modal').classList.remove('hidden');
+  });
+}
+
+async function respondToInvitation(invitationId, accept, choice = null) {
+  try {
+    const session = (await sb.auth.getSession()).data.session;
+    if (!session) throw new Error('not logged in');
+
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/respond-to-invitation`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': SUPABASE_ANON_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        invitation_id: invitationId,
+        accept,
+        ...(choice || {}),
+      }),
+    });
+
+    const result = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(result.error || `HTTP ${resp.status}`);
     }
 
     await loadNudges();
     updateNudgeBadge();
-    if (currentView === 'dashboard') loadSchema();
+    await loadSchema();
+    return result;
   } catch (e) {
     console.error('Invitation response error:', e);
-    await showAlertModal('Fel', 'Kunde inte svara på inbjudan.');
+    await showAlertModal('Fel', 'Kunde inte svara på inbjudan: ' + (e.message || 'Försök igen.'));
+    return null;
   }
 }
 
@@ -9626,14 +9704,17 @@ async function loadNudges() {
       return;
     }
 
+    let pendingInvs = [];
     let pendingInvIds = [];
     const invitationNudges = nudges.filter(n => n.type === 'invitation');
     if (invitationNudges.length > 0) {
       const { data: invs } = await sb.from('workout_invitations')
         .select('*')
         .eq('receiver_id', currentProfile.id)
-        .eq('status', 'pending');
-      pendingInvIds = (invs || []).map(inv => inv.id);
+        .eq('status', 'pending')
+        .order('workout_date', { ascending: true });
+      pendingInvs = invs || [];
+      pendingInvIds = pendingInvs.map(inv => inv.id);
     }
 
     const senderProfiles = {};
@@ -9649,11 +9730,13 @@ async function loadNudges() {
       let actions = '';
       if (nType === 'invitation') {
         icon = '📩';
-        const hasPending = invitationNudges.length > 0;
-        if (hasPending) {
+        const invitationId = (n.reference_id && pendingInvIds.includes(n.reference_id))
+          ? n.reference_id
+          : pendingInvs.find(inv => inv.sender_id === n.sender_id)?.id;
+        if (invitationId) {
           actions = `<div class="nudge-actions">
-            <button class="btn btn-sm invite-accept-btn" onclick="event.stopPropagation();acceptInviteFromNudge('${escapeHTML(n.sender_id)}', '${escapeHTML(n.id)}')">Acceptera</button>
-            <button class="btn btn-sm invite-decline-btn" onclick="event.stopPropagation();declineInviteFromNudge('${escapeHTML(n.sender_id)}', '${escapeHTML(n.id)}')">Avböj</button>
+            <button class="btn btn-sm invite-accept-btn" onclick="event.stopPropagation();acceptInviteFromNudge('${escapeHTML(invitationId)}', '${escapeHTML(n.id)}')">Acceptera</button>
+            <button class="btn btn-sm invite-decline-btn" onclick="event.stopPropagation();declineInviteFromNudge('${escapeHTML(invitationId)}', '${escapeHTML(n.id)}')">Avböj</button>
           </div>`;
         }
       } else if (nType === 'invitation_accepted') {
@@ -9683,45 +9766,55 @@ async function loadNudges() {
   }
 }
 
-async function acceptInviteFromNudge(senderId, nudgeId) {
+async function acceptInviteFromNudge(invitationId, _nudgeId) {
   try {
-    const { data: invs } = await sb.from('workout_invitations')
+    const { data: inv, error } = await sb.from('workout_invitations')
       .select('*')
-      .eq('sender_id', senderId)
+      .eq('id', invitationId)
       .eq('receiver_id', currentProfile.id)
       .eq('status', 'pending')
-      .order('workout_date', { ascending: true })
-      .limit(1);
+      .single();
 
-    if (!invs || invs.length === 0) {
+    if (error || !inv) {
       await showAlertModal('Hm', 'Hittade ingen väntande inbjudan.');
       return;
     }
-    await respondToInvitation(invs[0].id, true);
-    await showAlertModal('Accepterat', `Du har accepterat inbjudan till ${invs[0].activity_type}!`);
+
+    const planWorkouts = await _fetchMyPlanWorkoutsForDate(inv.workout_date);
+    const choice = await showInvitationAcceptChoice(inv, planWorkouts);
+    if (!choice) return;
+
+    const result = await respondToInvitation(inv.id, true, choice);
+    if (result) {
+      const msg = result.plan_action === 'added'
+        ? `Du har lagt till ${inv.activity_type} som extra pass.`
+        : `Du har accepterat inbjudan till ${inv.activity_type}.`;
+      await showAlertModal('Accepterat', msg);
+    }
   } catch (e) {
     console.error('Accept invite error:', e);
+    await showAlertModal('Fel', 'Kunde inte acceptera inbjudan.');
   }
 }
 
-async function declineInviteFromNudge(senderId, nudgeId) {
+async function declineInviteFromNudge(invitationId, _nudgeId) {
   try {
-    const { data: invs } = await sb.from('workout_invitations')
+    const { data: inv, error } = await sb.from('workout_invitations')
       .select('*')
-      .eq('sender_id', senderId)
+      .eq('id', invitationId)
       .eq('receiver_id', currentProfile.id)
       .eq('status', 'pending')
-      .order('workout_date', { ascending: true })
-      .limit(1);
+      .single();
 
-    if (!invs || invs.length === 0) {
+    if (error || !inv) {
       await showAlertModal('Hm', 'Hittade ingen väntande inbjudan.');
       return;
     }
-    await respondToInvitation(invs[0].id, false);
-    await showAlertModal('Avböjt', 'Inbjudan avböjd.');
+    const result = await respondToInvitation(inv.id, false);
+    if (result) await showAlertModal('Avböjt', 'Inbjudan avböjd.');
   } catch (e) {
     console.error('Decline invite error:', e);
+    await showAlertModal('Fel', 'Kunde inte avböja inbjudan.');
   }
 }
 

@@ -143,6 +143,9 @@ jobs:
       - name: Deploy swap-plan-days
         run: supabase functions deploy swap-plan-days --no-verify-jwt
 
+      - name: Deploy respond-to-invitation
+        run: supabase functions deploy respond-to-invitation --no-verify-jwt
+
       # ── Drift check: every function with an index.ts MUST be deployed by
       #    one of the steps above. If you add a new function, add a deploy
       #    step for it (or this job fails on next push).
