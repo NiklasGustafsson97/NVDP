@@ -1004,49 +1004,70 @@ select option { background: var(--surface-modal); color: var(--text); }
 
 /* ── Schema Cards ── */
 .sr-card {
-  display: flex; align-items: flex-start; gap: 12px;
-  padding: 14px 16px; border-radius: var(--radius);
-  border: 1px solid var(--border); margin-bottom: 6px;
-  background: color-mix(in srgb, var(--bg-card) 78%, var(--bg-input)); transition: all 0.15s;
+  display: flex; align-items: stretch; gap: 14px;
+  padding: 16px; border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, rgba(255,255,255,0.14));
+  margin-bottom: 8px;
+  background:
+    radial-gradient(circle at 0 0, rgba(var(--color-primary-rgb), 0.07), transparent 34%),
+    color-mix(in srgb, var(--bg-card) 76%, var(--bg-input));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
+  transition: transform 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.sr-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(var(--color-primary-rgb), 0.24);
+  background:
+    radial-gradient(circle at 0 0, rgba(var(--color-primary-rgb), 0.1), transparent 34%),
+    color-mix(in srgb, var(--bg-card-hover) 72%, var(--bg-input));
 }
 .sr-card.sr-today {
-  border-color: rgba(var(--color-primary-rgb), 0.45);
-  background: rgba(var(--color-primary-rgb), 0.08);
-  box-shadow: 0 0 0 1px rgba(var(--color-primary-rgb), 0.15);
+  border-color: rgba(var(--color-primary-rgb), 0.42);
+  background:
+    radial-gradient(circle at 0 0, rgba(var(--color-primary-rgb), 0.16), transparent 38%),
+    color-mix(in srgb, var(--bg-card) 72%, rgba(var(--color-primary-rgb), 0.13));
+  box-shadow: 0 0 0 1px rgba(var(--color-primary-rgb), 0.13), 0 14px 34px rgba(0,0,0,0.16);
 }
 .sr-card.sr-rest {
   opacity: 1;
-  background: rgba(255,255,255,0.045);
+  background:
+    radial-gradient(circle at 0 0, rgba(255,255,255,0.045), transparent 34%),
+    color-mix(in srgb, var(--bg-card) 70%, var(--bg-input));
 }
 .sr-card.sr-future { opacity: 1; }
-.sr-card.sr-done { border-left: 3px solid var(--green); }
-.sr-card.sr-missed { border-left: 3px solid var(--red); }
+.sr-card.sr-done { box-shadow: inset 3px 0 0 rgba(var(--color-success-rgb), 0.75), inset 0 1px 0 rgba(255,255,255,0.025); }
+.sr-card.sr-missed { box-shadow: inset 3px 0 0 rgba(var(--color-danger-rgb), 0.78), inset 0 1px 0 rgba(255,255,255,0.025); }
 
 .sr-left {
-  width: 36px; flex-shrink: 0; text-align: center;
-  padding-top: 2px;
+  width: 64px; flex-shrink: 0; text-align: left;
+  padding: 3px 12px 3px 0;
+  border-right: 1px solid var(--border);
 }
-.sr-day { font-weight: 700; font-size: 0.82rem; color: var(--text); }
+.sr-day {
+  font-weight: 850; font-size: 0.92rem; line-height: 1.12;
+  color: var(--text); text-transform: capitalize;
+}
 .sr-today .sr-day { color: var(--accent); }
-.sr-date { font-size: 0.62rem; color: var(--text-dim); margin-top: 2px; }
+.sr-date { font-size: 0.68rem; font-weight: 700; color: var(--text-dim); margin-top: 4px; }
 
 .sr-main { flex: 1; min-width: 0; }
 .sr-plan-label {
-  font-size: 0.85rem; font-weight: 700; color: var(--text);
+  font-size: 0.88rem; font-weight: 850; color: var(--text);
   margin-bottom: 2px; display: flex; align-items: center;
-  gap: 6px; flex-wrap: wrap; line-height: 1.3;
+  gap: 6px; flex-wrap: wrap; line-height: 1.25;
 }
 .sr-plan-desc {
-  font-size: 0.76rem; color: var(--text-dim); line-height: 1.5;
+  font-size: 0.78rem; color: var(--text-muted); line-height: 1.42;
   margin-top: 3px;
 }
 .sr-plan-text { font-size: 0.85rem; color: var(--text); }
 .sr-target {
-  font-size: 0.68rem; color: var(--text-dim); font-weight: 500;
-  background: rgba(255,255,255,0.04); padding: 2px 8px;
-  border-radius: 8px;
+  font-size: 0.68rem; color: var(--text); font-weight: 800;
+  background: rgba(255,255,255,0.065); padding: 3px 8px;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 999px;
 }
-.sr-rest-label { font-style: italic; color: var(--text-dim); font-size: 0.82rem; }
+.sr-rest-label { font-style: normal; color: var(--text-muted); font-size: 0.84rem; }
 .sr-km-badge {
   font-size: 0.68rem; font-weight: 600; color: var(--accent);
   background: rgba(var(--color-primary-rgb), 0.1); padding: 2px 8px; border-radius: 10px;
@@ -1092,7 +1113,7 @@ select option { background: var(--surface-modal); color: var(--text); }
  * get squeezed unreadable. */
 .sr-zones {
   display: grid;
-  grid-template-columns: 3fr 1fr;
+  grid-template-columns: minmax(0, 1.25fr) minmax(220px, 0.85fr);
   gap: 12px;
   align-items: start;
   width: 100%;
@@ -1101,17 +1122,33 @@ select option { background: var(--surface-modal); color: var(--text); }
 .sr-actual-zone {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
   min-height: 40px;
+  min-width: 0;
 }
 .sr-actual-zone {
-  border-left: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-left: 1px solid color-mix(in srgb, var(--border) 88%, rgba(255,255,255,0.14));
   padding-left: 12px;
 }
 .sr-actual-zone--empty { display: none; }
 .sr-zones:has(.sr-actual-zone--empty) { grid-template-columns: 1fr; }
 
 @media (max-width: 600px) {
+  .sr-card {
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+  }
+  .sr-left {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 0 0 10px;
+  }
+  .sr-date { margin-top: 0; }
   .sr-zones,
   .sr-zones:has(.sr-actual-zone--empty) {
     grid-template-columns: 1fr;
@@ -1125,41 +1162,61 @@ select option { background: var(--surface-modal); color: var(--text); }
   }
 }
 .sr-zone-label {
-  font-size: 0.6rem;
-  font-weight: 700;
+  font-size: 0.62rem;
+  font-weight: 850;
   color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.6px;
-  margin-top: 4px;
-  margin-bottom: 1px;
+  letter-spacing: 0.65px;
+  margin: 0 0 1px;
+}
+.sr-zone-label--plan {
+  color: color-mix(in srgb, var(--text-dim) 86%, var(--accent));
 }
 .sr-pass-empty {
-  font-size: 0.78rem;
-  color: var(--text-dim);
-  font-style: italic;
-  padding: 4px 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-style: normal;
+  padding: 11px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.025);
 }
 .sr-pass-card {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.065);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  transition: background 0.15s, border-color 0.15s;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, rgba(255,255,255,0.14));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  transition: transform 0.15s, background 0.15s, border-color 0.15s;
+}
+[data-theme="light"] .sr-pass-card { background: rgba(255,255,255,0.72); }
+.sr-pass-card[onclick]:hover,
+.sr-pass-card[style*="cursor:pointer"]:hover {
+  transform: translateY(-1px);
+  border-color: rgba(var(--color-primary-rgb), 0.35);
+  background: rgba(var(--color-primary-rgb), 0.08);
 }
 .sr-pass-card .sr-pass-body {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 .sr-pass-card.sr-draggable .sr-pass-body { padding-right: 4px; }
+.sr-pass-icon {
+  width: 30px; height: 30px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 9px;
+  background: rgba(255,255,255,0.08);
+  font-size: 0.95rem;
+}
 .sr-pass-actual {
-  background: rgba(var(--color-success-rgb), 0.10);
-  border-color: rgba(var(--color-success-rgb), 0.26);
+  background: rgba(var(--color-success-rgb), 0.075);
+  border-color: rgba(var(--color-success-rgb), 0.22);
 }
 .sr-pass-actual:hover { background: rgba(var(--color-success-rgb), 0.14); }
 .sr-pass-shared {
@@ -1171,6 +1228,7 @@ select option { background: var(--surface-modal); color: var(--text); }
   border-style: dashed;
   border-color: rgba(255, 255, 255, 0.14);
 }
+.sr-pass-rest .sr-pass-icon { background: rgba(255,255,255,0.055); }
 
 /* Status pills shown inside each plan-card / actual-card body. */
 .sr-pill {
@@ -1209,7 +1267,8 @@ select option { background: var(--surface-modal); color: var(--text); }
 .sr-invite-row { margin-top: 4px; }
 
 @media (max-width: 600px) {
-  .sr-pass-card { padding: 7px 8px; }
+  .sr-pass-card { padding: 10px; }
+  .sr-pass-icon { width: 28px; height: 28px; border-radius: 8px; }
   .sr-zone-label { font-size: 0.56rem; }
 }
 

@@ -4064,8 +4064,10 @@ function _renderPlanCard(planWo, opts) {
   const dndAttrs = canDrag
     ? ` data-day-of-week="${dayOfWeek}" data-plan-workout-id="${planWo.id}" data-sort-order="${planWo.sort_order ?? 0}"`
     : ` data-day-of-week="${dayOfWeek}" data-sort-order="${planWo.sort_order ?? 0}"`;
+  const icon = planWo.is_rest ? activityEmoji('Vila') : activityEmoji(planWo.activity_type);
 
   return `<div class="sr-pass-card sr-pass-plan${canDrag ? ' sr-draggable' : ''}${planWo.is_rest ? ' sr-pass-rest' : ''}${isAssessmentWorkout ? ' sr-pass-assessment' : ''}"${dndAttrs}${clickAttr}>
+    <div class="sr-pass-icon">${icon}</div>
     <div class="sr-pass-body">${body}${statusPill || ''}</div>
     ${dragHandle}
   </div>`;
@@ -4119,7 +4121,7 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
     // Build PLAN zone — one card per plan_workout (or a placeholder).
     const planCardsHtml = dayPlans.length === 0
       ? (acceptedInv
-          ? `<div class="sr-pass-card sr-pass-shared"><div class="sr-pass-body">${(() => {
+          ? `<div class="sr-pass-card sr-pass-shared"><div class="sr-pass-icon">&#128101;</div><div class="sr-pass-body">${(() => {
               const partnerId = acceptedInv.sender_id === profileId ? acceptedInv.receiver_id : acceptedInv.sender_id;
               const partner = allProfiles.find(p => p.id === partnerId);
               const initials = partner ? partner.name.split(' ').map(n => n[0]).join('').toUpperCase() : '?';
@@ -4155,6 +4157,7 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
           const isExtra = !loggedMatched.has(w.id) && nonRestPlans.length > 0;
           const extraPill = isExtra ? '<span class="sr-pill sr-pill--extra">Extra</span>' : '';
           return `<div class="sr-pass-card sr-pass-actual" onclick='openWorkoutModal(${JSON.stringify(w).replace(/'/g, "&#39;")})' style="cursor:pointer;">
+            <div class="sr-pass-icon">${activityEmoji(w.activity_type)}</div>
             <div class="sr-pass-body">${buildWorkoutBody(w)}${extraPill}</div>
           </div>`;
         }).join('');
@@ -4173,6 +4176,7 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
       <div class="sr-main">
         <div class="sr-zones">
           <div class="sr-plan-zone" data-day-of-week="${i}">
+            <div class="sr-zone-label sr-zone-label--plan">Planerat</div>
             ${planCardsHtml}
           </div>
           <div class="sr-actual-zone${actualCardsHtml ? '' : ' sr-actual-zone--empty'}">
