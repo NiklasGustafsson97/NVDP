@@ -6293,7 +6293,7 @@ function _buildEffortInsight(opts) {
 
   const n = effortAll.length;
   if (n === 0) {
-    return { band: 'neutral', title: 'Ingen data', sub: 'Logga pass så börjar vi följa upp.' };
+    return { band: 'neutral', title: 'Ingen belastningstrend än', sub: 'Logga några pass så kan coachen se om du bygger, står still eller behöver bromsa.' };
   }
 
   const lastIdx = n - 1;
@@ -6418,16 +6418,16 @@ function _buildEffortInsight(opts) {
   if (!last.deload && acwr !== null && acwr > 1.5) {
     return {
       band: 'bad',
-      title: 'Hög överbelastningsrisk',
-      sub: `7-dagarsbelastningen är ${Math.round((acwr - 1) * 100)} % över 28-dagarsmedel (ACWR ${acwr.toFixed(2)}). Backa intensiteten innan nästa hårda pass.`,
+      title: 'Belastningen har stuckit iväg',
+      sub: `Senaste veckan ligger ${Math.round((acwr - 1) * 100)} % över din senaste månad. Byt nästa hårda pass mot lugn volym eller vila.`,
     };
   }
   if (!last.deload && overStreak >= 2 && baseline && last.effort > baseline * 1.3) {
     const overPct = Math.round((last.effort / baseline - 1) * 100);
     return {
       band: 'bad',
-      title: 'Hög överbelastningsrisk',
-      sub: `${overStreak} v över bandet i rad och denna vecka +${overPct} % över baseline. Planera deload nästa vecka.`,
+      title: 'Två veckor för högt tryck',
+      sub: `${overStreak} veckor över bandet och nu +${overPct} % mot baslinjen. Planera en lättare vecka innan kroppen tvingar fram den.`,
     };
   }
 
@@ -6437,8 +6437,8 @@ function _buildEffortInsight(opts) {
     const cutPct = Math.max(0, Math.round((1 - last.effort / baseline) * 100));
     return {
       band: 'bad',
-      title: 'Otillräcklig deload',
-      sub: `Bara ${cutPct} % nedtrappning från baseline (rek 20-40 %). Korta intervaller och håll volymen lägre denna vecka.`,
+      title: 'Deloaden är inte tillräckligt lätt',
+      sub: `Du har bara trappat ner ${cutPct} % mot baslinjen. Sänk både volym och intensitet så återhämtningsveckan faktiskt ger effekt.`,
     };
   }
 
@@ -6449,8 +6449,8 @@ function _buildEffortInsight(opts) {
     const hoursStr = last.hours > 0 ? `${last.hours.toFixed(1)} h` : 'inga loggade pass';
     return {
       band: 'neutral',
-      title: 'Avbruten vecka',
-      sub: `${dropPct} % under förväntat (${hoursStr}). Sjuk, resa, eller medvetet lätt? Baslinjen påverkas inte — vi tar igen nästa vecka.`,
+      title: 'Veckan blev ett avbrott',
+      sub: `${dropPct} % under normal belastning (${hoursStr}). Om det var sjukdom eller resa: starta om kontrollerat, inte med en kompensationsvecka.`,
     };
   }
 
@@ -6458,8 +6458,8 @@ function _buildEffortInsight(opts) {
   if (underStreak >= 2) {
     return {
       band: 'warn',
-      title: 'Lågbelastad period',
-      sub: `${underStreak} v under bandet i rad. Medveten taper inför mål? Annars: höj volym eller intensitet kommande vecka för att hålla progressionen.`,
+      title: 'Progressionen tappar fart',
+      sub: `${underStreak} veckor under bandet i rad. Om det inte är taper: lägg in mer lugn volym först, sedan kvalitet.`,
     };
   }
 
@@ -6469,8 +6469,8 @@ function _buildEffortInsight(opts) {
       && baseline && last.effort >= baseline * 0.95) {
     return {
       band: 'bad',
-      title: 'Hög monotoni',
-      sub: `Liten variation mellan veckor på hög belastning (Foster monotony ${monotony.toFixed(1)}). Lägg in en lättare återhämtningsvecka för att undvika stagnation.`,
+      title: 'För jämnt hårt vecka efter vecka',
+      sub: `Belastningen är hög men variationen låg. Lägg in en tydligt lättare vecka så nästa hårda block faktiskt biter.`,
     };
   }
 
@@ -6479,8 +6479,8 @@ function _buildEffortInsight(opts) {
       && trendLoad > 0.05 && trendHours < -0.03) {
     return {
       band: 'neutral',
-      title: 'Skifte mot kvalitet',
-      sub: `Belastning trendar +${Math.round(trendLoad * 100)} %/v medan timmar trendar ${Math.round(trendHours * 100)} %/v — du tränar hårdare på mindre tid. Se till att återhämtningen hänger med.`,
+      title: 'Mer kvalitet på mindre tid',
+      sub: `Belastningen stiger trots färre timmar. Bra om det är planerat, men följ sömn och benkänsla innan du adderar mer intensitet.`,
     };
   }
 
@@ -6488,8 +6488,8 @@ function _buildEffortInsight(opts) {
   if (inBandStreak >= 3 && baselineGrowth !== null && baselineGrowth >= 0.03) {
     return {
       band: 'ok',
-      title: 'Stabil progression',
-      sub: `${inBandStreak} v inom bandet, baslinje +${(baselineGrowth * 100).toFixed(1)} %/v. Det här är vad coacher kallar "boring excellence" — håll kursen.`,
+      title: 'Kontrollerad progression',
+      sub: `${inBandStreak} veckor i rätt zon och baslinjen stiger ${(baselineGrowth * 100).toFixed(1)} % per vecka. Fortsätt likadant tills kroppen säger något annat.`,
     };
   }
 
@@ -6497,8 +6497,8 @@ function _buildEffortInsight(opts) {
   if (baselineGrowth !== null && Math.abs(baselineGrowth) < 0.03 && inBandStreak >= 4) {
     return {
       band: 'neutral',
-      title: 'Platå i belastning',
-      sub: `Baslinjen platt i ${inBandStreak} v. Lägg in ett progressivt block (volym +10 % nästa vecka) eller en specifik kvalitetsstimulus för att bryta platån.`,
+      title: 'Belastningen har planat ut',
+      sub: `Du tränar stabilt men utan ny stimulans. Välj ett tydligt block: lite mer lugn volym eller ett mer specifikt kvalitetspass.`,
     };
   }
 
@@ -6508,8 +6508,8 @@ function _buildEffortInsight(opts) {
     if (ratio >= 0.6 && ratio <= 0.85) {
       return {
         band: 'ok',
-        title: 'Deload på mål',
-        sub: `Veckans load ${Math.round(ratio * 100)} % av baseline — god återhämtning utan att tappa anpassning. Kör på enligt plan.`,
+        title: 'Deloaden sitter rätt',
+        sub: `Veckan ligger på ${Math.round(ratio * 100)} % av baslinjen. Det räcker för att återhämta utan att tappa rytmen inför nästa block.`,
       };
     }
   }
@@ -6526,8 +6526,8 @@ function _buildEffortInsight(opts) {
   if (gradedVisible.length === 0) {
     return {
       band: 'neutral',
-      title: 'Inte graderad än',
-      sub: `Bygg ≥ ${EFFORT_BAND_LOOKBACK + 1} aktiva träningsveckor så ritar vi mål-bandet.`,
+      title: 'Coachen bygger referensram',
+      sub: `Efter ${EFFORT_BAND_LOOKBACK + 1} aktiva träningsveckor kan vi säga om belastningen är smart, låg eller för aggressiv.`,
     };
   }
 
@@ -6536,17 +6536,34 @@ function _buildEffortInsight(opts) {
   const underCnt = gradedVisible.filter(c => c === 'under').length;
   const total = gradedVisible.length;
 
-  let title, band;
-  if (last.deload) { title = 'Planerad deload'; band = 'neutral'; }
-  else if (last.cls === 'on') { title = 'I bandet denna vecka'; band = 'ok'; }
-  else if (last.cls === 'over') { title = 'Över bandet denna vecka'; band = 'bad'; }
-  else if (last.cls === 'under') { title = 'Under bandet denna vecka'; band = 'warn'; }
-  else { title = 'Inte graderad än'; band = 'neutral'; }
+  let title, band, sub;
+  const windowShare = `${onCnt}/${total} graderade veckor har legat i rätt zon`;
+  if (last.deload) {
+    title = 'Planerad återhämtning';
+    band = 'neutral';
+    sub = `${windowShare}. Håll deloaden lätt även om grafen ser tom ut - poängen är att komma ut fräsch.`;
+  } else if (last.cls === 'on') {
+    title = 'Belastningen är coachbar';
+    band = 'ok';
+    sub = `${windowShare}. Det här är en vecka där du kan bygga vidare utan att jaga mer för sakens skull.`;
+  } else if (last.cls === 'over') {
+    title = 'Veckan ligger över målzonen';
+    band = 'bad';
+    sub = `${windowShare}. Nästa beslut bör vara återhämtning eller lugn volym, inte ännu ett hårt pass.`;
+  } else if (last.cls === 'under') {
+    title = 'Veckan gav för lite stimulans';
+    band = 'warn';
+    sub = `${windowShare}. Om detta inte var planerad vila behöver nästa vecka få mer sammanhängande träning.`;
+  } else {
+    title = 'Coachen bygger referensram';
+    band = 'neutral';
+    sub = `Det finns ${total} graderade veckor i fönstret. Fortsätt logga så blir målzonen mer träffsäker.`;
+  }
 
   return {
     band,
     title,
-    sub: `${onCnt} i bandet · ${overCnt} över · ${underCnt} under (av ${total} graderade veckor i fönstret)`,
+    sub,
   };
 }
 
@@ -6930,7 +6947,7 @@ function renderPmcChart(workouts) {
   const allDates = [];
   for (const w of workouts) if (w.workout_date) allDates.push(w.workout_date);
   if (allDates.length === 0) {
-    _renderChartInsight('pmc-ctl-insight', { band: 'neutral', title: 'För lite data', sub: 'Logga några pass så fylls fitness-kurvan i.' });
+    _renderChartInsight('pmc-ctl-insight', { band: 'neutral', title: 'Ingen fitness-trend än', sub: 'När du har loggat några pass kan vi se om kapaciteten faktiskt byggs över tid.' });
     return;
   }
   allDates.sort();
@@ -6941,7 +6958,7 @@ function renderPmcChart(workouts) {
 
   const fullSeries = _dailyLoadSeries(workouts, totalDays);
   if (fullSeries.every((s) => s.load === 0)) {
-    _renderChartInsight('pmc-ctl-insight', { band: 'neutral', title: 'För lite data', sub: 'Logga några pass så fylls fitness-kurvan i.' });
+    _renderChartInsight('pmc-ctl-insight', { band: 'neutral', title: 'Ingen fitness-trend än', sub: 'Logga träningspass med belastning så får coachen ett kapacitetsankare.' });
     return;
   }
 
@@ -6981,7 +6998,7 @@ function renderPmcChart(workouts) {
   }
   const dataWeeks = [...weekAgg.keys()].sort();
   if (dataWeeks.length === 0) {
-    _renderChartInsight('pmc-ctl-insight', { band: 'neutral', title: 'För lite data', sub: 'Logga några pass så fylls fitness-kurvan i.' });
+    _renderChartInsight('pmc-ctl-insight', { band: 'neutral', title: 'Ingen fitness-trend än', sub: 'Det saknas veckor med användbar belastning. Logga konsekvent så blir kurvan coachbar.' });
     return;
   }
 
@@ -7072,12 +7089,24 @@ function renderPmcChart(workouts) {
     const baselineDate = baselineDateIso
       ? (() => { const d = new Date(baselineDateIso + 'T00:00:00'); return `V${weekNumber(d)} ${d.getFullYear()}`; })()
       : 'start';
-    const sub = ratio >= 1
-      ? `+${ratioPct.toFixed(0)} % bättre än när du började mäta (${baselineDate}).`
-      : `${ratioPct.toFixed(0)} % vs när du började mäta (${baselineDate}).`;
+    const absPct = Math.abs(ratioPct).toFixed(0);
+    let title, sub;
+    if (ratio >= 1.10) {
+      title = 'Fitnessen bygger tydligt';
+      sub = `Du ligger +${ratioPct.toFixed(0)} % mot ankaret från ${baselineDate}. Fortsätt progressivt, men låt återhämtningen skydda trenden.`;
+    } else if (ratio >= 1.05) {
+      title = 'Fitnessen rör sig åt rätt håll';
+      sub = `+${ratioPct.toFixed(0)} % mot ${baselineDate}. Det här är robust kapacitet, inte bara en bra dag.`;
+    } else if (ratio >= 0.95) {
+      title = 'Fitnessen är stabil';
+      sub = `${ratioPct >= 0 ? '+' : ''}${ratioPct.toFixed(0)} % mot ${baselineDate}. Behåll rytmen och jaga hellre kontinuitet än snabba hopp.`;
+    } else {
+      title = 'Fitnessen har tappat från ankaret';
+      sub = `${absPct} % under ${baselineDate}. Bygg tillbaka med 1-2 veckor jämn volym innan du pressar kvalitet.`;
+    }
     _renderChartInsight('pmc-ctl-insight', {
       band: ratio >= 1.05 ? 'ok' : (ratio >= 0.95 ? 'neutral' : 'warn'),
-      title: 'Personal fitness score',
+      title,
       sub,
       headline: ratio.toFixed(2),
       headlineLabel: 'FITNESS',
@@ -7086,8 +7115,8 @@ function renderPmcChart(workouts) {
     const daysSoFar = fullCtl.length;
     _renderChartInsight('pmc-ctl-insight', {
       band: 'neutral',
-      title: 'Bygger baseline',
-      sub: `${daysSoFar} av ${FITNESS_BASELINE_DAY} dagar tränings­historik. Vi anker fitness-scoren när vi har minst ${FITNESS_BASELINE_DAY} dagars data.`,
+      title: 'Första månaden kalibrerar kurvan',
+      sub: `${daysSoFar} av ${FITNESS_BASELINE_DAY} dagar finns. Fortsätt logga konsekvent så blir fitness-jämförelsen meningsfull.`,
     });
   }
 }
@@ -7306,8 +7335,8 @@ function renderPolarizationCard(workouts) {
     legendEl.innerHTML = '';
     _renderChartInsight('polarization-insight', {
       band: 'neutral',
-      title: 'För lite data',
-      sub: 'Logga några löppass så fylls mätaren.',
+      title: 'Ingen intensitetsbild än',
+      sub: 'Logga löppass med puls eller tydlig intensitet så kan coachen skilja basträning från hård stimulans.',
     });
     return;
   }
@@ -7335,35 +7364,35 @@ function renderPolarizationCard(workouts) {
   let band, title, sub;
   if (pEasy >= 75 && pHard >= 10 && pHard <= 25) {
     band = 'ok';
-    title = `Polariserad mix (${Math.round(pEasy)}/${Math.round(pHard)})`;
-    sub = 'Exakt där du ska vara — mål ~80% lugnt, ~20% hårt.';
+    title = `Bra distans mellan lugnt och hårt`;
+    sub = `${Math.round(pEasy)} % lugnt och ${Math.round(pHard)} % hårt. Behåll den här fördelningen så kvaliteten får effekt.`;
   } else if (pEasy < 70) {
     band = 'bad';
-    title = `Bara ${Math.round(pEasy)}% lugnt`;
-    sub = `För lite lågintensivt — bygg mer tid under ~${cutoffPct} % av maxpuls.`;
+    title = 'För lite riktigt lugn löpning';
+    sub = `Bara ${Math.round(pEasy)} % under ${cutoffPct} % av maxpuls. Flytta ett mellanhårt pass till tydlig Z1/Z2.`;
   } else if (pHard > 25) {
     band = 'bad';
-    title = `${Math.round(pHard)}% hårt`;
-    sub = 'Risk för överträning — backa intensiteten.';
+    title = 'Hård andel är för hög';
+    sub = `${Math.round(pHard)} % hårt senaste 4 veckorna. Sänk nästa kvalitetspass eller byt mot lugn distans.`;
   } else if (pHard < 8) {
     band = 'neutral';
-    title = `Bara ${Math.round(pHard)}% hårt`;
-    sub = 'Du kan lägga in mer kvalitet om formen tillåter.';
+    title = 'Du saknar tydlig kvalitet';
+    sub = `Bara ${Math.round(pHard)} % hårt. Om benen känns fräscha: lägg in ett kort, kontrollerat intervall- eller tröskelpass.`;
   } else if (z3DominantHard) {
     band = 'warn';
-    title = `${Math.round(pMod)}% i Z3 ("gråzonen")`;
-    sub = `Styr mer mot tydligt lugnt (<${cutoffPct} % maxpuls) eller tydligt hårt (>${cutoffPct} %) istället.`;
+    title = 'Gråzonen tar för mycket plats';
+    sub = `${Math.round(pMod)} % hamnar mitt emellan. Gör lugna pass lättare och hårda pass mer avsiktliga.`;
   } else if (showHrWarning && proxyShare >= 0.5) {
     // When most of the displayed time was classified via the pace
     // proxy, soften the headline so users understand the mix is an
     // estimate rather than measured HR-zone time.
     band = 'neutral';
-    title = `Mix: ${Math.round(pEasy)}/${Math.round(pHard)} (uppskattad)`;
-    sub = 'Mest pace-baserad — koppla en pulsmätare för exakt mix.';
+    title = 'Intensitetsmixen är osäker';
+    sub = `Ungefär ${Math.round(pEasy)}/${Math.round(pHard)}, men mycket är pace-baserat. Pulsmätare gör slutsatsen coachbar.`;
   } else {
     band = 'neutral';
-    title = `Mix: ${Math.round(pEasy)}/${Math.round(pHard)}`;
-    sub = 'OK balans — mål ~80% lugnt, ~20% hårt.';
+    title = 'Balansen är användbar';
+    sub = `${Math.round(pEasy)} % lugnt och ${Math.round(pHard)} % hårt. Nästa steg är att göra de lugna passen ännu lättare.`;
   }
   _renderChartInsight('polarization-insight', { band, title, sub });
 }
@@ -7470,10 +7499,10 @@ function renderEasyHrChart(workouts) {
   if (dataKeys.length < 2) {
     _renderChartInsight('easy-hr-insight', {
       band: 'neutral',
-      title: qualifiedPasses === 0 ? 'Inga kvalificerade pass än' : 'Bygg historik',
+      title: qualifiedPasses === 0 ? 'Saknar rena Z2-pass' : 'För få Z2-veckor för trend',
       sub: qualifiedPasses === 0
-        ? `Behöver löppass med splits från Strava och puls i ${hrMin}–${hrMax} bpm efter de första 10 min.`
-        : 'Behöver minst 2 veckor med kvalificerade Z2-pass för att rita trenden.',
+        ? `Spring lugnt med puls i ${hrMin}-${hrMax} bpm efter uppvärmning så kan coachen mäta aerob effektivitet.`
+        : 'En vecka räcker inte för slutsats. Lägg in ett återkommande lugnt pass så ser vi riktningen.',
     });
     return;
   }
@@ -7588,8 +7617,8 @@ function renderEasyHrChart(workouts) {
   if (earlierEf.length === 0) {
     _renderChartInsight('easy-hr-insight', {
       band: 'neutral',
-      title: 'Bygg historik',
-      sub: `Behöver ~8 veckor med kvalificerade Z2-pass för att jämföra trenden. Senaste 4 v: EF ${avgRecent.toFixed(2)}.`,
+      title: 'Aeroba trenden kalibreras',
+      sub: `Senaste 4 veckor: EF ${avgRecent.toFixed(2)}. Fortsätt med jämna Z2-pass innan vi drar slutsats om utvecklingen.`,
       headline: avgRecent.toFixed(2),
       headlineLabel: 'EF · 4 V',
     });
@@ -7600,16 +7629,16 @@ function renderEasyHrChart(workouts) {
   let band, title, sub;
   if (deltaPct >= 3) {
     band = 'ok';
-    title = `Aerob form starkare (+${deltaPct.toFixed(1)} %)`;
-    sub = `Samma puls bär ${(avgRecent - avgEarlier).toFixed(2)} km/h fortare GAP. Z2-band ${hrMin}–${hrMax} bpm.`;
+    title = `Aeroba motorn svarar (+${deltaPct.toFixed(1)} %)`;
+    sub = `Du får mer fart vid samma puls. Fortsätt bygga lugn volym innan du växlar upp intensiteten.`;
   } else if (deltaPct <= -3) {
     band = 'bad';
-    title = `EF ner ${Math.abs(deltaPct).toFixed(1)} %`;
-    sub = `Mot förra 4-veckors. Kolla sömn, stress, värme — eller om du smyger upp pulsen i Z2 (${hrMin}–${hrMax} bpm).`;
+    title = `Aerob effektivitet faller (${Math.abs(deltaPct).toFixed(1)} %)`;
+    sub = `Samma puls ger mindre fart. Kolla sömn, värme och om dina lugna pass driver över ${hrMax} bpm.`;
   } else {
     band = 'neutral';
-    title = `Stabil aerob profil (${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)} %)`;
-    sub = `EF mot förra 4-veckors. Z2-band ${hrMin}–${hrMax} bpm.`;
+    title = `Grundfarten är stabil (${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)} %)`;
+    sub = `Ingen tydlig rörelse än. Behåll Z2-rytmen och jämför först efter några fler liknande pass.`;
   }
   _renderChartInsight('easy-hr-insight', {
     band, title, sub,
@@ -7759,11 +7788,11 @@ function renderVo2maxChart(workouts) {
   // need to log more passes, add HR data, or set their HRmax.
   if (points.length === 0) {
     const sub = usingFallbackHrMax
-      ? `Sätt din max-puls i profilen så vi kan filtrera kvalpass korrekt. Använder default ${EF_DEFAULT_MAX_HR} bpm tills vidare. Behöver pass med snittpuls ≥ ${Math.round(VO2MAX_QUAL_HR_PCT * 100)}% av HRmax.`
-      : `Inga löppass med snittpuls ≥ ${Math.round(VO2MAX_QUAL_HR_PCT * 100)}% av HRmax (${Math.round(hrMax * VO2MAX_QUAL_HR_PCT)} bpm). Logga ett pass med pulsdata så ritar vi trenden.`;
+      ? `Sätt maxpuls i profilen först. Annars kan coachen inte avgöra vilka pass som är tillräckligt hårda för en rimlig trend.`
+      : `Inga löppass når ${Math.round(hrMax * VO2MAX_QUAL_HR_PCT)} bpm i snitt. Logga ett kontrollerat tempo- eller intervallpass med pulsdata.`;
     _renderChartInsight('vo2max-insight', {
       band: usingFallbackHrMax ? 'warn' : 'neutral',
-      title: 'Inga kvalpass än',
+      title: usingFallbackHrMax ? 'Maxpuls saknas' : 'Inga tydliga testpass än',
       sub,
     });
     return;
@@ -7818,8 +7847,8 @@ function renderVo2maxChart(workouts) {
   if (visiblePoints.length === 0) {
     _renderChartInsight('vo2max-insight', {
       band: 'neutral',
-      title: 'Inga kvalpass i fönstret',
-      sub: `Inga kvalpass i de valda ${vo2Size} veckorna. Logga ett löppass med puls eller bläddra bakåt för att se historik.`,
+      title: 'Valt fönster saknar testpass',
+      sub: `De här ${vo2Size} veckorna säger inget om VO2max. Bläddra bakåt eller lägg in ett pulsregistrerat kvalitetspass.`,
     });
     return;
   }
@@ -7834,8 +7863,8 @@ function renderVo2maxChart(workouts) {
     const v = visiblePoints[0].y;
     _renderChartInsight('vo2max-insight', {
       band: 'neutral',
-      title: 'Behöver ett kvalpass till',
-      sub: `Behöver ≥ 2 kvalpass i fönstret för att rita trend. Senaste: VO2max ${v.toFixed(1)} · 1 kvalpass.`,
+      title: 'En mätpunkt är ingen trend',
+      sub: `Senaste VO2max-estimat är ${v.toFixed(1)}. Lägg in ett liknande pass till innan du tolkar riktningen.`,
       headline: v.toFixed(1),
       headlineLabel: 'VO2MAX',
     });
@@ -7864,8 +7893,8 @@ function renderVo2maxChart(workouts) {
   if (priorIdx < 0) {
     _renderChartInsight('vo2max-insight', {
       band: 'neutral',
-      title: 'Bygg historik',
-      sub: `Behöver ~4 veckor med kvalpass för att jämföra trenden. ${passCountStr}.`,
+      title: 'Trendlinjen kalibreras',
+      sub: `Det finns ${passCountStr}. Coachen väntar på ungefär fyra veckors jämförbara pass innan riktningen bedöms.`,
       headline: latestSmoothed.toFixed(1),
       headlineLabel: 'VO2MAX',
     });
@@ -7876,16 +7905,16 @@ function renderVo2maxChart(workouts) {
   let band, title, sub;
   if (delta >= 0.8) {
     band = 'ok';
-    title = `Form upp: VO2max +${delta.toFixed(1)} mot för 4 v sen`;
-    sub = `Snabbare på samma puls. ${passCountStr}.`;
+    title = `VO2max-trenden stiger (+${delta.toFixed(1)})`;
+    sub = `Du får mer fart ur samma fysiologi. Håll ett kvalitetspass per vecka och skydda de lugna dagarna.`;
   } else if (delta <= -0.8) {
     band = 'bad';
-    title = `Form ner: VO2max ${delta.toFixed(1)} mot för 4 v sen`;
-    sub = `Kolla återhämtning, värme eller om kvalpassen tappat skärpa. ${passCountStr}.`;
+    title = `VO2max-trenden viker (${delta.toFixed(1)})`;
+    sub = `Titta först på återhämtning, värme och om kvalitetspassen tappat skärpa innan du lägger till mer volym.`;
   } else {
     band = 'neutral';
-    title = `Stabil snittad VO2max (${delta >= 0 ? '+' : ''}${delta.toFixed(1)})`;
-    sub = `Mot för 4 veckor sen. ${passCountStr}.`;
+    title = `VO2max håller nivån (${delta >= 0 ? '+' : ''}${delta.toFixed(1)})`;
+    sub = `Ingen tydlig formförändring senaste månaden. Fortsätt samla jämförbara pass och låt trenden, inte enstaka prickar, styra.`;
   }
   _renderChartInsight('vo2max-insight', {
     band, title, sub,
@@ -8222,27 +8251,34 @@ function renderGroupChart(allWorkouts, members) {
   // (not the visible window) so the callout always describes "now".
   const latestWeekKey = dataWeeks[dataWeeks.length - 1];
   const latestEntry = weekData[latestWeekKey] || {};
-  let topId = null, topVal = 0;
+  let topId = null, topVal = 0, activeMembers = 0, totalVal = 0;
   for (const m of members) {
     const raw = latestEntry[m.id] || 0;
     const val = isGrpNorm ? effortRawToDisplay(raw) : raw / 60;
+    if (val > 0) { activeMembers++; totalVal += val; }
     if (val > topVal) { topVal = val; topId = m.id; }
   }
   const topMember = members.find((m) => m.id === topId);
   if (topMember && topVal > 0) {
     const valStr = isGrpNorm ? `Belastning ${topVal.toFixed(1)}` : `${topVal.toFixed(1)} h`;
+    const totalStr = isGrpNorm ? `belastning ${totalVal.toFixed(1)}` : `${totalVal.toFixed(1)} h`;
+    const activeShare = members.length ? activeMembers / members.length : 0;
     _renderChartInsight('group-weekly-insight', {
-      band: 'ok',
-      title: `Mest aktiv: ${topMember.name.split(' ')[0]}`,
-      sub: `${valStr} denna vecka${isGrpNorm ? ' (skalad)' : ''}.`,
-      headline: isGrpNorm ? topVal.toFixed(1) : topVal.toFixed(1) + 'h',
-      headlineLabel: isGrpNorm ? 'BELASTNING' : 'TIMMAR',
+      band: activeShare >= 0.6 ? 'ok' : 'neutral',
+      title: activeMembers === 1
+        ? `${topMember.name.split(' ')[0]} håller gruppen igång`
+        : `${activeMembers} av ${members.length} har loggat i veckan`,
+      sub: activeMembers === 1
+        ? `${valStr} från en person. Gruppsignalen är för tunn - få in fler loggar innan ni jämför er.`
+        : `Gruppen har totalt ${totalStr}; ${topMember.name.split(' ')[0]} bidrar mest med ${valStr}. Bra läge för en kort avstämning.`,
+      headline: isGrpNorm ? totalVal.toFixed(1) : totalVal.toFixed(1) + 'h',
+      headlineLabel: isGrpNorm ? 'GRUPPLOAD' : 'GRUPPTID',
     });
   } else {
     _renderChartInsight('group-weekly-insight', {
       band: 'neutral',
       title: 'Tyst vecka i gruppen',
-      sub: 'Ingen har loggat något än denna vecka.',
+      sub: 'Ingen har loggat något än. Grafen är inte problemet - datan behöver komma in först.',
     });
   }
 }
@@ -8309,8 +8345,8 @@ function renderGroupEffortChart(allWorkouts, members) {
   _renderChartWeekNav('chart-group-effort', allWeekKeys.length, win, () => renderGroupEffortChart(allWorkouts, members));
 
   // Insight: classify each member's most recent week against their own
-  // 3-week rolling band (same logic as the personal Effort chart) so the
-  // group rollup reads "X i bandet · Y över / Z under denna vecka".
+  // 3-week rolling band (same logic as the personal Effort chart) and turn
+  // the group distribution into a coaching action, not just a count.
   let nOn = 0, nOver = 0, nUnder = 0, nUngraded = 0;
   for (const m of members) {
     const memberSeriesAll = allWeekKeys.map((k) =>
@@ -8324,27 +8360,32 @@ function renderGroupEffortChart(allWorkouts, members) {
     else nUngraded++;
   }
   const total = members.length;
+  const graded = total - nUngraded;
   let band, title, sub;
   if (total === 0) {
     band = 'neutral';
     title = 'Inga medlemmar';
     sub = 'Bjud in vänner så fylls grafen.';
+  } else if (graded === 0) {
+    band = 'neutral';
+    title = 'Gruppen bygger jämförelse';
+    sub = `Varje medlem behöver ${EFFORT_BAND_LOOKBACK + 1} aktiva veckor innan coachen kan bedöma belastningen rättvist.`;
   } else if (nOver > nOn && nOver >= nUnder) {
     band = 'warn';
-    title = `${nOver} av ${total} över bandet denna vecka`;
-    sub = `${nOn} i bandet · ${nUnder} under${nUngraded ? ` · ${nUngraded} utan band-historik` : ''}.`;
+    title = 'Flera i gruppen pressar för hårt';
+    sub = `${nOver} av ${graded} graderade ligger över sin zon. Synka återhämtning innan nästa gemensamma kvalitetspass.`;
   } else if (nUnder > nOn && nUnder >= nOver) {
     band = 'neutral';
-    title = `${nUnder} av ${total} under bandet denna vecka`;
-    sub = `${nOn} i bandet · ${nOver} över${nUngraded ? ` · ${nUngraded} utan band-historik` : ''}.`;
+    title = 'Gruppen tappar träningsstimulus';
+    sub = `${nUnder} av ${graded} graderade ligger under sin zon. Om det inte är taper behövs mer konsekvent volym nästa vecka.`;
   } else if (nOn > 0) {
     band = 'ok';
-    title = `${nOn} av ${total} i bandet denna vecka`;
-    sub = `${nOver} över · ${nUnder} under${nUngraded ? ` · ${nUngraded} utan band-historik` : ''}.`;
+    title = 'Gruppen tränar kontrollerat';
+    sub = `${nOn} av ${graded} graderade ligger i rätt zon. Det är en bra vecka att hålla planen snarare än att jaga extra.`;
   } else {
     band = 'neutral';
-    title = 'Bygger band-historik';
-    sub = `Behöver ≥ ${EFFORT_BAND_LOOKBACK + 1} v per medlem för att gradera veckan.`;
+    title = 'Blandad gruppvecka';
+    sub = `Signalen är splittrad. Använd grafen för att se vem som behöver lugnare respektive mer konsekvent träning.`;
   }
   _renderChartInsight('group-effort-insight', { band, title, sub });
 }
