@@ -1008,31 +1008,23 @@ select option { background: var(--surface-modal); color: var(--text); }
   padding: 16px; border-radius: 16px;
   border: 1px solid color-mix(in srgb, var(--border) 82%, rgba(255,255,255,0.14));
   margin-bottom: 8px;
-  background:
-    radial-gradient(circle at 0 0, rgba(var(--color-primary-rgb), 0.07), transparent 34%),
-    color-mix(in srgb, var(--bg-card) 76%, var(--bg-input));
+  background: color-mix(in srgb, var(--bg-card) 76%, var(--bg-input));
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
   transition: transform 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 .sr-card:hover {
   transform: translateY(-1px);
   border-color: rgba(var(--color-primary-rgb), 0.24);
-  background:
-    radial-gradient(circle at 0 0, rgba(var(--color-primary-rgb), 0.1), transparent 34%),
-    color-mix(in srgb, var(--bg-card-hover) 72%, var(--bg-input));
+  background: color-mix(in srgb, var(--bg-card-hover) 72%, var(--bg-input));
 }
 .sr-card.sr-today {
   border-color: rgba(var(--color-primary-rgb), 0.42);
-  background:
-    radial-gradient(circle at 0 0, rgba(var(--color-primary-rgb), 0.16), transparent 38%),
-    color-mix(in srgb, var(--bg-card) 72%, rgba(var(--color-primary-rgb), 0.13));
+  background: color-mix(in srgb, var(--bg-card) 72%, rgba(var(--color-primary-rgb), 0.13));
   box-shadow: 0 0 0 1px rgba(var(--color-primary-rgb), 0.13), 0 14px 34px rgba(0,0,0,0.16);
 }
 .sr-card.sr-rest {
   opacity: 1;
-  background:
-    radial-gradient(circle at 0 0, rgba(255,255,255,0.045), transparent 34%),
-    color-mix(in srgb, var(--bg-card) 70%, var(--bg-input));
+  background: color-mix(in srgb, var(--bg-card) 70%, var(--bg-input));
 }
 .sr-card.sr-future { opacity: 1; }
 .sr-card.sr-done { box-shadow: inset 3px 0 0 rgba(var(--color-success-rgb), 0.75), inset 0 1px 0 rgba(255,255,255,0.025); }
