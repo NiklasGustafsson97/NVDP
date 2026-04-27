@@ -2634,8 +2634,8 @@ async function openWorkoutModal(w) {
             labels,
             datasets: [{
               data,
-              borderColor: themeChartColor('elevation', '#8B5CF6'),
-              backgroundColor: themeChartRgba('elevation', 0.18, 'rgba(139,92,246,0.18)'),
+              borderColor: themeChartColor('elevation', '#2563EB'),
+              backgroundColor: themeChartRgba('elevation', 0.18, 'rgba(37,99,235,0.18)'),
               borderWidth: 2,
               fill: true,
               tension: 0.35,
@@ -7045,7 +7045,7 @@ function renderPmcChart(workouts) {
   });
 
   const textColor = themeTextDim();
-  const ctlColor = themeChartRgba('fitness', 0.9, 'rgba(3,105,161,0.9)');
+  const ctlColor = themeChartRgba('fitness', 0.9, 'rgba(37,99,235,0.9)');
 
   // Personal fitness score on #pmc-ctl-card. Either ratio (if we have a
   // baseline) or raw CTL fallback (if user is still building history).
@@ -7068,7 +7068,7 @@ function renderPmcChart(workouts) {
           label: 'Fitness-score',
           data: fitnessData,
           borderColor: ctlColor,
-          backgroundColor: themeChartRgba('fitness', 0.15, 'rgba(3,105,161,0.15)'),
+          backgroundColor: themeChartRgba('fitness', 0.15, 'rgba(37,99,235,0.15)'),
           borderWidth: 2,
           pointRadius: 3,
           pointHoverRadius: 5,
@@ -7591,8 +7591,8 @@ function renderEasyHrChart(workouts) {
       datasets: [{
         label: 'EF (GAP km/h ÷ HR × 100)',
         data: efData,
-        borderColor: themeChartRgba('aerobic', 0.95, 'rgba(15,118,110,0.95)'),
-        backgroundColor: themeChartRgba('aerobic', 0.12, 'rgba(15,118,110,0.12)'),
+        borderColor: themeChartRgba('aerobic', 0.95, 'rgba(37,99,235,0.95)'),
+        backgroundColor: themeChartRgba('aerobic', 0.12, 'rgba(37,99,235,0.12)'),
         borderWidth: 2.5,
         pointRadius: 3,
         pointHoverRadius: 5,
@@ -7975,8 +7975,8 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
       label: 'Löppass (HR-justerat)',
       data: points.map((p) => ({ x: p.x, y: p.y, meta: p.meta })),
       parsing: false,
-      borderColor: themeChartRgba('vo2', 0.38, 'rgba(124,58,237,0.38)'),
-      backgroundColor: themeChartRgba('vo2', 0.38, 'rgba(124,58,237,0.38)'),
+      borderColor: themeChartRgba('vo2', 0.38, 'rgba(37,99,235,0.38)'),
+      backgroundColor: themeChartRgba('vo2', 0.38, 'rgba(37,99,235,0.38)'),
       pointRadius: 2.5,
       pointHoverRadius: 5,
       showLine: false,
@@ -7989,8 +7989,8 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
       label: `Snittad VO2max (${VO2MAX_SMOOTH_DAYS}d)`,
       data: points.map((p) => ({ x: p.x, y: p.smoothed, meta: p.meta, windowCount: p.windowCount })),
       parsing: false,
-      borderColor: themeChartRgba('vo2', 0.95, 'rgba(124,58,237,0.95)'),
-      backgroundColor: themeChartRgba('vo2', 0.12, 'rgba(124,58,237,0.12)'),
+      borderColor: themeChartRgba('vo2', 0.95, 'rgba(37,99,235,0.95)'),
+      backgroundColor: themeChartRgba('vo2', 0.12, 'rgba(37,99,235,0.12)'),
       borderWidth: 3,
       pointRadius: 0,
       pointHoverRadius: 4,

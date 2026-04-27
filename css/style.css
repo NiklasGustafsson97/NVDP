@@ -37,16 +37,16 @@
   --color-neutral-rgb: 148, 163, 184;
   --chart-load: #2563EB;
   --chart-load-rgb: 37, 99, 235;
-  --chart-vo2: #7C3AED;
-  --chart-vo2-rgb: 124, 58, 237;
-  --chart-aerobic: #0F766E;
-  --chart-aerobic-rgb: 15, 118, 110;
-  --chart-fitness: #0369A1;
-  --chart-fitness-rgb: 3, 105, 161;
-  --chart-elevation: #8B5CF6;
-  --chart-elevation-rgb: 139, 92, 246;
-  --chart-route: #2F80ED;
-  --chart-route-rgb: 47, 128, 237;
+  --chart-vo2: #2563EB;
+  --chart-vo2-rgb: 37, 99, 235;
+  --chart-aerobic: #2563EB;
+  --chart-aerobic-rgb: 37, 99, 235;
+  --chart-fitness: #2563EB;
+  --chart-fitness-rgb: 37, 99, 235;
+  --chart-elevation: #2563EB;
+  --chart-elevation-rgb: 37, 99, 235;
+  --chart-route: #2563EB;
+  --chart-route-rgb: 37, 99, 235;
   --on-color: #FFFFFF;
   --accent: var(--color-primary);
   --accent-hover: var(--color-primary-hover);
@@ -3506,14 +3506,14 @@ input.code-input {
   font-size: 0.62rem; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600;
 }
-.chart-insight--ok      { background: color-mix(in srgb, var(--green) 8%, var(--bg-card-hover));
-                          border-color: color-mix(in srgb, var(--green) 28%, var(--border)); }
+.chart-insight--ok      { background: color-mix(in srgb, var(--chart-load) 8%, var(--bg-card-hover));
+                          border-color: color-mix(in srgb, var(--chart-load) 28%, var(--border)); }
 .chart-insight--warn    { background: color-mix(in srgb, var(--amber) 9%, var(--bg-card-hover));
                           border-color: color-mix(in srgb, var(--amber) 30%, var(--border)); }
 .chart-insight--bad     { background: color-mix(in srgb, var(--red) 9%, var(--bg-card-hover));
                           border-color: color-mix(in srgb, var(--red) 32%, var(--border)); }
 .chart-insight--neutral { background: var(--bg-card-hover); border-color: var(--border); }
-.chart-insight--ok      .chart-insight-badge { background: var(--green); color: var(--green); }
+.chart-insight--ok      .chart-insight-badge { background: var(--chart-load); color: var(--chart-load); }
 .chart-insight--warn    .chart-insight-badge { background: var(--amber); color: var(--amber); }
 .chart-insight--bad     .chart-insight-badge { background: var(--red);   color: var(--red); }
 .chart-insight--neutral .chart-insight-badge { background: var(--text-muted); color: var(--text-muted); }
