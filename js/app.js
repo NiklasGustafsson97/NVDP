@@ -4408,31 +4408,6 @@ function setGroupSubtab(id) {
 
 let _mixUnit = 'hours';
 
-// Progress tab: "Timmar"-linjen i belastningsdiagrammet är default DOLD
-// (defaultar av enligt design); användaren kan slå på den via switchen i
-// #effort-card-headern. Valet persisteras i localStorage så det överlever
-// sidladdningar.
-const EFFORT_HOURS_STORAGE_KEY = 'runcoach.progress.showHours';
-let _effortHoursVisible = (() => {
-  try { return localStorage.getItem(EFFORT_HOURS_STORAGE_KEY) === '1'; } catch (_) { return false; }
-})();
-function setEffortHoursVisible(visible) {
-  _effortHoursVisible = !!visible;
-  try { localStorage.setItem(EFFORT_HOURS_STORAGE_KEY, _effortHoursVisible ? '1' : '0'); } catch (_) { /* noop */ }
-  // Patcha befintlig chart utan full re-render — Chart.js har inbyggt API
-  // för att toggla datasets, och vi vill också gömma y1-axeln så den inte
-  // står tom på högerkanten.
-  const chart = window._chartEffort;
-  if (chart) {
-    const idx = chart.data.datasets.findIndex(d => d.label === 'Timmar');
-    if (idx >= 0) chart.setDatasetVisibility(idx, _effortHoursVisible);
-    if (chart.options && chart.options.scales && chart.options.scales.y1) {
-      chart.options.scales.y1.display = _effortHoursVisible;
-    }
-    chart.update();
-  }
-}
-
 function setTrendMode(mode) { trendMode = mode; loadTrends(); }
 function setEffortMode(mode) { effortMode = mode; loadTrends(); }
 function setMixUnit(unit) {
@@ -6618,14 +6593,6 @@ function renderEffortChart(workouts) {
   if (!effortCanvas) return;
   if (window._chartEffort) window._chartEffort.destroy();
 
-  // Synka checkbox med persisterat state vid varje render. Behövs framför
-  // allt vid första renderingen efter sidladdning, då DOM-checkboxen alltid
-  // startar unchecked.
-  const _hoursToggleCb = document.querySelector('#effort-hours-toggle input[type="checkbox"]');
-  if (_hoursToggleCb && _hoursToggleCb.checked !== _effortHoursVisible) {
-    _hoursToggleCb.checked = _effortHoursVisible;
-  }
-
   const weekMap = {};
   // Group raw workouts per ISO-Monday week so the diagnostic below can list
   // which sessions actually contributed to each bar (or didn't, when a week
@@ -6659,7 +6626,6 @@ function renderEffortChart(workouts) {
   const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-effort'], _getChartWindowSize('chart-effort'));
   const visibleWeeks = win.weeks;
   const effortData = effortDataAll.slice(win.startIdx, win.endIdx + 1);
-  const hoursData = hoursDataAll.slice(win.startIdx, win.endIdx + 1);
   const isDeload = isDeloadAll.slice(win.startIdx, win.endIdx + 1);
   const targetUpper = targetUpperAll.slice(win.startIdx, win.endIdx + 1);
   const targetLower = targetLowerAll.slice(win.startIdx, win.endIdx + 1);
@@ -6726,19 +6692,6 @@ function renderEffortChart(workouts) {
           fill: false,
           spanGaps: false,
           order: 4,
-        },
-        {
-          label: 'Timmar',
-          data: hoursData,
-          type: 'line',
-          borderColor: 'rgba(46,134,193,0.7)',
-          backgroundColor: 'rgba(46,134,193,0.1)',
-          borderWidth: 2,
-          pointRadius: 3,
-          fill: false,
-          order: 1,
-          yAxisID: 'y1',
-          hidden: !_effortHoursVisible,
         }
       ]
     },
@@ -6753,31 +6706,12 @@ function renderEffortChart(workouts) {
             // technical companion to the upper band's fill target.
             filter: (item) => item.text !== '_band-lower',
           },
-          onClick: function (e, legendItem, legend) {
-            // Default Chart.js-beteendet togglar synligheten på datasetet.
-            // Vi vill samma sak men dessutom synka "Visa timmar"-toggle:n
-            // i kortets header och persistera valet om man klickar på
-            // Timmar-legenden direkt — annars skulle legend-klicket inte
-            // överleva en sidladdning.
-            const ci = legend.chart;
-            const idx = legendItem.datasetIndex;
-            const willBeVisible = !ci.isDatasetVisible(idx);
-            ci.setDatasetVisibility(idx, willBeVisible);
-            if (legendItem.text === 'Timmar') {
-              setEffortHoursVisible(willBeVisible);
-            } else {
-              ci.update();
-            }
-          },
         },
         tooltip: {
           callbacks: {
             label: (c) => {
               if (c.dataset.label === 'Belastning (staplar)') {
                 return `Belastning: ${c.parsed.y.toFixed(1)}`;
-              }
-              if (c.dataset.label === 'Timmar') {
-                return `Timmar: ${c.parsed.y.toFixed(1)} h`;
               }
               if (c.dataset.label === '_band-lower') return null;
               // Upper-band line tooltip
@@ -6806,7 +6740,6 @@ function renderEffortChart(workouts) {
       },
       scales: {
         y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor }, title: { display: true, text: 'Belastning (skalad)', color: textColor } },
-        y1: { display: _effortHoursVisible, beginAtZero: true, position: 'right', grid: { display: false }, ticks: { color: textColor, callback: v => v + 'h' }, title: { display: true, text: 'Timmar', color: textColor } },
         x: { grid: { display: false }, ticks: { color: textColor, maxRotation: 45, minRotation: 0 } }
       }
     }
@@ -6840,7 +6773,7 @@ function renderEffortChart(workouts) {
       <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.over.border}"></span> Över bandet (>+${pctUp} %) — bevakad signal: kolla återhämtning före nästa hårda pass.</div>
       <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.under.border}"></span> Under bandet (&lt;−${pctDown} %) — låg vecka. OK om planerad deload, annars höj volym/intensitet.</div>
       <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.neutral.border}"></span> Ej graderad — färre än ${EFFORT_BAND_LOOKBACK + 1} aktiva träningsveckor, längre inaktiv lucka eller planerad deload.</div>
-      <div class="effort-legend-item effort-legend-meta">Staplar och mål-band använder vänster axel (normaliserad belastning, rå score ÷ ${effortDivisor}). Blå Timmar-linje använder höger axel. Mål-bandet är -${pctDown} % / +${pctUp} % runt en aktiv baslinje som följer din senaste träningsnivå, växer lugnt (~+${growthPct} % per aktiv vecka) och re-ankras om flera veckor ligger utanför bandet.</div>
+      <div class="effort-legend-item effort-legend-meta">Staplar och mål-band visar normaliserad belastning (rå score ÷ ${effortDivisor}). Mål-bandet är -${pctDown} % / +${pctUp} % runt en aktiv baslinje som följer din senaste träningsnivå, växer lugnt (~+${growthPct} % per aktiv vecka) och re-ankras om flera veckor ligger utanför bandet.</div>
     `;
   }
 
