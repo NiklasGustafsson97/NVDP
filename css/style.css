@@ -671,6 +671,7 @@ select option { background: #1a1a2e; color: var(--text); }
   margin-bottom: 18px; background: var(--bg-card);
   border: 1px solid var(--border); border-radius: var(--radius);
   padding: 14px 8px 10px;
+  position: relative;
 }
 .cal-strip-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -687,6 +688,7 @@ select option { background: #1a1a2e; color: var(--text); }
 
 .cal-strip-scroll-area {
   --cal-cell-gap: 8px;
+  position: relative;
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x mandatory;
@@ -698,6 +700,41 @@ select option { background: #1a1a2e; color: var(--text); }
   cursor: grab;
   scrollbar-width: none;
   -ms-overflow-style: none;
+}
+.cal-strip-wrapper::before,
+.cal-strip-wrapper::after {
+  content: attr(data-left-peek);
+  position: absolute;
+  top: 58px;
+  z-index: 2;
+  width: 14px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  overflow: hidden;
+  color: var(--text);
+  opacity: 0.28;
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 32px;
+  pointer-events: none;
+}
+.cal-strip-wrapper::before {
+  left: 8px;
+  transform: translateX(-1px);
+}
+.cal-strip-wrapper::after {
+  content: attr(data-right-peek);
+  right: 8px;
+  justify-content: flex-end;
+  transform: translateX(1px);
+}
+.cal-strip-wrapper:not([data-left-peek])::before,
+.cal-strip-wrapper[data-left-peek=""]::before,
+.cal-strip-wrapper:not([data-right-peek])::after,
+.cal-strip-wrapper[data-right-peek=""]::after {
+  content: none;
 }
 .cal-strip-scroll-area::-webkit-scrollbar { display: none; }
 .cal-strip-scroll-area.cal-strip-dragging { cursor: grabbing; }
@@ -5385,7 +5422,7 @@ body.chat-mode #view-coach { height: 100%; }
   background: linear-gradient(180deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.005) 100%);
 }
 
-/* ── Hero: probability ring + plan name ─────────────────────────── */
+/* ── Hero: progress ring + plan name ────────────────────────────── */
 .goal-hero {
   display: grid;
   grid-template-columns: 120px 1fr;
@@ -5423,34 +5460,86 @@ body.chat-mode #view-coach { height: 100%; }
   color: var(--text-muted);
   line-height: 1.4;
 }
+.goal-hero-submeta {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.35;
+}
 
-/* ── Probability ring SVG ───────────────────────────────────────── */
-.probability-ring { display: block; }
-.probability-ring-bg {
+/* ── Metric ring SVG ────────────────────────────────────────────── */
+.goal-metric-ring { display: block; }
+.goal-metric-ring-bg {
   stroke: rgba(255,255,255,0.07);
 }
-[data-theme="light"] .probability-ring-bg {
+[data-theme="light"] .goal-metric-ring-bg {
   stroke: rgba(0,0,0,0.07);
 }
-.probability-ring-fg {
+.goal-metric-ring-fg {
   transition: stroke-dasharray 0.6s ease-out;
 }
-.probability-ring--great .probability-ring-fg { stroke: #2ECC71; }
-.probability-ring--good  .probability-ring-fg { stroke: #58B9E0; }
-.probability-ring--warn  .probability-ring-fg { stroke: #F39C12; }
-.probability-ring--risk  .probability-ring-fg { stroke: #E74C3C; }
-.probability-ring--unknown .probability-ring-fg { stroke: var(--text-dim); }
-.probability-ring-num {
+.goal-metric-ring--progress .goal-metric-ring-fg { stroke: #2E86C1; }
+.goal-metric-ring--great .goal-metric-ring-fg { stroke: #2ECC71; }
+.goal-metric-ring--good  .goal-metric-ring-fg { stroke: #58B9E0; }
+.goal-metric-ring--warn  .goal-metric-ring-fg { stroke: #F39C12; }
+.goal-metric-ring--risk  .goal-metric-ring-fg { stroke: #E74C3C; }
+.goal-metric-ring--unknown .goal-metric-ring-fg { stroke: var(--text-dim); }
+.goal-metric-ring-num {
   font-size: 28px;
   font-weight: 800;
   fill: var(--text);
   font-family: var(--font);
 }
-.probability-ring-pct {
+.goal-metric-ring-pct {
   font-size: 12px;
   font-weight: 600;
   fill: var(--text-muted);
   font-family: var(--font);
+}
+
+/* ── Secondary goal status explanation ──────────────────────────── */
+.goal-status {
+  display: grid;
+  grid-template-columns: minmax(0, auto) 1fr;
+  gap: 10px 14px;
+  align-items: center;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+}
+[data-theme="light"] .goal-status {
+  background: rgba(0,0,0,0.02);
+}
+.goal-status--great { border-left-color: #2ECC71; }
+.goal-status--good { border-left-color: #58B9E0; }
+.goal-status--warn { border-left-color: #F39C12; }
+.goal-status--risk { border-left-color: #E74C3C; }
+.goal-status--unknown { border-left-color: var(--text-dim); }
+.goal-status-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+}
+.goal-status-eyebrow {
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.9px;
+  color: var(--text-muted);
+}
+.goal-status-title {
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.25;
+}
+.goal-status-copy {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.35;
 }
 
 /* ── Stat tiles (3-up grid) ─────────────────────────────────────── */
@@ -5715,8 +5804,11 @@ body.chat-mode #view-coach { height: 100%; }
     gap: 14px;
   }
   .goal-hero-ring { width: 92px; height: 92px; flex-basis: 92px; }
-  .goal-hero-ring .probability-ring { width: 92px; height: 92px; }
+  .goal-hero-ring .goal-metric-ring { width: 92px; height: 92px; }
   .goal-hero-title { font-size: 1.2rem; }
+  .goal-status {
+    grid-template-columns: 1fr;
+  }
   .goal-stat-value { font-size: 1rem; }
   .goal-roadmap-node { min-width: 26px; height: 26px; font-size: 0.64rem; }
 }

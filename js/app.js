@@ -1935,29 +1935,38 @@ function _scrollCalToDate(dateStr, { behavior = 'auto' } = {}) {
   scrollArea.scrollTo({ left: cell.offsetLeft, behavior });
 }
 
-function _getVisibleCalDates() {
+function _getCalStripVisibleMeta() {
   const scrollArea = document.getElementById('cal-strip-scroll-area');
   const track = document.getElementById('cal-strip-track');
-  if (!scrollArea || !track || !_calStripAnchorDate) return [];
+  if (!scrollArea || !track || !_calStripAnchorDate) return { dates: [], startIdx: 0, totalCells: 0 };
   const first = track.firstElementChild;
-  if (!first) return [];
+  if (!first) return { dates: [], startIdx: 0, totalCells: 0 };
   const cellWidth = first.getBoundingClientRect().width;
-  if (cellWidth <= 0) return [];
+  if (cellWidth <= 0) return { dates: [], startIdx: 0, totalCells: 0 };
   const gapStr = getComputedStyle(track).columnGap || getComputedStyle(track).gap || '0';
   const gap = parseFloat(gapStr) || 0;
   const step = cellWidth + gap;
   const startIdx = Math.max(0, Math.round(scrollArea.scrollLeft / step));
+  const totalCells = track.children.length;
   const dates = [];
   for (let i = 0; i < CAL_STRIP_VISIBLE_CELLS; i++) {
-    dates.push(isoDate(addDays(_calStripAnchorDate, startIdx + i)));
+    const idx = startIdx + i;
+    if (idx >= totalCells) break;
+    dates.push(isoDate(addDays(_calStripAnchorDate, idx)));
   }
-  return dates;
+  return { dates, startIdx, totalCells };
+}
+
+function _getVisibleCalDates() {
+  return _getCalStripVisibleMeta().dates;
 }
 
 function _updateCalStripHeader() {
   const monthLabel = document.getElementById('cal-strip-month');
   const todayBtn = document.getElementById('cal-strip-today-btn');
-  const visible = _getVisibleCalDates();
+  const scrollArea = document.getElementById('cal-strip-scroll-area');
+  const stripWrapper = scrollArea?.closest('.cal-strip-wrapper');
+  const { dates: visible, startIdx, totalCells } = _getCalStripVisibleMeta();
   if (visible.length === 0) return;
 
   const firstVisible = new Date(visible[0] + 'T12:00:00');
@@ -1968,6 +1977,13 @@ function _updateCalStripHeader() {
 
   const todayStr = isoDate(new Date());
   if (todayBtn) todayBtn.classList.toggle('hidden', visible.includes(todayStr));
+  if (stripWrapper) {
+    const leftDate = startIdx > 0 ? addDays(_calStripAnchorDate, startIdx - 1) : null;
+    const rightIdx = startIdx + visible.length;
+    const rightDate = rightIdx < totalCells ? addDays(_calStripAnchorDate, rightIdx) : null;
+    stripWrapper.dataset.leftPeek = leftDate ? String(leftDate.getDate()) : '';
+    stripWrapper.dataset.rightPeek = rightDate ? String(rightDate.getDate()) : '';
+  }
 }
 
 function _onCalStripScroll() {
@@ -5440,13 +5456,10 @@ function _evaluateMilestone(milestone, plan, workouts) {
   return 'off_track';
 }
 
-// SVG probability ring used in the goal-card-v2 hero. cls is one of
-// 'great' | 'good' | 'warn' | 'risk' | 'unknown' (matches the values
-// _computePlanFormProbability and _computeRaceProbability return) and
-// drives the stroke color via .probability-ring--<cls> in CSS. pct
-// renders as the big number in the center; null / non-finite renders
-// as an em-dash.
-function _renderProbabilityRing(pct, cls) {
+// SVG metric ring used in the goal-card-v2 hero. The primary card now
+// uses it for plan progress, not goal likelihood, so the aria label is
+// supplied by the caller instead of hard-coded as "sannolikhet".
+function _renderGoalMetricRing(pct, cls, ariaLabel) {
   const radius = 52;
   const circumference = 2 * Math.PI * radius;
   const safePct = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : 0;
@@ -5454,15 +5467,18 @@ function _renderProbabilityRing(pct, cls) {
   const remainder = circumference - dash;
   const display = Number.isFinite(pct) ? String(pct) : '—';
   const safeCls = cls || 'unknown';
+  const aria = Number.isFinite(pct)
+    ? `${ariaLabel || 'Mätvärde'} ${display} procent`
+    : `${ariaLabel || 'Mätvärde'} saknas`;
   return `
-    <svg class="probability-ring probability-ring--${safeCls}" viewBox="0 0 120 120"
-         width="120" height="120" role="img" aria-label="Sannolikhet ${display} procent">
-      <circle class="probability-ring-bg" cx="60" cy="60" r="${radius}" fill="none" stroke-width="10"/>
-      <circle class="probability-ring-fg" cx="60" cy="60" r="${radius}" fill="none" stroke-width="10"
+    <svg class="goal-metric-ring goal-metric-ring--${safeCls}" viewBox="0 0 120 120"
+         width="120" height="120" role="img" aria-label="${_escapeHtml(aria)}">
+      <circle class="goal-metric-ring-bg" cx="60" cy="60" r="${radius}" fill="none" stroke-width="10"/>
+      <circle class="goal-metric-ring-fg" cx="60" cy="60" r="${radius}" fill="none" stroke-width="10"
               stroke-dasharray="${dash} ${remainder}" stroke-linecap="round"
               transform="rotate(-90 60 60)"/>
-      <text class="probability-ring-num" x="60" y="62" text-anchor="middle" dominant-baseline="middle">${display}</text>
-      <text class="probability-ring-pct" x="60" y="82" text-anchor="middle" dominant-baseline="middle">%</text>
+      <text class="goal-metric-ring-num" x="60" y="62" text-anchor="middle" dominant-baseline="middle">${display}</text>
+      <text class="goal-metric-ring-pct" x="60" y="82" text-anchor="middle" dominant-baseline="middle">%</text>
     </svg>`;
 }
 
@@ -5484,7 +5500,7 @@ function _buildGoalCoachInsights(plan, indicators, probability, currentWeek, tot
   const out = [];
 
   if (probability && probability.pct !== null) {
-    out.push({ tone: probability.cls || 'unknown', text: `${probability.label} — ${probability.pct} % sannolikhet.` });
+    out.push({ tone: probability.cls || 'unknown', text: `Målstatus: ${probability.label} (${probability.pct} %).` });
   }
 
   if (indicators?.volume?.status?.cls === 'lagging') {
@@ -5520,8 +5536,8 @@ function renderPlanDerivedGoalCard(goal, workouts, plan) {
   const probability = isRace
     ? _computeRaceProbability(goal, workouts, indicators)
     : _computePlanFormProbability(plan, workouts, milestones, indicators);
-  const pct = (probability && probability.pct !== null) ? probability.pct : null;
-  const probCls = probability?.cls || 'unknown';
+  const goalStatusPct = (probability && probability.pct !== null) ? probability.pct : null;
+  const goalStatusCls = probability?.cls || 'unknown';
 
   // Plan dimensions
   const startDate = plan?.start_date
@@ -5547,6 +5563,8 @@ function renderPlanDerivedGoalCard(goal, workouts, plan) {
   const fillPct = totalWeeks > 0
     ? Math.min(100, Math.max(0, (weeksDone / totalWeeks) * 100))
     : 0;
+  const planProgressPct = Math.round(fillPct);
+  const completedWeeksText = `${weeksDone} av ${totalWeeks} veckor klara`;
 
   // Assessment milestones, normalized for the roadmap + cards
   const assessments = (milestones || [])
@@ -5586,6 +5604,21 @@ function renderPlanDerivedGoalCard(goal, workouts, plan) {
     : daysLeft === 0 ? 'Sista dagen!'
     : daysLeft === 1 ? 'Imorgon'
     : `${daysLeft} dagar kvar`;
+  const goalStatusLabel = probability?.label || 'För lite data';
+  const goalStatusBasis = isRace
+    ? 'Baserat på fartprojektion, volym och kontinuitet.'
+    : 'Baserat på milstolpar, volym och kontinuitet.';
+  const goalStatusPctText = Number.isFinite(goalStatusPct)
+    ? ` (${goalStatusPct} %)`
+    : '';
+  const goalStatusHtml = `
+    <div class="goal-status goal-status--${goalStatusCls}">
+      <div class="goal-status-main">
+        <span class="goal-status-eyebrow">Målstatus</span>
+        <span class="goal-status-title">${_escapeHtml(goalStatusLabel)}${goalStatusPctText}</span>
+      </div>
+      <div class="goal-status-copy">${_escapeHtml(goalStatusBasis)}</div>
+    </div>`;
 
   // Roadmap: track + fill + assessment nodes + now-marker
   const nodeCls = (status) => ({
@@ -5653,25 +5686,27 @@ function renderPlanDerivedGoalCard(goal, workouts, plan) {
 
   return `<div class="card goal-card-v2" data-goal-id="${goal.id}">
     <div class="goal-hero">
-      <div class="goal-hero-ring">${_renderProbabilityRing(pct, probCls)}</div>
+      <div class="goal-hero-ring">${_renderGoalMetricRing(planProgressPct, 'progress', 'Planprogress')}</div>
       <div class="goal-hero-text">
-        <div class="goal-hero-eyebrow">Din plan</div>
+        <div class="goal-hero-eyebrow">Planprogress</div>
         <h2 class="goal-hero-title">${_escapeHtml(planName)}</h2>
         <div class="goal-hero-meta">Vecka ${currentWeek} av ${totalWeeks} · ${_escapeHtml(daysLeftTxt)}</div>
+        <div class="goal-hero-submeta">${_escapeHtml(completedWeeksText)}</div>
       </div>
     </div>
+    ${goalStatusHtml}
     <div class="goal-stats">
       <div class="goal-stat">
         <span class="goal-stat-value">${weeksDone}/${totalWeeks}</span>
-        <span class="goal-stat-label">Veckor</span>
+        <span class="goal-stat-label">Veckor klara</span>
       </div>
       <div class="goal-stat">
         <span class="goal-stat-value">${assessmentsDone}/${assessmentsTotal}</span>
-        <span class="goal-stat-label">Bedömningar</span>
+        <span class="goal-stat-label">Bedömningar klara</span>
       </div>
       <div class="goal-stat">
         <span class="goal-stat-value">${avgKmPerWeek} km</span>
-        <span class="goal-stat-label">Snitt/vecka</span>
+        <span class="goal-stat-label">Snitt/vecka hittills</span>
       </div>
     </div>
     ${roadmapHtml}
