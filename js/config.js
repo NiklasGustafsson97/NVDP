@@ -18,19 +18,19 @@ const ACTIVITY_TYPES = [
 ];
 
 const ACTIVITY_COLORS = {
-  Löpning: '#3498DB',
-  Cykel: '#2ECC71',
-  Gym: '#9B59B6',
-  Annat: '#E67E22',
-  Hyrox: '#E74C3C',
-  Stakmaskin: '#1ABC9C',
-  Längdskidor: '#F39C12',
-  Vila: '#555555',
+  Löpning: '#2F80ED',
+  Cykel: '#14B8A6',
+  Gym: '#8B5CF6',
+  Annat: '#94A3B8',
+  Hyrox: '#EF4444',
+  Stakmaskin: '#22C55E',
+  Längdskidor: '#38BDF8',
+  Vila: '#94A3B8',
 };
 
 const PERSON_COLORS = {
-  Niklas: '#2E86C1',
-  Love: '#E74C3C',
+  Niklas: '#2F80ED',
+  Love: '#14B8A6',
 };
 
 // Original training-group profiles for whom the legacy `period_plans`
@@ -97,12 +97,12 @@ const FITNESS_LEVELS = [
 ];
 
 const INTENSITY_ZONE_COLORS = {
-  Z1: '#3498DB',
-  Z2: '#2ECC71',
-  Z3: '#F39C12',
-  Z4: '#E67E22',
-  Z5: '#E74C3C',
-  mixed: '#9B59B6',
+  Z1: '#38BDF8',
+  Z2: '#22C55E',
+  Z3: '#F59E0B',
+  Z4: '#14B8A6',
+  Z5: '#EF4444',
+  mixed: '#8B5CF6',
 };
 
 const PHASE_LABELS = {

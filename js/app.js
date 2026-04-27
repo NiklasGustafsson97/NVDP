@@ -105,6 +105,29 @@ let editingWorkoutId = null;
 const DAY_NAMES = ['Mån', 'Tis', 'Ons', 'Tors', 'Fre', 'Lör', 'Sön'];
 const DAY_NAMES_FULL = ['Måndag', 'Tisdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lördag', 'Söndag'];
 
+// ── Theme colors ──
+function themeColor(name, fallback) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+function themeRgba(rgbName, alpha, fallback) {
+  const rgb = getComputedStyle(document.documentElement).getPropertyValue(rgbName).trim();
+  return rgb ? `rgba(${rgb}, ${alpha})` : fallback;
+}
+function themeActivityColor(type) {
+  return (typeof ACTIVITY_COLORS !== 'undefined' && ACTIVITY_COLORS[type]) || themeColor('--color-primary', '#2F80ED');
+}
+function themeMemberPalette() {
+  return [
+    themeColor('--color-primary', '#2F80ED'),
+    themeColor('--color-secondary', '#14B8A6'),
+    themeColor('--color-success', '#22C55E'),
+    themeColor('--color-recovery', '#8B5CF6'),
+    themeColor('--color-warning', '#F59E0B'),
+    themeColor('--color-info', '#38BDF8'),
+  ];
+}
+
 // ── Init ──
 let _initDone = false;
 
@@ -195,7 +218,7 @@ function _initLeafletMap(el) {
     });
     L.tileLayer(getMapTileUrl(), { maxZoom: 18 }).addTo(map);
     const line = L.polyline(coords, {
-      color: '#3B9DFF', weight: 3.5, opacity: 0.9,
+      color: themeColor('--color-primary', '#2F80ED'), weight: 3.5, opacity: 0.9,
       lineCap: 'round', lineJoin: 'round'
     }).addTo(map);
     map.fitBounds(line.getBounds(), { padding: [4, 4], animate: false });
@@ -2273,7 +2296,7 @@ function showMoreRecent() {
   el.classList.add('feed-stack');
   const batch = _recentWorkouts.slice(_recentShown, _recentShown + RECENT_PAGE);
   const ownerName = currentProfile?.name || 'Du';
-  const ownerColor = currentProfile?.color || ACTIVITY_COLORS.Löpning || '#2E86C1';
+  const ownerColor = currentProfile?.color || themeActivityColor('Löpning');
   const ownerAvatar = currentProfile?.avatar || ownerName[0].toUpperCase();
   const html = batch.map(w => {
     return _buildFeedCardHtml(w, {
@@ -2569,7 +2592,7 @@ async function openWorkoutModal(w) {
           });
           L.tileLayer(getMapTileUrl(), { maxZoom: 18 }).addTo(map);
           L.polyline(coords, { color: '#000', weight: 7, opacity: 0.15, lineCap: 'round', lineJoin: 'round' }).addTo(map);
-          L.polyline(coords, { color: '#3B9DFF', weight: 4, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+          L.polyline(coords, { color: themeColor('--color-primary', '#2F80ED'), weight: 4, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(map);
           map.fitBounds(bounds, { padding: [20, 20], animate: false });
           _wmMapInstance = map;
           setTimeout(() => { try { map.invalidateSize(); map.fitBounds(bounds, { padding: [20, 20], animate: false }); } catch (e) { /* ignore */ } }, 320);
@@ -2602,8 +2625,8 @@ async function openWorkoutModal(w) {
             labels,
             datasets: [{
               data,
-              borderColor: '#9B7CFF',
-              backgroundColor: 'rgba(155,124,255,0.18)',
+              borderColor: themeColor('--color-recovery', '#8B5CF6'),
+              backgroundColor: themeRgba('--color-recovery-rgb', 0.18, 'rgba(139,92,246,0.18)'),
               borderWidth: 2,
               fill: true,
               tension: 0.35,
@@ -2617,7 +2640,7 @@ async function openWorkoutModal(w) {
             plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.parsed.y} m` } } },
             scales: {
               x: { ticks: { color: textDim, maxTicksLimit: 6 }, grid: { display: false } },
-              y: { ticks: { color: textDim, callback: (v) => v + ' m' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+              y: { ticks: { color: textDim, callback: (v) => v + ' m' }, grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') } },
             },
           },
         });
@@ -3743,7 +3766,7 @@ function buildWorkoutBody(w, opts = {}) {
 }
 
 function activityIcon(type) {
-  const c = ACTIVITY_COLORS[type] || 'var(--accent)';
+  const c = themeActivityColor(type);
   const letter = (type || '?')[0].toUpperCase();
   return `<div class="sr-activity-icon" style="background:${c}22;color:${c}">${letter}</div>`;
 }
@@ -6101,7 +6124,7 @@ function renderSeasonActivityBars(workouts, mode) {
     const val = mode === 'km' ? byType[t].km : byType[t].hours;
     const pct = Math.round((val / maxVal) * 100);
     const label = mode === 'km' ? val.toFixed(1) + ' km' : val.toFixed(1) + 'h';
-    const color = 'rgba(123,168,138,0.90)';
+    const color = themeRgba('--color-success-rgb', 0.90, 'rgba(34,197,94,0.90)');
     return `<div class="season-bar-row">
       <span class="season-bar-label">${t}</span>
       <div class="season-bar-track">
@@ -6139,12 +6162,12 @@ const EFFORT_BAND_REANCHOR_STREAK = 4; // after 4 active weeks outside band, tru
 const EFFORT_BAND_REANCHOR_BLEND = 0.70; // blend 70 % toward recent volume when re-anchoring
 const EFFORT_BAND_MAX_UP_STEP = 1.06;  // normal smoothing cap: max +6 % per active week
 const EFFORT_BAND_MAX_DOWN_STEP = 0.92; // normal smoothing cap: max -8 % per active week
-const EFFORT_BAND_FILL = 'rgba(123,168,138,0.10)';
+const EFFORT_BAND_FILL = themeRgba('--color-success-rgb', 0.10, 'rgba(34,197,94,0.10)');
 const EFFORT_BAR_COLORS = {
-  on:      { fill: 'rgba(123,168,138,0.65)', border: 'rgba(123,168,138,0.95)' },
-  under:   { fill: 'rgba(196,165,123,0.65)', border: 'rgba(196,165,123,0.95)' },
-  over:    { fill: 'rgba(201,112,100,0.65)', border: 'rgba(201,112,100,0.95)' },
-  neutral: { fill: 'rgba(138,154,163,0.55)', border: 'rgba(138,154,163,0.85)' },
+  on:      { fill: themeRgba('--color-success-rgb', 0.65, 'rgba(34,197,94,0.65)'), border: themeRgba('--color-success-rgb', 0.95, 'rgba(34,197,94,0.95)') },
+  under:   { fill: themeRgba('--color-warning-rgb', 0.65, 'rgba(245,158,11,0.65)'), border: themeRgba('--color-warning-rgb', 0.95, 'rgba(245,158,11,0.95)') },
+  over:    { fill: themeRgba('--color-danger-rgb', 0.65, 'rgba(239,68,68,0.65)'), border: themeRgba('--color-danger-rgb', 0.95, 'rgba(239,68,68,0.95)') },
+  neutral: { fill: themeRgba('--color-neutral-rgb', 0.55, 'rgba(148,163,184,0.55)'), border: themeRgba('--color-neutral-rgb', 0.85, 'rgba(148,163,184,0.85)') },
 };
 
 function _effortBandClassify(effortData, isDeload) {
@@ -6624,7 +6647,7 @@ function renderMixChart(workouts) {
       if (isNorm) return +effortRawToDisplay(weekEffortByType[w]?.[t] || 0).toFixed(2);
       return +wos.reduce((s, wo) => s + durationWeightedHours(wo), 0).toFixed(2);
     }),
-    backgroundColor: ACTIVITY_COLORS[t] || '#555',
+    backgroundColor: themeActivityColor(t),
     borderRadius: 4
   }));
 
@@ -6638,7 +6661,7 @@ function renderMixChart(workouts) {
         tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)}${mixYUnit}` } }
       },
       scales: {
-        y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + mixYUnit } },
+        y: { stacked: true, beginAtZero: true, grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') }, ticks: { color: '#888', callback: v => v.toFixed(1) + mixYUnit } },
         x: { stacked: true, grid: { display: false }, ticks: { color: '#888' } }
       }
     }
@@ -6731,7 +6754,7 @@ function renderEffortChart(workouts) {
           label: 'Mål-band',
           data: targetUpper,
           type: 'line',
-          borderColor: 'rgba(123,168,138,0.45)',
+          borderColor: themeRgba('--color-success-rgb', 0.45, 'rgba(34,197,94,0.45)'),
           backgroundColor: EFFORT_BAND_FILL,
           borderWidth: 1,
           borderDash: [4, 3],
@@ -6744,7 +6767,7 @@ function renderEffortChart(workouts) {
           label: '_band-lower',
           data: targetLower,
           type: 'line',
-          borderColor: 'rgba(123,168,138,0.45)',
+          borderColor: themeRgba('--color-success-rgb', 0.45, 'rgba(34,197,94,0.45)'),
           borderWidth: 1,
           borderDash: [4, 3],
           pointRadius: 0,
@@ -6798,7 +6821,7 @@ function renderEffortChart(workouts) {
         }
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor }, title: { display: true, text: 'Belastning (skalad)', color: textColor } },
+        y: { beginAtZero: true, grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') }, ticks: { color: textColor }, title: { display: true, text: 'Belastning (skalad)', color: textColor } },
         x: { grid: { display: false }, ticks: { color: textColor, maxRotation: 45, minRotation: 0 } }
       }
     }
@@ -7014,7 +7037,7 @@ function renderPmcChart(workouts) {
   });
 
   const textColor = getComputedStyle(document.body).getPropertyValue('--text-dim').trim() || '#888';
-  const ctlColor = 'rgba(46, 134, 193, 0.9)';
+  const ctlColor = themeRgba('--color-primary-rgb', 0.9, 'rgba(47,128,237,0.9)');
 
   // Personal fitness score on #pmc-ctl-card. Either ratio (if we have a
   // baseline) or raw CTL fallback (if user is still building history).
@@ -7037,7 +7060,7 @@ function renderPmcChart(workouts) {
           label: 'Fitness-score',
           data: fitnessData,
           borderColor: ctlColor,
-          backgroundColor: 'rgba(46,134,193,0.15)',
+          backgroundColor: themeRgba('--color-primary-rgb', 0.15, 'rgba(47,128,237,0.15)'),
           borderWidth: 2,
           pointRadius: 3,
           pointHoverRadius: 5,
@@ -7065,7 +7088,7 @@ function renderPmcChart(workouts) {
         y: {
           min: useRatio ? yMin : 0,
           beginAtZero: !useRatio,
-          grid: { color: 'rgba(255,255,255,0.05)' },
+          grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') },
           ticks: { color: textColor, callback: (v) => useRatio ? Number(v).toFixed(2) : Number(v).toFixed(1) },
           title: { display: true, text: yTitle, color: textColor },
         },
@@ -7594,7 +7617,7 @@ function renderEasyHrChart(workouts) {
       scales: {
         y: {
           beginAtZero: true,
-          grid: { color: 'rgba(255,255,255,0.05)' },
+          grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') },
           ticks: { color: textColor, callback: (v) => v.toFixed(1) },
           title: { display: true, text: 'EF', color: textColor },
         },
@@ -8019,7 +8042,7 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
           beginAtZero: true,
           min: 0,
           max: maxVal,
-          grid: { color: 'rgba(255,255,255,0.05)' },
+          grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') },
           ticks: { color: textColor, callback: (v) => v.toFixed(0) },
           title: { display: true, text: 'VO2max (ml/kg/min)', color: textColor },
         },
@@ -8161,7 +8184,7 @@ async function _loadGroup() {
   renderGroupEffortChart(allWorkouts, members);
 
   // Season totals bars
-  const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
+  const colors = themeMemberPalette();
   const maxTotal = Math.max(...members.map(m => allWorkouts.filter(w => w.profile_id === m.id).reduce((s, w) => s + w.duration_minutes, 0) / 60), 1);
   const barsEl = document.getElementById('group-totals-bars');
   barsEl.innerHTML = members.map((m, i) => {
@@ -8187,7 +8210,7 @@ function setGrpEffortMode(mode) {
 }
 
 function renderGroupChart(allWorkouts, members) {
-  const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
+  const colors = themeMemberPalette();
   const isGrpNorm = grpEffortMode === 'normalized';
   const gUnit = isGrpNorm ? ' belastning' : 'h';
   const weekData = {};
@@ -8239,7 +8262,7 @@ function renderGroupChart(allWorkouts, members) {
         tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)}${gUnit}` } }
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#888', callback: v => v.toFixed(1) + gUnit } },
+        y: { beginAtZero: true, grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') }, ticks: { color: '#888', callback: v => v.toFixed(1) + gUnit } },
         x: { grid: { display: false }, ticks: { color: '#888' } }
       }
     }
@@ -8288,7 +8311,7 @@ function renderGroupEffortChart(allWorkouts, members) {
   if (!canvas) return;
   if (window._chartGroupEffort) window._chartGroupEffort.destroy();
 
-  const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
+  const colors = themeMemberPalette();
   const weekMap = {};
   allWorkouts.forEach(w => {
     const mon = mondayOfWeek(new Date(w.workout_date));
@@ -8331,7 +8354,7 @@ function renderGroupEffortChart(allWorkouts, members) {
         tooltip: { callbacks: { label: c => `${c.dataset.label}: Belastning ${c.parsed.y.toFixed(1)}` } }
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: textColor, callback: v => v.toFixed(1) }, title: { display: true, text: 'Belastning', color: textColor } },
+        y: { beginAtZero: true, grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') }, ticks: { color: textColor, callback: v => v.toFixed(1) }, title: { display: true, text: 'Belastning', color: textColor } },
         x: { grid: { display: false }, ticks: { color: textColor } }
       }
     }
@@ -8339,7 +8362,7 @@ function renderGroupEffortChart(allWorkouts, members) {
 
   const legendEl = document.getElementById('group-effort-legend');
   if (legendEl) {
-    legendEl.innerHTML = `<div class="effort-legend-item"><span class="effort-legend-dot" style="background:rgba(214,99,158,0.8)"></span> Belastning = skalad träningsbelastning (rå score ÷ ${EFFORT_DISPLAY_DIVISOR}), samma som på Din progress.</div>`;
+    legendEl.innerHTML = `<div class="effort-legend-item"><span class="effort-legend-dot" style="background:${themeRgba('--color-primary-rgb', 0.8, 'rgba(47,128,237,0.8)')}"></span> Belastning = skalad träningsbelastning (rå score ÷ ${EFFORT_DISPLAY_DIVISOR}), samma som på Din progress.</div>`;
   }
 
   _renderChartWeekNav('chart-group-effort', allWeekKeys.length, win, () => renderGroupEffortChart(allWorkouts, members));
@@ -8592,7 +8615,7 @@ function renderGroupWeekDetail(allWorkouts, members, plans) {
   const monday = mondayOfWeek(now);
   const todayStr = isoDate(now);
   const todayDow = (now.getDay() + 6) % 7;
-  const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
+  const colors = themeMemberPalette();
 
   const memberStats = members.map((m, mi) => {
     let totalMins = 0;
@@ -8741,7 +8764,7 @@ function _polylineToSvg(polyline, opts) {
   if (!coords || coords.length < 2) return '';
   const w = (opts && opts.width) || 320;
   const h = (opts && opts.height) || 180;
-  const stroke = (opts && opts.stroke) || 'var(--accent, #3B9DFF)';
+  const stroke = (opts && opts.stroke) || themeColor('--color-primary', '#2F80ED');
   const pad = 6;
   let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
   for (const [lat, lng] of coords) {
@@ -8867,7 +8890,7 @@ function _feedSourceBadge(w) {
 function _buildFeedCardHtml(w, opts) {
   opts = opts || {};
   const ownerName = opts.ownerName || '';
-  const ownerColor = opts.ownerColor || '#2E86C1';
+  const ownerColor = opts.ownerColor || themeColor('--color-primary', '#2F80ED');
   const ownerAvatar = (opts.ownerAvatar != null && opts.ownerAvatar !== '') ? String(opts.ownerAvatar) : (ownerName[0] || '?').toUpperCase();
   // Single-character avatars that aren't latin letters/digits are treated
   // as emoji (so we render them transparent w/o the coloured circle).
@@ -8923,12 +8946,12 @@ function _buildFeedCardHtml(w, opts) {
 }
 
 function renderFeedItems(items, members, reactions, comments) {
-  const colors = ['#2E86C1', '#E74C3C', '#2ECC71', '#9B59B6', '#F39C12', '#1ABC9C'];
+  const colors = themeMemberPalette();
   const html = items.map(w => {
     const globalIdx = _feedAllItems.indexOf(w);
     const mi = members.findIndex(m => m.id === w.profile_id);
     const member = members[mi] || {};
-    const color = colors[mi % colors.length] || '#2E86C1';
+    const color = colors[mi % colors.length] || themeColor('--color-primary', '#2F80ED');
     const likes = reactions.filter(r => r.workout_id === w.id && r.reaction === 'like');
     const dislikes = reactions.filter(r => r.workout_id === w.id && r.reaction === 'dislike');
     const myReaction = reactions.find(r => r.workout_id === w.id && r.profile_id === currentProfile.id);
@@ -9957,7 +9980,7 @@ async function openMemberProfile(memberId) {
     const maxCount = typeEntries[0][1];
     typeEntries.forEach(([type, count]) => {
       const pct = Math.round((count / maxCount) * 100);
-      const color = ACTIVITY_COLORS[type] || '#555';
+      const color = themeActivityColor(type);
       html += `<div class="mp-type-row">
         <span class="mp-type-label">${activityEmoji(type)} ${escapeHTML(type)}</span>
         <div class="mp-type-bar-bg"><div class="mp-type-bar" style="width:${pct}%;background:${color};"></div></div>
@@ -9981,7 +10004,7 @@ async function openMemberProfile(memberId) {
       const intBadge = w.intensity ? `<span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
       const mapThumb = w.map_polyline ? `<div class="wo-map wo-map-mini" data-polyline="${escapeHTML(w.map_polyline)}"></div>` : '';
       html += `<div class="workout-item clickable${w.map_polyline ? ' workout-item-with-map' : ''}" data-mp-recent-idx="${idx}">
-        <div class="workout-icon" style="background:${ACTIVITY_COLORS[w.activity_type] || '#555'}22;">${activityEmoji(w.activity_type)}</div>
+        <div class="workout-icon" style="background:${themeActivityColor(w.activity_type)}22;">${activityEmoji(w.activity_type)}</div>
         <div class="workout-info">
           <div class="name">${escapeHTML(w.activity_type)}${intBadge}</div>
           <div class="meta">${formatDate(w.workout_date)}</div>
@@ -12448,7 +12471,7 @@ async function topbarSearchUsers() {
 
   resultsEl.innerHTML = matches.slice(0, 10).map(p => {
     const avatar = p.avatar || p.name[0].toUpperCase();
-    const color = p.color || '#2E86C1';
+    const color = p.color || themeColor('--color-primary', '#2F80ED');
     const isEmoji = p.avatar && p.avatar.length <= 2;
     const status = friendMap[p.id];
     let actionHtml = '';
@@ -12625,7 +12648,7 @@ async function renderFriendList() {
     const p = allProfiles.find(pr => pr.id === fid);
     if (!p) return '';
     const avatar = p.avatar || p.name[0].toUpperCase();
-    const color = p.color || '#2E86C1';
+    const color = p.color || themeColor('--color-primary', '#2F80ED');
     const isEmoji = p.avatar && p.avatar.length <= 2;
     return `<div class="friend-item">
       <div class="friend-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1.2rem' : '0.8rem'};">${escapeHTML(avatar)}</div>
@@ -12729,7 +12752,7 @@ async function renderSocialFeed(append) {
     const p = allProfiles.find(pr => pr.id === w.profile_id);
     const name = p?.name || 'Okänd';
     const avatar = p?.avatar || name[0].toUpperCase();
-    const color = p?.color || '#2E86C1';
+    const color = p?.color || themeColor('--color-primary', '#2F80ED');
     const wReactions = reactionsByWorkout[w.id] || [];
     const wLikes = wReactions.filter(r => r.reaction === 'like');
     const wDislikes = wReactions.filter(r => r.reaction === 'dislike');
@@ -12933,7 +12956,7 @@ async function loadFriendProfile(profileId) {
     // Header.
     const isEmoji = profile.avatar && profile.avatar.length <= 2;
     avatarEl.textContent = profile.avatar || (profile.name || '?')[0].toUpperCase();
-    avatarEl.style.background = isEmoji ? 'transparent' : (profile.color || '#2E86C1');
+    avatarEl.style.background = isEmoji ? 'transparent' : (profile.color || themeColor('--color-primary', '#2F80ED'));
     avatarEl.style.fontSize = isEmoji ? '2rem' : '1.2rem';
     nameEl.textContent = profile.name || 'Okänd';
     titleEl.textContent = profile.name || 'Profil';
