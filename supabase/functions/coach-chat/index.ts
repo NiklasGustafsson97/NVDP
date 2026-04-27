@@ -720,6 +720,52 @@ function weekdayFromText(raw: string | null): number | null {
   return hit ? hit[1] : null;
 }
 
+function userWeekdayIntent(raw: string | null): string | null {
+  if (!raw) return null;
+  const s = raw.toLowerCase();
+  const patterns: Array<{ canonical: string; re: RegExp }> = [
+    { canonical: "söndag", re: /\b(söndag(?:en|ens|s)?|sondag(?:en|ens|s)?|sön\.?|son\.?)\b/gu },
+    { canonical: "måndag", re: /\b(måndag(?:en|ens|s)?|mandag(?:en|ens|s)?|mån\.?)\b/gu },
+    { canonical: "tisdag", re: /\b(tisdag(?:en|ens|s)?|tis\.?)\b/gu },
+    { canonical: "onsdag", re: /\b(onsdag(?:en|ens|s)?|ons\.?)\b/gu },
+    { canonical: "torsdag", re: /\b(torsdag(?:en|ens|s)?|tor\.?)\b/gu },
+    { canonical: "fredag", re: /\b(fredag(?:en|ens|s)?|fre\.?)\b/gu },
+    { canonical: "lördag", re: /\b(lördag(?:en|ens|s)?|lordag(?:en|ens|s)?|lör\.?|lor\.?)\b/gu },
+  ];
+  const hits: Array<{ canonical: string; index: number; preferred: boolean; negated: boolean }> = [];
+  for (const { canonical, re } of patterns) {
+    for (const match of s.matchAll(re)) {
+      const index = match.index ?? 0;
+      const before = s.slice(Math.max(0, index - 32), index);
+      hits.push({
+        canonical,
+        index,
+        preferred: /\b(menar|utan|istället|istallet|snarare)\b/.test(before),
+        negated: /\b(inte|ej)\b/.test(before),
+      });
+    }
+  }
+  if (hits.length === 0) return null;
+  const preferred = hits.filter((h) => h.preferred && !h.negated);
+  if (preferred.length > 0) return preferred.sort((a, b) => a.index - b.index).at(-1)?.canonical ?? null;
+  const nonNegated = hits.filter((h) => !h.negated);
+  const pool = nonNegated.length > 0 ? nonNegated : hits;
+  return pool.sort((a, b) => a.index - b.index).at(-1)?.canonical ?? null;
+}
+
+function guardWorkoutEditWithUserWeekday(call: ToolCall, userMessage: string): ToolCall {
+  if (call.name !== "propose_workout_edit") return call;
+  const weekday = userWeekdayIntent(userMessage);
+  if (!weekday) return call;
+  return {
+    ...call,
+    arguments: {
+      ...call.arguments,
+      workout_date: weekday,
+    },
+  };
+}
+
 async function getActivePlanScope(db: SupabaseClient, profileId: string): Promise<ActivePlanScope> {
   const { data: plan } = await db.from("training_plans")
     .select("id")
@@ -1819,7 +1865,7 @@ serve(async (req) => {
       let lastDiffId: string | null = null;
 
       for (let i = 0; i < 3 && llm.tool_call; i++) {
-        const call = llm.tool_call;
+        const call = guardWorkoutEditWithUserWeekday(llm.tool_call, trimmed);
 
         // apply_plan_changes is user-gated: never run from an LLM turn, only
         // from an explicit `tool` mode POST from the frontend after the user
