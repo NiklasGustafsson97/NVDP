@@ -6104,9 +6104,10 @@ function renderSeasonActivityBars(workouts, mode) {
 // Ny modell:
 //   1. Baslinjen är monotont icke-fallande. En låg vecka kan aldrig
 //      sänka målet nästa vecka.
-//   2. Inbyggd progression: baslinjen ökar som default 5 %/v ("expected
-//      trend"). Det matchar världsledande löpcoachers principer för
-//      progressiv overload (5–10 %/v under buildfaser).
+//   2. Inbyggd progression: baslinjen ökar som default 5 % per AKTIV
+//      träningsvecka ("expected trend"). Tomma kalenderveckor ska inte
+//      compounda målbandet uppåt. Det matchar världsledande löpcoachers
+//      principer för progressiv overload (5–10 %/v under buildfaser).
 //   3. Demonstrerad kapacitet: om någon av de senaste 3 veckorna varit
 //      högre än expected trend lyfts baslinjen till den nivån (kapad
 //      till +10 %/v för att en enstaka explosivvecka inte ska få fart-
@@ -6119,6 +6120,8 @@ const EFFORT_BAND_PCT_DOWN = 0.15;    // band reaches 15 % below the baseline
 const EFFORT_BAND_PCT_UP   = 0.25;    // band reaches 25 % above the baseline
 const EFFORT_BAND_GROWTH   = 0.05;    // expected progression: +5 %/week
 const EFFORT_BAND_GROWTH_CAP = 0.10;  // hard cap on per-week ratchet from a single high week
+const EFFORT_BAND_MIN_ACTIVE_LOAD = 0.25; // ignore zero / near-zero weeks when building the target
+const EFFORT_BAND_RESET_GAP = 3;      // re-seed after 3+ inactive non-deload weeks
 const EFFORT_BAND_FILL = 'rgba(123,168,138,0.10)';
 const EFFORT_BAR_COLORS = {
   on:      { fill: 'rgba(123,168,138,0.65)', border: 'rgba(123,168,138,0.95)' },
@@ -6148,39 +6151,51 @@ function _effortBandClassify(effortData, isDeload) {
   const targetLower = new Array(n).fill(null);
   const classes    = new Array(n).fill('neutral');
 
-  let prevBaseline = null; // monotont icke-fallande över tiden
+  let prevBaseline = null; // monotont icke-fallande inom ett aktivt träningsblock
+  let inactiveGap = 0;
+  let activeHistory = []; // active, non-deload weeks since the latest reset
 
   for (let i = 0; i < n; i++) {
-    if (i < EFFORT_BAND_LOOKBACK) continue;
+    const value = effortData[i] || 0;
+    const isActive = !deload[i] && value >= EFFORT_BAND_MIN_ACTIVE_LOAD;
 
-    // Window: de EFFORT_BAND_LOOKBACK senaste veckorna FÖRE i,
-    // exkl. deload (planerade dippar säger inget om kapacitet).
-    const window = [];
-    for (let j = i - EFFORT_BAND_LOOKBACK; j < i; j++) {
-      if (deload[j]) continue;
-      window.push(effortData[j]);
+    // Empty calendar weeks should not compound the +5 % ramp. After a real
+    // inactive gap, re-seed from fresh active weeks instead of carrying a
+    // stale baseline forward (the cause of the 180-scale chart bug).
+    if (!isActive) {
+      if (!deload[i]) inactiveGap++;
+      if (inactiveGap >= EFFORT_BAND_RESET_GAP) {
+        activeHistory = [];
+        prevBaseline = null;
+      }
+      continue;
     }
 
+    if (inactiveGap >= EFFORT_BAND_RESET_GAP) {
+      activeHistory = [];
+      prevBaseline = null;
+    }
+    inactiveGap = 0;
+
+    if (activeHistory.length < EFFORT_BAND_LOOKBACK) {
+      activeHistory.push({ index: i, value });
+      continue;
+    }
+
+    // Window: the last EFFORT_BAND_LOOKBACK ACTIVE weeks before i, not the
+    // last calendar weeks. This keeps the target anchored to real training
+    // exposure rather than time elapsed since an old block.
+    const window = activeHistory.slice(-EFFORT_BAND_LOOKBACK).map((w) => w.value);
     let nextBaseline;
     if (prevBaseline === null) {
-      // Initialt frö — medel av tillgängliga non-deload-veckor i fönstret.
-      // Faller tillbaka till simple mean av hela fönstret om alla 3 var
-      // deload (osannolikt; user gör ett "deload-block").
-      const sample = window.length > 0
-        ? window
-        : effortData.slice(i - EFFORT_BAND_LOOKBACK, i);
-      const mean = sample.reduce((a, b) => a + b, 0) / sample.length;
-      if (mean <= 0.01) continue; // ingen meningsfull baslinje än
-      nextBaseline = mean;
+      nextBaseline = window.reduce((a, b) => a + b, 0) / window.length;
     } else {
-      // Ratchet: minst +5 %/v från förra baslinjen.
+      // Ratchet one step per ACTIVE week: +5 % expected progression, with a
+      // +10 % cap from demonstrated recent capacity. Low weeks classify as
+      // under but never lower the baseline.
       const expectedTrend = prevBaseline * (1 + EFFORT_BAND_GROWTH);
-      // Demonstrerad kapacitet — den högsta non-deload-veckan i fönstret —
-      // får lyfta baslinjen, men kapas till +10 %/v.
-      const recentMax = window.length > 0 ? Math.max.apply(null, window) : 0;
+      const recentMax = Math.max.apply(null, window);
       const cappedMax = Math.min(recentMax, prevBaseline * (1 + EFFORT_BAND_GROWTH_CAP));
-      // Aldrig under förra baslinjen (monotonicitet) och aldrig under
-      // expectedTrend (default-progression).
       nextBaseline = Math.max(expectedTrend, cappedMax, prevBaseline);
     }
 
@@ -6188,18 +6203,12 @@ function _effortBandClassify(effortData, isDeload) {
     targetLower[i] = +(nextBaseline * (1 - EFFORT_BAND_PCT_DOWN)).toFixed(2);
     targetUpper[i] = +(nextBaseline * (1 + EFFORT_BAND_PCT_UP)).toFixed(2);
 
-    if (deload[i]) {
-      // Deload-veckor klassas alltid som neutral — de är planerade dippar
-      // och ska inte räknas som "under" i countingen.
-      classes[i] = 'neutral';
-    } else {
-      const v = effortData[i];
-      if (v < targetLower[i]) classes[i] = 'under';
-      else if (v > targetUpper[i]) classes[i] = 'over';
-      else classes[i] = 'on';
-    }
+    if (value < targetLower[i]) classes[i] = 'under';
+    else if (value > targetUpper[i]) classes[i] = 'over';
+    else classes[i] = 'on';
 
     prevBaseline = nextBaseline;
+    activeHistory.push({ index: i, value });
   }
 
   return { targetUpper, targetLower, baseline, classes };
@@ -6473,7 +6482,7 @@ function _buildEffortInsight(opts) {
     return {
       band: 'neutral',
       title: 'Inte graderad än',
-      sub: `Bygg ≥ ${EFFORT_BAND_LOOKBACK + 1} v historik så ritar vi mål-bandet.`,
+      sub: `Bygg ≥ ${EFFORT_BAND_LOOKBACK + 1} aktiva träningsveckor så ritar vi mål-bandet.`,
     };
   }
 
@@ -6666,10 +6675,10 @@ function renderEffortChart(workouts) {
         // first 3 weeks visibly leave the band un-drawn instead of
         // interpolating across them.
         {
-          label: `Mål-band (+${Math.round(EFFORT_BAND_GROWTH * 100)} %/v progression, -${Math.round(EFFORT_BAND_PCT_DOWN * 100)} %/+${Math.round(EFFORT_BAND_PCT_UP * 100)} %)`,
+          label: 'Mål-band',
           data: targetUpper,
           type: 'line',
-          borderColor: 'rgba(56,178,124,0.45)',
+          borderColor: 'rgba(123,168,138,0.45)',
           backgroundColor: EFFORT_BAND_FILL,
           borderWidth: 1,
           borderDash: [4, 3],
@@ -6682,7 +6691,7 @@ function renderEffortChart(workouts) {
           label: '_band-lower',
           data: targetLower,
           type: 'line',
-          borderColor: 'rgba(56,178,124,0.45)',
+          borderColor: 'rgba(123,168,138,0.45)',
           borderWidth: 1,
           borderDash: [4, 3],
           pointRadius: 0,
@@ -6753,7 +6762,7 @@ function renderEffortChart(workouts) {
               if (!items.length) return [];
               const i = items[0].dataIndex;
               const cls = classes[i];
-              if (cls === 'neutral') return ['Inget mål-band än (behöver 3 v historik).'];
+              if (cls === 'neutral') return ['Inget mål-band än (behöver 3 aktiva träningsveckor).'];
               if (isDeload[i]) {
                 if (cls === 'under') return ['Planerad deload — under bandet by design.'];
               }
@@ -6795,12 +6804,15 @@ function renderEffortChart(workouts) {
     const pctDown = Math.round(EFFORT_BAND_PCT_DOWN * 100);
     const pctUp = Math.round(EFFORT_BAND_PCT_UP * 100);
     const growthPct = Math.round(EFFORT_BAND_GROWTH * 100);
+    const effortDivisor = (typeof EFFORT_DISPLAY_DIVISOR === 'number' && EFFORT_DISPLAY_DIVISOR > 0)
+      ? EFFORT_DISPLAY_DIVISOR
+      : 600;
     legendEl.innerHTML = `
       <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.on.border}"></span> Inom bandet — i fas med din progression.</div>
       <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.over.border}"></span> Över bandet (>+${pctUp} %) — bevakad signal: kolla återhämtning före nästa hårda pass.</div>
       <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.under.border}"></span> Under bandet (&lt;−${pctDown} %) — låg vecka. OK om planerad deload, annars höj volym/intensitet.</div>
-      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.neutral.border}"></span> Ej graderad — färre än ${EFFORT_BAND_LOOKBACK + 1} v historik eller planerad deload.</div>
-      <div class="effort-legend-item effort-legend-meta">Belastning = normaliserad träningsbelastning (rå score ÷ ${EFFORT_DISPLAY_DIVISOR} ≈ 1 h @ MET 10). Mål-bandet är asymmetriskt (-${pctDown} % / +${pctUp} %) runt en baslinje som växer med +${growthPct} %/v (progressiv overload). Baslinjen kan inte falla från en låg vecka — den höjs när du visar kapacitet, men sänks inte när du dippar.</div>
+      <div class="effort-legend-item"><span class="effort-legend-dot" style="background:${EFFORT_BAR_COLORS.neutral.border}"></span> Ej graderad — färre än ${EFFORT_BAND_LOOKBACK + 1} aktiva träningsveckor, längre inaktiv lucka eller planerad deload.</div>
+      <div class="effort-legend-item effort-legend-meta">Staplar och mål-band använder vänster axel (normaliserad belastning, rå score ÷ ${effortDivisor}). Blå Timmar-linje använder höger axel. Mål-bandet är -${pctDown} % / +${pctUp} % runt en aktiv baslinje som växer +${growthPct} % per aktiv träningsvecka, inte genom tomma kalenderveckor.</div>
     `;
   }
 
