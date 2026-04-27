@@ -7212,6 +7212,8 @@ function _polarizationMaxHr() {
     : DEFAULT_HRMAX;
 }
 
+const POLARIZATION_HR_CUTOFF = 0.70;
+
 function _hasUsableWorkoutHr(w, maxHr) {
   if (_hasHrZoneSeconds(w)) return true;
   const avgHr = Number(w?.avg_hr);
@@ -7234,7 +7236,7 @@ function _classifyWorkoutIntensity(w, ctx) {
   const maxHr = ctx && ctx.maxHr ? ctx.maxHr : _polarizationMaxHr();
   if (avgHr >= 30 && maxHr >= 100) {
     const pctMax = avgHr / maxHr;
-    if (pctMax < 0.75) return { easy: seconds, mod: 0, hard: 0, proxy: false };
+    if (pctMax < POLARIZATION_HR_CUTOFF) return { easy: seconds, mod: 0, hard: 0, proxy: false };
     if (pctMax <= 0.80) return { easy: 0, mod: seconds, hard: 0, proxy: false };
     return { easy: 0, mod: 0, hard: seconds, proxy: false };
   }
@@ -7283,7 +7285,7 @@ function renderPolarizationCard(workouts) {
   const maxHr = _polarizationMaxHr();
   const ctx = { vTByType, maxHr };
 
-  // Polarized model: two buckets — lugnt (<75 % HRmax) vs hårt (>75 % HRmax).
+  // Polarized model: two buckets — lugnt (<70 % HRmax) vs hårt (>70 % HRmax).
   // Measured HR zones arrive as five buckets from the provider. Z3 is the
   // grey zone around the cutover, so split it 50/50 instead of counting all
   // of it as hard. That better matches how the user experiences controlled
@@ -7339,9 +7341,10 @@ function renderPolarizationCard(workouts) {
   segHard.textContent = pHard >= 12 ? Math.round(pHard) + '%' : '';
 
   const fmt = (sec) => (sec / 3600).toFixed(1) + ' h';
+  const cutoffPct = Math.round(POLARIZATION_HR_CUTOFF * 100);
   legendEl.innerHTML = `
-    <div class="polarization-legend-item"><span class="pol-dot pol-dot--easy"></span>Lugnt (&lt;75 % av maxpuls) — ${fmt(easy)} · ${Math.round(pEasy)}%</div>
-    <div class="polarization-legend-item"><span class="pol-dot pol-dot--hard"></span>Hårt (&gt;75 % av maxpuls) — ${fmt(hard)} · ${Math.round(pHard)}%</div>
+    <div class="polarization-legend-item"><span class="pol-dot pol-dot--easy"></span>Lugnt (&lt;${cutoffPct} % av maxpuls) — ${fmt(easy)} · ${Math.round(pEasy)}%</div>
+    <div class="polarization-legend-item"><span class="pol-dot pol-dot--hard"></span>Hårt (&gt;${cutoffPct} % av maxpuls) — ${fmt(hard)} · ${Math.round(pHard)}%</div>
   `;
 
   // Z3-time is still tracked separately so we can warn when "hard" is
@@ -7356,7 +7359,7 @@ function renderPolarizationCard(workouts) {
   } else if (pEasy < 70) {
     band = 'bad';
     title = `Bara ${Math.round(pEasy)}% lugnt`;
-    sub = 'För lite lågintensivt — bygg mer tid under ~75 % av maxpuls.';
+    sub = `För lite lågintensivt — bygg mer tid under ~${cutoffPct} % av maxpuls.`;
   } else if (pHard > 25) {
     band = 'bad';
     title = `${Math.round(pHard)}% hårt`;
@@ -7368,7 +7371,7 @@ function renderPolarizationCard(workouts) {
   } else if (z3DominantHard) {
     band = 'warn';
     title = `${Math.round(pMod)}% i Z3 ("gråzonen")`;
-    sub = 'Styr mer mot tydligt lugnt (<75 % maxpuls) eller tydligt hårt (>75 %) istället.';
+    sub = `Styr mer mot tydligt lugnt (<${cutoffPct} % maxpuls) eller tydligt hårt (>${cutoffPct} %) istället.`;
   } else if (showHrWarning && proxyShare >= 0.5) {
     // When most of the displayed time was classified via the pace
     // proxy, soften the headline so users understand the mix is an
