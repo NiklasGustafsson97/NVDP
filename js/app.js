@@ -3021,6 +3021,7 @@ async function openWorkoutModal(w) {
       });
       const textDim = themeTextDim();
       try {
+        _enableTapTooltip(canvas);
         window._wmElevChart = new Chart(canvas.getContext('2d'), {
           type: 'line',
           data: {
@@ -7222,6 +7223,7 @@ function renderMixChart(workouts) {
     borderRadius: 4
   }));
 
+  _enableTapTooltip(mixCanvas);
   chartMixPersonal = new Chart(mixCanvas.getContext('2d'), {
     type: 'bar',
     data: { labels, datasets },
@@ -7296,6 +7298,7 @@ function renderEffortChart(workouts) {
 
   const textColor = themeTextDim();
 
+  _enableTapTooltip(effortCanvas);
   window._chartEffort = new Chart(effortCanvas.getContext('2d'), {
     type: 'bar',
     data: {
@@ -8886,6 +8889,7 @@ function renderGroupChart(allWorkouts, members) {
     borderWidth: m.id === selfId ? 2.75 : 1.75,
   }));
 
+  _enableTapTooltip(canvas);
   chartGroupWeekly = new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: { labels, datasets },
@@ -8977,6 +8981,7 @@ function renderGroupEffortChart(allWorkouts, members) {
     borderWidth: m.id === selfId ? 2.75 : 1.75,
   }));
 
+  _enableTapTooltip(canvas);
   window._chartGroupEffort = new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: { labels, datasets },
