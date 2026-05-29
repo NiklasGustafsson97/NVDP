@@ -8298,19 +8298,28 @@ function renderEasyHrChart(workouts) {
   }
   const avgEarlier = efSeriesFull[prevIdx];
   const deltaPct = (avgRecent - avgEarlier) / avgEarlier * 100;
+  const pct = Math.abs(deltaPct).toFixed(1);
   let band, title, sub;
   if (deltaPct >= 3) {
     band = 'ok';
-    title = `Aeroba motorn svarar (+${deltaPct.toFixed(1)} %)`;
-    sub = `${deltaPct.toFixed(1)} % snabbare vid samma ansträngning mot för en månad sedan. Håll Z2-andelen, lägg ett tröskelpass nästa vecka.`;
-  } else if (deltaPct <= -3) {
-    band = 'bad';
-    title = `Aerob effektivitet faller (${Math.abs(deltaPct).toFixed(1)} %)`;
-    sub = `${Math.abs(deltaPct).toFixed(1)} % mindre fart vid samma ansträngning mot för en månad sedan. Kolla sömn, värme och om Z2-passen kröp över ${hrMax} bpm.`;
-  } else {
+    title = `Aeroba motorn svarar (+${pct} %)`;
+    sub = `+${pct} % snabbare vid samma ansträngning mot för en månad sedan. Håll Z2-andelen, lägg ett tröskelpass nästa vecka.`;
+  } else if (deltaPct >= 1.2) {
+    band = 'ok';
+    title = `Aerob effektivitet pekar uppåt (+${pct} %)`;
+    sub = `Rullande EF ${avgRecent.toFixed(2)}, +${pct} % mot för en månad sedan. Aeroba motorn bygger - håll Z2-andelen så fortsätter det.`;
+  } else if (deltaPct > -1.2) {
     band = 'neutral';
-    title = `Grundfarten är stabil (${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)} %)`;
-    sub = `Rullande EF ${avgRecent.toFixed(2)}, ${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)} % mot för en månad sedan. Jämn aerob form.`;
+    title = 'Aerob form ligger stilla';
+    sub = `Rullande EF ${avgRecent.toFixed(2)}, i princip oförändrat mot för en månad sedan. Stabilt - men ingen tydlig progress än.`;
+  } else if (deltaPct > -3) {
+    band = 'neutral';
+    title = `Aerob effektivitet dippar något (-${pct} %)`;
+    sub = `Rullande EF ${avgRecent.toFixed(2)}, -${pct} % mot för en månad sedan. Liten dipp - kolla sömn och att Z2-passen inte kröp uppåt.`;
+  } else {
+    band = 'bad';
+    title = `Aerob effektivitet faller (${pct} %)`;
+    sub = `${pct} % mindre fart vid samma ansträngning mot för en månad sedan. Kolla sömn, värme och om Z2-passen kröp över ${hrMax} bpm.`;
   }
   _renderChartInsight('easy-hr-insight', {
     band, title, sub,
@@ -8974,26 +8983,57 @@ function renderGroupChart(allWorkouts, members) {
   // (not the visible window) so the callout always describes "now".
   const latestWeekKey = dataWeeks[dataWeeks.length - 1];
   const latestEntry = weekData[latestWeekKey] || {};
+  const fn = (m) => m.name.split(' ')[0];
+  const fmtVal = (v) => isGrpNorm ? `Belastning ${v.toFixed(1)}` : `${v.toFixed(1)} h`;
+  const joinNames = (arr) => arr.length === 1
+    ? arr[0]
+    : `${arr.slice(0, -1).join(', ')} och ${arr[arr.length - 1]}`;
   let topId = null, topVal = 0, activeMembers = 0, totalVal = 0;
+  let lowMember = null, lowVal = Infinity;
+  const idle = [];
   for (const m of members) {
     const raw = latestEntry[m.id] || 0;
     const val = isGrpNorm ? effortRawToDisplay(raw) : raw / 60;
-    if (val > 0) { activeMembers++; totalVal += val; }
+    if (val > 0) {
+      activeMembers++; totalVal += val;
+      if (val < lowVal) { lowVal = val; lowMember = m; }
+    } else {
+      idle.push(m);
+    }
     if (val > topVal) { topVal = val; topId = m.id; }
   }
   const topMember = members.find((m) => m.id === topId);
   if (topMember && topVal > 0) {
-    const valStr = isGrpNorm ? `Belastning ${topVal.toFixed(1)}` : `${topVal.toFixed(1)} h`;
+    const valStr = fmtVal(topVal);
     const totalStr = isGrpNorm ? `belastning ${totalVal.toFixed(1)}` : `${totalVal.toFixed(1)} h`;
     const activeShare = members.length ? activeMembers / members.length : 0;
+    const topName = fn(topMember);
+
+    let title, sub;
+    if (activeMembers === 1) {
+      title = `${topName} håller gruppen igång`;
+      sub = `${valStr} från en person. Gruppsignalen är för tunn - få in fler loggar innan ni jämför er.`;
+    } else {
+      title = `${activeMembers} av ${members.length} har loggat i veckan`;
+      // Multiple people logged. Call out who trains hardest and who slacks.
+      if (idle.length > 0) {
+        const idlePhrase = idle.length > 2
+          ? `${idle.length} stycken har inte synts till - dags att kliva upp ur soffan.`
+          : `${joinNames(idle.map(fn))} har inte synts till - dags att kliva upp ur soffan.`;
+        sub = `${topName} kör hårdast med ${valStr}. ${idlePhrase}`;
+      } else {
+        const avgVal = totalVal / activeMembers;
+        const hasJumbo = lowMember && lowMember.id !== topMember.id && lowVal < 0.5 * avgVal;
+        sub = hasJumbo
+          ? `${topName} drar lasset med ${valStr}; ${fn(lowMember)} släpar i botten på ${fmtVal(lowVal)}. Dags att pika tillbaka.`
+          : `${topName} leder med ${valStr} men gruppen är jämn - ingen slappar den här veckan.`;
+      }
+    }
+
     _renderChartInsight('group-weekly-insight', {
       band: activeShare >= 0.6 ? 'ok' : 'neutral',
-      title: activeMembers === 1
-        ? `${topMember.name.split(' ')[0]} håller gruppen igång`
-        : `${activeMembers} av ${members.length} har loggat i veckan`,
-      sub: activeMembers === 1
-        ? `${valStr} från en person. Gruppsignalen är för tunn - få in fler loggar innan ni jämför er.`
-        : `Gruppen har totalt ${totalStr}; ${topMember.name.split(' ')[0]} bidrar mest med ${valStr}. Bra läge för en kort avstämning.`,
+      title,
+      sub,
       headline: isGrpNorm ? totalVal.toFixed(1) : totalVal.toFixed(1) + 'h',
       headlineLabel: isGrpNorm ? 'GRUPPLOAD' : 'GRUPPTID',
     });
@@ -9070,20 +9110,32 @@ function renderGroupEffortChart(allWorkouts, members) {
   // Insight: classify each member's most recent week against their own
   // 3-week rolling band (same logic as the personal Effort chart) and turn
   // the group distribution into a coaching action, not just a count.
+  const efn = (m) => m.name.split(' ')[0];
   let nOn = 0, nOver = 0, nUnder = 0, nUngraded = 0;
+  let hardestMember = null, hardestEffort = -1;
+  let lowestMember = null, lowestEffort = Infinity;
+  const overMembers = [], underMembers = [], idleMembers = [];
   for (const m of members) {
     const memberSeriesAll = allWeekKeys.map((k) =>
       +effortRawToDisplay(weekMap[k]?.[m.id]?.effort || 0).toFixed(2)
     );
     const { classes } = _effortBandClassify(memberSeriesAll);
     const last = classes[classes.length - 1];
+    const latestEffort = memberSeriesAll[memberSeriesAll.length - 1] || 0;
+    if (latestEffort > hardestEffort) { hardestEffort = latestEffort; hardestMember = m; }
+    if (latestEffort === 0) idleMembers.push(m);
+    else if (latestEffort < lowestEffort) { lowestEffort = latestEffort; lowestMember = m; }
     if (last === 'on') nOn++;
-    else if (last === 'over') nOver++;
-    else if (last === 'under') nUnder++;
+    else if (last === 'over') { nOver++; overMembers.push(m); }
+    else if (last === 'under') { nUnder++; underMembers.push(m); }
     else nUngraded++;
   }
   const total = members.length;
   const graded = total - nUngraded;
+  const canName = total >= 2;
+  // Who slacks: prefer a member who logged nothing, else the under-zone one,
+  // else simply the lowest effort this week.
+  const slackerMember = idleMembers[0] || underMembers[0] || lowestMember;
   let band, title, sub;
   if (total === 0) {
     band = 'neutral';
@@ -9097,18 +9149,26 @@ function renderGroupEffortChart(allWorkouts, members) {
     band = 'warn';
     title = 'Flera i gruppen pressar för hårt';
     sub = `${nOver} av ${graded} graderade ligger över sin zon. Synka återhämtning innan nästa gemensamma kvalitetspass.`;
+    if (canName && hardestMember) sub += ` ${efn(hardestMember)} kör hårdast - dra i handbromsen först.`;
   } else if (nUnder > nOn && nUnder >= nOver) {
     band = 'neutral';
     title = 'Gruppen tappar träningsstimulus';
     sub = `${nUnder} av ${graded} graderade ligger under sin zon. Om det inte är taper behövs mer konsekvent volym nästa vecka.`;
+    if (canName && slackerMember) sub += ` ${efn(slackerMember)} har gått i ide - knuffa igång hen.`;
   } else if (nOn > 0) {
     band = 'ok';
     title = 'Gruppen tränar kontrollerat';
     sub = `${nOn} av ${graded} graderade ligger i rätt zon. Det är en bra vecka att hålla planen snarare än att jaga extra.`;
+    if (canName && hardestMember) sub += ` ${efn(hardestMember)} ligger tyngst i belastning just nu.`;
   } else {
     band = 'neutral';
     title = 'Blandad gruppvecka';
-    sub = `Signalen är splittrad. Använd grafen för att se vem som behöver lugnare respektive mer konsekvent träning.`;
+    sub = `Signalen är splittrad.`;
+    if (canName && hardestMember && slackerMember && hardestMember.id !== slackerMember.id) {
+      sub += ` ${efn(hardestMember)} kör hårdast, ${efn(slackerMember)} slappar mest - säg åt varandra.`;
+    } else {
+      sub += ` Använd grafen för att se vem som behöver lugnare respektive mer konsekvent träning.`;
+    }
   }
   _renderChartInsight('group-effort-insight', { band, title, sub });
 }
