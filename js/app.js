@@ -1424,6 +1424,26 @@ function _weekAxisLabel(visibleWeeks, i, isDeload) {
   return showYear ? [base, String(year)] : base;
 }
 
+/** Touch ergonomics: by default Chart.js keeps a tooltip pinned after a tap
+ *  on mobile, which clutters small screens. This makes the tooltip behave
+ *  like a press-and-hold readout — it shows while the finger is down and
+ *  clears on release. Desktop (mouse) is unaffected. Bound once per canvas;
+ *  the handler resolves the current chart via Chart.getChart so it survives
+ *  the destroy/recreate cycle these charts go through on every re-render. */
+function _enableHoldTooltip(canvas) {
+  if (!canvas || canvas._holdTooltipBound) return;
+  canvas._holdTooltipBound = true;
+  const hide = () => {
+    const chart = (typeof Chart !== 'undefined' && Chart.getChart) ? Chart.getChart(canvas) : null;
+    if (!chart || !chart.tooltip) return;
+    chart.setActiveElements([]);
+    chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+    chart.update('none');
+  };
+  canvas.addEventListener('touchend', hide, { passive: true });
+  canvas.addEventListener('touchcancel', hide, { passive: true });
+}
+
 /** Return the N-week window ending at anchorIdx (clamped). If anchorIdx is
  *  null/undefined, defaults to the latest window. `size` defaults to the
  *  app-wide default (12) but per-chart callers should pass the user-selected
@@ -5042,8 +5062,6 @@ async function _loadTrends() {
   // Week summary card moved to dashboard - clear here to avoid duplication
   const deltaEl = document.getElementById('volume-delta');
   if (deltaEl) deltaEl.innerHTML = '';
-  const wsCard = document.getElementById('weekly-summary-card');
-  if (wsCard) wsCard.classList.add('hidden');
 
   if (PLAN_GENERATION_ENABLED) {
     await ensureActivePlanLoaded(currentProfile.id);
@@ -5076,37 +5094,8 @@ async function _loadTrends() {
   renderEasyHrChart(myWorkouts);
   renderVo2maxChart(myWorkouts);
 
-  // Weekly summary + recent workouts (moved from dashboard)
-  const now2 = new Date();
-  const monday2 = mondayOfWeek(now2);
-  const sunday2 = addDays(monday2, 6);
-  const weekWorkouts2 = await fetchWorkouts(currentProfile.id, isoDate(monday2), isoDate(sunday2));
-
-  let weekPlanItems2 = [];
-  if (PLAN_GENERATION_ENABLED) {
-    if (!_activePlan) {
-      _activePlan = await fetchActivePlan(currentProfile.id);
-      if (_activePlan) _activePlanWeeks = await fetchPlanWeeks(_activePlan.id);
-    }
-    if (_activePlan) {
-      const todayStr2 = isoDate(now2);
-      if (todayStr2 >= _activePlan.start_date && todayStr2 <= _activePlan.end_date) {
-        const pw = await fetchPlanWorkoutsByDate(_activePlan.id, isoDate(monday2), isoDate(sunday2));
-        weekPlanItems2 = pw.map(p => ({ day_of_week: p.day_of_week, label: p.label || p.activity_type, description: p.description, is_rest: p.is_rest }));
-      }
-    }
-  }
-  if (weekPlanItems2.length === 0) {
-    const periods = await fetchPeriods();
-    const todayStr2 = isoDate(now2);
-    const period = periods.find(p => todayStr2 >= p.start_date && todayStr2 <= p.end_date);
-    if (period) {
-      const plans = await fetchPlans(period.id);
-      weekPlanItems2 = plans.map(p => ({ day_of_week: p.day_of_week, label: stripDayPrefix(p.label), description: p.description, is_rest: p.is_rest }));
-    }
-  }
-  renderWeeklySummary(weekWorkouts2, weekPlanItems2, monday2, currentProfile);
-
+  // Recent workouts (moved from dashboard). The duplicate "Veckosummering"
+  // card was removed — "Den här veckan" at the top covers the same stats.
   const { data: recent } = await sb.from('workouts').select('*')
     .eq('profile_id', currentProfile.id)
     .order('workout_date', { ascending: false });
@@ -7661,6 +7650,7 @@ function renderPmcChart(workouts) {
     },
   });
 
+  _enableHoldTooltip(ctlCanvas);
   _renderChartWeekNav('chart-pmc-ctl', allWeekKeys.length, win, () => renderPmcChart(workouts));
 
   // Insight compares the LAST visible week against the FIRST visible week
@@ -8143,6 +8133,15 @@ function renderEasyHrChart(workouts) {
   });
 
   const textColor = themeTextDim();
+  // Auto-zoom the y-axis to the visible data (with ~15 % padding) so the
+  // curve's week-to-week movement is readable instead of being flattened
+  // against a 0-anchored axis.
+  const efNums = efData.filter((v) => v !== null);
+  const efMin = efNums.length ? Math.min(...efNums) : 0;
+  const efMax = efNums.length ? Math.max(...efNums) : 10;
+  const efSpan = Math.max(efMax - efMin, 0.5);
+  const efYMin = Math.max(0, +(efMin - efSpan * 0.15).toFixed(2));
+  const efYMax = +(efMax + efSpan * 0.15).toFixed(2);
   window._chartEasyHr = new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: {
@@ -8183,7 +8182,9 @@ function renderEasyHrChart(workouts) {
       },
       scales: {
         y: {
-          beginAtZero: true,
+          beginAtZero: false,
+          min: efYMin,
+          max: efYMax,
           grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') },
           ticks: { color: textColor, callback: (v) => v.toFixed(1) },
           title: { display: true, text: 'EF', color: textColor },
@@ -8202,6 +8203,7 @@ function renderEasyHrChart(workouts) {
   const earlierEf = efDataAll.slice(-8, -4);
   const avgRecent = recentEf.reduce((a, b) => a + b, 0) / recentEf.length;
 
+  _enableHoldTooltip(canvas);
   _renderChartWeekNav('chart-easy-hr', allWeekKeys.length, win, () => renderEasyHrChart(workouts));
 
   if (earlierEf.length === 0) {
@@ -8554,10 +8556,14 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
   if (withTrend) {
     for (const p of points) yValues.push(p.smoothed);
   }
-  // Y-axis anchored at 0 so a small dip doesn't visually look like a 90 %
-  // collapse. Trade-off: the trend line lives in the upper portion of the
-  // canvas, but absolute scale is honest. Upper bound gets ~10 % headroom.
-  const maxVal = yValues.length ? Math.ceil(Math.max(...yValues) * 1.1) : 60;
+  // Auto-zoom the y-axis to the data range (with ~15 % padding) so the
+  // week-to-week movement is visible. A 0-anchored axis flattened the trend
+  // into a near-flat line near the top of the canvas.
+  const minRaw = yValues.length ? Math.min(...yValues) : 0;
+  const maxRaw = yValues.length ? Math.max(...yValues) : 60;
+  const vo2Span = Math.max(maxRaw - minRaw, 1);
+  const maxVal = Math.ceil(maxRaw + vo2Span * 0.15);
+  const minVal = Math.max(0, Math.floor(minRaw - vo2Span * 0.15));
 
   // Two layers:
   //   1. Weekly-average dots = one dot per ISO week, anchored mid-week.
@@ -8635,8 +8641,8 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
       },
       scales: {
         y: {
-          beginAtZero: true,
-          min: 0,
+          beginAtZero: false,
+          min: minVal,
           max: maxVal,
           grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') },
           ticks: { color: textColor, callback: (v) => v.toFixed(0) },
@@ -8672,6 +8678,7 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
       },
     },
   });
+  _enableHoldTooltip(canvas);
 }
 
 // ═══════════════════════
