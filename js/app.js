@@ -1307,7 +1307,7 @@ function calendarBaselineMonday(fromMonday) {
 // year boundary because weekNumber() is year-local. These helpers give every
 // chart a contiguous Monday-by-Monday timeline plus a 12-week sliding window.
 
-const WEEKLY_CHART_WINDOW_OPTIONS = [6, 12, 36];
+const WEEKLY_CHART_WINDOW_OPTIONS = [6, 12, 36, 52, 104];
 const WEEKLY_CHART_WINDOW_DEFAULT = 12;
 // Kept for any legacy callers / constants that still reference it.
 const WEEKLY_CHART_WINDOW = WEEKLY_CHART_WINDOW_DEFAULT;
@@ -1338,7 +1338,9 @@ function _buildContiguousWeeks(firstMonIso, lastMonIso) {
   const out = [];
   let cursor = new Date(start.getTime());
   // Hard cap to avoid runaway loops if data ever contains a bad date.
-  let safety = 520;
+  // 1040 weeks (~20 years) covers the 2 å selector with headroom while
+  // still bounding worst-case allocation if a stray date sneaks in.
+  let safety = 1040;
   while (cursor <= end && safety-- > 0) {
     out.push(isoDate(cursor));
     cursor = addDays(cursor, 7);
@@ -1399,10 +1401,13 @@ function _renderChartWeekNav(chartId, totalWeeks, windowInfo, rerender) {
     nav = document.createElement('div');
     nav.className = 'chart-week-nav';
     nav.dataset.chart = chartId;
-    const sizeButtons = WEEKLY_CHART_WINDOW_OPTIONS.map((n) => `
+    const sizeButtons = WEEKLY_CHART_WINDOW_OPTIONS.map((n) => {
+      const label = n === 52 ? '1 å' : n === 104 ? '2 å' : `${n} v`;
+      return `
       <button type="button" class="chart-week-nav-size-btn" data-size="${n}"
-              role="radio" aria-checked="false" aria-label="Visa ${n} veckor">${n} v</button>
-    `).join('');
+              role="radio" aria-checked="false" aria-label="Visa ${n} veckor">${label}</button>
+    `;
+    }).join('');
     nav.innerHTML = `
       <div class="chart-week-nav-size" role="radiogroup" aria-label="Antal veckor">${sizeButtons}</div>
       <button type="button" class="chart-week-nav-btn" data-dir="prev" aria-label="Föregående fönster">‹</button>
@@ -2044,9 +2049,7 @@ function _getVisibleCalDates() {
 function _updateCalStripHeader() {
   const monthLabel = document.getElementById('cal-strip-month');
   const todayBtn = document.getElementById('cal-strip-today-btn');
-  const scrollArea = document.getElementById('cal-strip-scroll-area');
-  const stripWrapper = scrollArea?.closest('.cal-strip-wrapper');
-  const { dates: visible, startIdx, totalCells } = _getCalStripVisibleMeta();
+  const { dates: visible } = _getCalStripVisibleMeta();
   if (visible.length === 0) return;
 
   const firstVisible = new Date(visible[0] + 'T12:00:00');
@@ -2057,13 +2060,6 @@ function _updateCalStripHeader() {
 
   const todayStr = isoDate(new Date());
   if (todayBtn) todayBtn.classList.toggle('hidden', visible.includes(todayStr));
-  if (stripWrapper) {
-    const leftDate = startIdx > 0 ? addDays(_calStripAnchorDate, startIdx - 1) : null;
-    const rightIdx = startIdx + visible.length;
-    const rightDate = rightIdx < totalCells ? addDays(_calStripAnchorDate, rightIdx) : null;
-    stripWrapper.dataset.leftPeek = leftDate ? String(leftDate.getDate()) : '';
-    stripWrapper.dataset.rightPeek = rightDate ? String(rightDate.getDate()) : '';
-  }
 }
 
 function _onCalStripScroll() {
@@ -7111,12 +7107,10 @@ function _ewma(values, tau) {
   return out;
 }
 
-// Day-index used as the "where I started" anchor for the personal
-// fitness score. CTL is an EWMA with tau=42d, so we wait ~30 days for the
-// curve to settle into a meaningful baseline before we anchor to it. New
-// users with less history get a "bygger baseline" insight instead of a
-// noisy ratio that explodes on tiny denominators.
-const FITNESS_BASELINE_DAY = 28;
+// Minimum CTL we'll accept as a denominator for the in-window ratio.
+// Below this, the first visible week is too close to zero and dividing by
+// it would explode the rest of the curve. We fall back to raw CTL in that
+// case so the chart still renders something honest.
 const FITNESS_BASELINE_MIN_CTL = 1.0;
 
 function renderPmcChart(workouts) {
@@ -7124,11 +7118,11 @@ function renderPmcChart(workouts) {
   if (!ctlCanvas || typeof Chart === 'undefined') return;
   if (window._chartPmcCtl) window._chartPmcCtl.destroy();
 
-  // Find earliest workout so we can build the FULL CTL history (needed for
-  // the personal fitness baseline). The chart itself only shows the latest
-  // 12 ISO weeks (matching every other progress chart's cadence), but the
-  // ratio denominator is still anchored to the user's first month of
-  // training so the headline number is comparable across windows.
+  // Build the FULL daily CTL series across the user's whole training
+  // history. The chart only renders the currently selected window (6 v /
+  // 12 v / 36 v / 1 å / 2 å), but we still build the full curve up front
+  // so the EWMA at the left edge of the window has real history behind
+  // it instead of starting from zero.
   const allDates = [];
   for (const w of workouts) if (w.workout_date) allDates.push(w.workout_date);
   if (allDates.length === 0) {
@@ -7154,19 +7148,6 @@ function renderPmcChart(workouts) {
   const fullLoads = fullSeries.map((s) => effortRawToDisplay(s.load));
   const fullCtl = _ewma(fullLoads, 42);
 
-  // Personal fitness baseline = CTL on day FITNESS_BASELINE_DAY of the
-  // user's training history (or null if they don't have that much data
-  // yet, or their CTL still hasn't crossed the meaningful-baseline floor).
-  let baselineCtl = null;
-  let baselineDateIso = null;
-  if (fullCtl.length > FITNESS_BASELINE_DAY) {
-    const candidate = fullCtl[FITNESS_BASELINE_DAY];
-    if (candidate >= FITNESS_BASELINE_MIN_CTL) {
-      baselineCtl = candidate;
-      baselineDateIso = fullSeries[FITNESS_BASELINE_DAY]?.date || null;
-    }
-  }
-
   // Aggregate the daily CTL into ISO-week buckets so the x-axis can use
   // V-numbers like every other Din progress chart. We take the mean of the
   // CTL values within each week — CTL itself is already a smoothed EWMA so
@@ -7187,8 +7168,9 @@ function renderPmcChart(workouts) {
     return;
   }
 
-  // Contiguous Monday timeline + 12-week sliding window navigator, same
-  // pattern as renderEffortChart / renderEasyHrChart.
+  // Contiguous Monday timeline + sliding window navigator, same pattern
+  // as renderEffortChart / renderEasyHrChart. Window size pulls from the
+  // user's selection (6 / 12 / 36 / 52 / 104 weeks).
   const allWeekKeys = _buildContiguousWeeks(dataWeeks[0], dataWeeks[dataWeeks.length - 1]);
   const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-pmc-ctl'], _getChartWindowSize('chart-pmc-ctl'));
   const visibleWeeks = win.weeks;
@@ -7198,17 +7180,33 @@ function renderPmcChart(workouts) {
     return e ? e.sum / e.count : null;
   });
 
+  // Personal fitness baseline = the first non-null weekly CTL inside the
+  // CURRENTLY VISIBLE window. The first dot in the chart is therefore
+  // always 1.00 and the rest of the line shows how fitness has evolved
+  // since that week. Changing the window (6 v / 12 v / 36 v / 1 å / 2 å)
+  // or paging prev/next automatically re-baselines.
+  let windowBaselineCtl = null;
+  let windowBaselineIdx = -1;
+  for (let i = 0; i < ctl.length; i++) {
+    if (ctl[i] !== null && ctl[i] >= FITNESS_BASELINE_MIN_CTL) {
+      windowBaselineCtl = ctl[i];
+      windowBaselineIdx = i;
+      break;
+    }
+  }
+  const windowBaselineWeekIso = windowBaselineIdx >= 0 ? visibleWeeks[windowBaselineIdx] : null;
+
   const textColor = themeTextDim();
   const ctlColor = themeChartRgba('fitness', 0.9, 'rgba(37,99,235,0.9)');
 
-  // Personal fitness score on #pmc-ctl-card. Either ratio (if we have a
-  // baseline) or raw CTL fallback (if user is still building history).
-  // The ratio version starts at ~1.0 and drifts upward as fitness improves
-  // vs day 28 of training.
-  const useRatio = baselineCtl !== null;
+  // Either ratio (if the visible window has a usable baseline) or raw CTL
+  // fallback (if every visible week is below the meaningful-baseline
+  // floor — typical for a brand-new user whose first visible week is
+  // still ramping from zero).
+  const useRatio = windowBaselineCtl !== null;
   const fitnessData = ctl.map((c) => {
     if (c === null) return null;
-    return useRatio ? +(c / baselineCtl).toFixed(3) : +c.toFixed(2);
+    return useRatio ? +(c / windowBaselineCtl).toFixed(3) : +c.toFixed(2);
   });
   const yTitle = useRatio ? 'Fitness-score' : 'Belastning (bygger baseline)';
   const numericData = fitnessData.filter((v) => v !== null);
@@ -7264,30 +7262,36 @@ function renderPmcChart(workouts) {
 
   _renderChartWeekNav('chart-pmc-ctl', allWeekKeys.length, win, () => renderPmcChart(workouts));
 
-  // Insight uses the FULL daily series so the headline always describes
-  // "now", not whichever 12-week window the user happens to be browsing.
-  const lastCtl = fullCtl[fullCtl.length - 1];
-
-  if (baselineCtl !== null) {
-    const ratio = lastCtl / baselineCtl;
+  // Insight compares the LAST visible week against the FIRST visible week
+  // (same baseline the chart uses). Headline ratio = last_visible / first_visible.
+  if (useRatio) {
+    const lastVisibleCtl = (() => {
+      for (let i = ctl.length - 1; i >= 0; i--) if (ctl[i] !== null) return ctl[i];
+      return null;
+    })();
+    if (lastVisibleCtl === null) {
+      _renderChartInsight('pmc-ctl-insight', { band: 'neutral', title: 'Valt fönster saknar data', sub: 'Bläddra bakåt eller välj ett bredare fönster så finns det material att jämföra mot.' });
+      return;
+    }
+    const ratio = lastVisibleCtl / windowBaselineCtl;
     const ratioPct = (ratio - 1) * 100;
-    const baselineDate = baselineDateIso
-      ? (() => { const d = new Date(baselineDateIso + 'T00:00:00'); return `V${weekNumber(d)} ${d.getFullYear()}`; })()
-      : 'start';
+    const baselineLabel = windowBaselineWeekIso
+      ? (() => { const d = new Date(windowBaselineWeekIso + 'T00:00:00'); return `V${weekNumber(d)} ${d.getFullYear()}`; })()
+      : 'start på fönstret';
     const absPct = Math.abs(ratioPct).toFixed(0);
     let title, sub;
     if (ratio >= 1.10) {
       title = 'Fitnessen bygger tydligt';
-      sub = `Du ligger +${ratioPct.toFixed(0)} % mot ankaret från ${baselineDate}. Fortsätt progressivt, men låt återhämtningen skydda trenden.`;
+      sub = `+${ratioPct.toFixed(0)} % sedan ${baselineLabel}. Fortsätt progressivt, men låt återhämtningen skydda trenden.`;
     } else if (ratio >= 1.05) {
       title = 'Fitnessen rör sig åt rätt håll';
-      sub = `+${ratioPct.toFixed(0)} % mot ${baselineDate}. Det här är robust kapacitet, inte bara en bra dag.`;
+      sub = `+${ratioPct.toFixed(0)} % sedan ${baselineLabel}. Det här är robust kapacitet, inte bara en bra dag.`;
     } else if (ratio >= 0.95) {
       title = 'Fitnessen är stabil';
-      sub = `${ratioPct >= 0 ? '+' : ''}${ratioPct.toFixed(0)} % mot ${baselineDate}. Behåll rytmen och jaga hellre kontinuitet än snabba hopp.`;
+      sub = `${ratioPct >= 0 ? '+' : ''}${ratioPct.toFixed(0)} % sedan ${baselineLabel}. Behåll rytmen och jaga hellre kontinuitet än snabba hopp.`;
     } else {
       title = 'Fitnessen har tappat från ankaret';
-      sub = `${absPct} % under ${baselineDate}. Bygg tillbaka med 1-2 veckor jämn volym innan du pressar kvalitet.`;
+      sub = `${absPct} % under ${baselineLabel}. Bygg tillbaka med 1-2 veckor jämn volym innan du pressar kvalitet.`;
     }
     _renderChartInsight('pmc-ctl-insight', {
       band: ratio >= 1.05 ? 'ok' : (ratio >= 0.95 ? 'neutral' : 'warn'),
@@ -7297,11 +7301,10 @@ function renderPmcChart(workouts) {
       headlineLabel: 'FITNESS',
     });
   } else {
-    const daysSoFar = fullCtl.length;
     _renderChartInsight('pmc-ctl-insight', {
       band: 'neutral',
-      title: 'Första månaden kalibrerar kurvan',
-      sub: `${daysSoFar} av ${FITNESS_BASELINE_DAY} dagar finns. Fortsätt logga konsekvent så blir fitness-jämförelsen meningsfull.`,
+      title: 'Bygger baseline',
+      sub: 'Första veckan i fönstret ligger för nära noll för att jämföra mot. Fortsätt logga konsekvent eller välj ett senare fönster.',
     });
   }
 }
@@ -7862,6 +7865,12 @@ function _vdotFromWorkout(w) {
 const VO2MAX_DEFAULT_RESTING_HR = 55;
 const VO2MAX_MIN_HRR_PCT = 0.45;
 const VO2MAX_MAX_HRR_PCT = 0.97;
+// Empirical calibration: the raw ACSM+HRR formula overestimates real-world
+// VO2max from Strava-style avg_hr/avg_pace data by ~7-10 % because (a) HR
+// drift during a run inflates avg_hr, (b) warm-up dilutes the steady-state
+// relationship, and (c) %HRR slightly overstates %VO2R (Swain 1997).
+// Scaling by 0.92 brings values in line with what Garmin/Firstbeat reports.
+const VO2MAX_CALIBRATION = 0.92;
 
 function _vo2maxRestingHr() {
   const restingHr = currentProfile && Number(currentProfile.user_resting_hr);
@@ -7891,7 +7900,7 @@ function _vo2maxEstimateFromWorkout(w, hrMax) {
   if (maxHr - restingHr < 40 || avgHr <= restingHr) return null;
   const hrrPct = (avgHr - restingHr) / (maxHr - restingHr);
   if (hrrPct < VO2MAX_MIN_HRR_PCT || hrrPct > VO2MAX_MAX_HRR_PCT) return null;
-  const value = 3.5 + ((vo2Cost - 3.5) / hrrPct);
+  const value = (3.5 + ((vo2Cost - 3.5) / hrrPct)) * VO2MAX_CALIBRATION;
   if (!Number.isFinite(value) || value < 20 || value > 90) return null;
   return { value, hrrPct, restingHr, vo2Cost };
 }
@@ -8111,29 +8120,57 @@ function renderVo2maxChart(workouts) {
 
 function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
   const textColor = themeTextDim();
-  const yValues = points.map((p) => p.y);
+
+  // Aggregate qualifying passes into ISO-week buckets so the chart shows
+  // one anchor dot per week (weekly mean of qualifying VO2max estimates)
+  // instead of every individual run. Per-pass scatter was noisy and made
+  // small day-to-day variation feel meaningful when it wasn't.
+  const weeklyMap = new Map(); // mondayMs -> { sum, count, weekStartIso }
+  for (const p of points) {
+    const monDate = mondayOfWeek(new Date(p.x));
+    const monMs = monDate.valueOf();
+    if (!weeklyMap.has(monMs)) {
+      weeklyMap.set(monMs, { sum: 0, count: 0, weekStartIso: isoDate(monDate) });
+    }
+    const e = weeklyMap.get(monMs);
+    e.sum += p.y;
+    e.count += 1;
+  }
+  // Anchor each weekly dot at mid-week (Thursday) so a week with one
+  // Saturday run doesn't look like it landed on the previous Monday.
+  const weeklyPoints = [...weeklyMap.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([monMs, b]) => ({
+      x: monMs + 3 * _MS_PER_DAY,
+      y: +(b.sum / b.count).toFixed(1),
+      count: b.count,
+      weekStartIso: b.weekStartIso,
+    }));
+
+  const yValues = weeklyPoints.map((p) => p.y);
   if (withTrend) {
     for (const p of points) yValues.push(p.smoothed);
   }
   // Y-axis anchored at 0 so a small dip doesn't visually look like a 90 %
   // collapse. Trade-off: the trend line lives in the upper portion of the
   // canvas, but absolute scale is honest. Upper bound gets ~10 % headroom.
-  const maxVal = Math.ceil(Math.max(...yValues) * 1.1);
+  const maxVal = yValues.length ? Math.ceil(Math.max(...yValues) * 1.1) : 60;
 
   // Two layers:
-  //   1. Faint scattered dots = each individual qualifying run estimate.
-  //   2. Thick smoothed line = 28-day rolling mean. This is the number
-  //      the user should anchor "Är jag i bättre form än för en månad sen?"
-  //      on; the dots are there for transparency.
+  //   1. Weekly-average dots = one dot per ISO week, anchored mid-week.
+  //      Each dot is the mean of qualifying VO2max estimates that week.
+  //   2. Thick smoothed line = 28-day rolling mean over the full daily
+  //      history. This is the number the user should anchor on; the dots
+  //      add weekly granularity without per-pass noise.
   const datasets = [
     {
-      label: 'Löppass (HR-justerat)',
-      data: points.map((p) => ({ x: p.x, y: p.y, meta: p.meta })),
+      label: 'Veckosnitt',
+      data: weeklyPoints.map((p) => ({ x: p.x, y: p.y, count: p.count, weekStartIso: p.weekStartIso })),
       parsing: false,
-      borderColor: themeChartRgba('vo2', 0.38, 'rgba(37,99,235,0.38)'),
-      backgroundColor: themeChartRgba('vo2', 0.38, 'rgba(37,99,235,0.38)'),
-      pointRadius: 2.5,
-      pointHoverRadius: 5,
+      borderColor: themeChartRgba('vo2', 0.95, 'rgba(37,99,235,0.95)'),
+      backgroundColor: themeChartRgba('vo2', 0.95, 'rgba(37,99,235,0.95)'),
+      pointRadius: 4,
+      pointHoverRadius: 6,
       showLine: false,
       fill: false,
       order: 2,
@@ -8172,9 +8209,14 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
         tooltip: {
           callbacks: {
             title: (items) => {
-              const m = items[0]?.raw?.meta;
-              if (!m) return '';
-              return `V${weekNumber(new Date(m.date + 'T00:00:00'))} · ${m.date}`;
+              const raw = items[0]?.raw;
+              if (!raw) return '';
+              if (raw.weekStartIso) {
+                return `V${weekNumber(new Date(raw.weekStartIso + 'T00:00:00'))} · ${raw.weekStartIso}`;
+              }
+              const m = raw.meta;
+              if (m && m.date) return `V${weekNumber(new Date(m.date + 'T00:00:00'))} · ${m.date}`;
+              return '';
             },
             label: (c) => {
               const isTrend = c.dataset.label && c.dataset.label.startsWith('Snittad');
@@ -8182,20 +8224,8 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
                 const cnt = c.raw.windowCount;
                 return `Snittad VO2max: ${c.raw.y.toFixed(1)} (${cnt} pass i fönstret)`;
               }
-              return `VO2max-estimat: ${c.raw.y.toFixed(1)}`;
-            },
-            afterLabel: (c) => {
-              if (c.dataset.label && c.dataset.label.startsWith('Snittad')) return '';
-              const m = c.raw?.meta;
-              if (!m) return '';
-              const pace = (m.min / m.km);
-              const paceMin = Math.floor(pace);
-              const paceSec = Math.round((pace - paceMin) * 60).toString().padStart(2, '0');
-              return [
-                `${m.km.toFixed(1)} km · ${m.min} min · ${paceMin}:${paceSec}/km`,
-                `Snittpuls ${m.avgHr} bpm (${m.hrPct}% av HRmax, ${m.hrrPct}% HR-reserv)`,
-                m.intensity ? `Zon: ${m.intensity}` : '',
-              ].filter(Boolean);
+              const cnt = c.raw.count;
+              return `Veckosnitt: ${c.raw.y.toFixed(1)} (${cnt} pass)`;
             },
           },
         },

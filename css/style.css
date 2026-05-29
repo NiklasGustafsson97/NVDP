@@ -797,41 +797,6 @@ select option { background: var(--surface-modal); color: var(--text); }
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
-.cal-strip-wrapper::before,
-.cal-strip-wrapper::after {
-  content: attr(data-left-peek);
-  position: absolute;
-  top: 58px;
-  z-index: 2;
-  width: 14px;
-  height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  overflow: hidden;
-  color: var(--text);
-  opacity: 0.28;
-  font-size: 0.88rem;
-  font-weight: 700;
-  line-height: 32px;
-  pointer-events: none;
-}
-.cal-strip-wrapper::before {
-  left: 8px;
-  transform: translateX(-1px);
-}
-.cal-strip-wrapper::after {
-  content: attr(data-right-peek);
-  right: 8px;
-  justify-content: flex-end;
-  transform: translateX(1px);
-}
-.cal-strip-wrapper:not([data-left-peek])::before,
-.cal-strip-wrapper[data-left-peek=""]::before,
-.cal-strip-wrapper:not([data-right-peek])::after,
-.cal-strip-wrapper[data-right-peek=""]::after {
-  content: none;
-}
 .cal-strip-scroll-area::-webkit-scrollbar { display: none; }
 .cal-strip-scroll-area.cal-strip-dragging { cursor: grabbing; }
 @media (hover: none) and (pointer: coarse) {
