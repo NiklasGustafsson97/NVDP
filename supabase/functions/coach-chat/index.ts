@@ -117,7 +117,7 @@ Du har tillgång till verktyg:
 - update_memory(fact_patch) — uppdatera coach_memory.facts (t.ex. niggles, motivators, race_targets).
 - predict_race_time(distance_km, target_date?) — Riegel-prognos på användarens senaste löppass. Cita alltid anchor-passet du fick tillbaka när du presenterar tiden, och nämn caveat om värme/bana.
 - start_return_to_training(body_part, severity, days_off?, notes?) — när användaren beskriver en skada eller flera dagars ofrivillig vila. Verktyget skriver till minnet och returnerar en 3-veckorsrampa. Följ direkt upp med propose_plan_changes som speglar rampan (sätt responses.injury till severity och använd lämplig free_text/unavailable_days).
-- move_plan_workout(plan_workout_id, to_day_of_week, to_sort_order?) — flytta ett enskilt planerat pass till en annan dag (eller annat slot inom samma dag). Använd när användaren ber om en specifik flytt ("flytta tisdagens gym till torsdag"). Hämta plan_workout_id från context.next_7_days eller via get_workout(date). En dag kan ha 0-2 pass; sort_order=0 är primärpasset, 1 är sekundärpasset (t.ex. gym på en löpdag).
+- move_plan_workout(plan_workout_id, to_workout_date ELLER to_day_of_week, to_sort_order?) — flytta ett enskilt planerat pass till en annan dag (eller annat slot inom samma dag). Använd när användaren ber om en specifik flytt ("flytta tisdagens gym till torsdag", "flytta lördagens test till söndag"). Hämta plan_workout_id från context.next_7_days. ANGE HELST destinationen som to_workout_date (YYYY-MM-DD) — kopiera datumet för måldagen från context.next_7_days, gissa aldrig. Om du istället använder to_day_of_week gäller måndag=0, tisdag=1, onsdag=2, torsdag=3, fredag=4, lördag=5, söndag=6 (aldrig 7). En dag kan ha 0-2 pass; sort_order=0 är primärpasset, 1 är sekundärpasset (t.ex. gym på en löpdag).
 
 Använd verktyg när det är rätt verktyg för jobbet. Annars svara direkt.
 
@@ -130,6 +130,7 @@ Planerade dag-ändringar:
 - HEL OCH SAMMANHÄNGANDE ÄNDRING: när du byter ett pass aktivitet (t.ex. löpning → gym) MÅSTE changes-objektet vara komplett och konsekvent. Sätt label som matchar den nya aktiviteten, ta bort target_distance_km (gym/styrka har ingen distans), och sätt intensity_zone till null om pulszon inte är relevant. Lämna ALDRIG kvar den gamla aktivitetens label, distans, pulszon eller beskrivning — då blir NU och FÖRSLAG identiska och förslaget meningslöst.
 - BEDÖMNINGSPASS ("Bedömning: ..."): dessa är kalibreringstester i bedömningsveckan (puls, tröskel, 5 km). Om användaren vill ändra ett sådant pass: säg KORT att det är ett testpass och att vi tappar kalibreringen om vi byter det, och föreslå hellre att FLYTTA testet till en annan dag (move_plan_workout) så att både testet och deras gympass får plats. Byt bara ut testet helt om användaren ändå insisterar.
 - KONSEKVENS MELLAN TURER: om ett pass finns i context.next_7_days så finns det — påstå aldrig "jag hittar inget pass" för en dag som har en rad där. Återanvänd samma plan_workout_id för samma pass över flera turer i samtalet.
+- FLYTT MISSLYCKAS: om move_plan_workout returnerar fel — försök ALDRIG förklara felet tekniskt för användaren ("jag har problem med att flytta", "kan inte göra det just nu"). Kontrollera istället dina argument (rätt plan_workout_id från next_7_days, destinationen som to_workout_date) och kör verktyget igen. Bekräfta först när TOOL_RESULT är ok:true ("Klart — testet ligger nu på söndag").
 
 Veckoavstämning (söndag): Om första meddelandet i tråden är ditt eget söndagsnudge "Söndag — dags för veckoavstämning" ansvarar du för att genomföra den i chatten — ersätter den gamla guiden. Arbetssätt:
 1) Läs användarens första svar (helhetskänsla). Bekräfta det kort.
@@ -1586,11 +1587,24 @@ async function toolMovePlanWorkout(
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
   const planWorkoutId = typeof args.plan_workout_id === "string" ? args.plan_workout_id : null;
-  const toDow = typeof args.to_day_of_week === "number" ? args.to_day_of_week : NaN;
+  // Destination day: accept either a 0-6 index (Mon=0 .. Sun=6) OR an ISO date.
+  // The date form is preferred — the model copies workout_date straight from
+  // context.next_7_days, which removes any ambiguity about which weekday-
+  // numbering convention to use (a frequent source of failed moves where the
+  // model sent e.g. 7 for Sunday and tripped the 0-6 validation).
+  let toDow = typeof args.to_day_of_week === "number" ? args.to_day_of_week : NaN;
+  const toDateArg = typeof args.to_workout_date === "string" ? args.to_workout_date.trim() : null;
+  if ((!Number.isInteger(toDow) || toDow < 0 || toDow > 6) && toDateArg) {
+    const parsed = parseISODateArg(toDateArg);
+    if (parsed) {
+      const d = new Date(parsed + "T00:00:00Z");
+      toDow = (d.getUTCDay() + 6) % 7; // Mon=0 .. Sun=6
+    }
+  }
   const toSortRaw = args.to_sort_order;
   const toSort = (toSortRaw === undefined || toSortRaw === null) ? null : Number(toSortRaw);
   if (!planWorkoutId || !Number.isInteger(toDow) || toDow < 0 || toDow > 6) {
-    return { ok: false, error: "Need plan_workout_id and to_day_of_week (0-6)" };
+    return { ok: false, error: "Need plan_workout_id and to_day_of_week (0-6) or to_workout_date (YYYY-MM-DD)" };
   }
 
   // Load row + verify ownership.
