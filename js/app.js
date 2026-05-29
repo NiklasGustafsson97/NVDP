@@ -3592,9 +3592,20 @@ async function togglePlanWeekDeload(planWeekId, currentPhase) {
       : 'build';
   }
 
-  const { error } = await sb.from('plan_weeks').update({ phase: newPhase }).eq('id', planWeekId);
+  const { data: updated, error } = await sb
+    .from('plan_weeks')
+    .update({ phase: newPhase })
+    .eq('id', planWeekId)
+    .select('id');
   if (error) {
     showToast('Kunde inte uppdatera veckan: ' + error.message);
+    return;
+  }
+  if (!updated || updated.length === 0) {
+    // An RLS denial (or a missing row) drops the write silently: PostgREST
+    // returns 200 with 0 rows and no error. Surface it instead of a false
+    // success toast so the change isn't lost without warning.
+    showToast('Kunde inte spara ändringen — saknar behörighet att ändra veckan.');
     return;
   }
 
