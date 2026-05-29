@@ -1320,6 +1320,10 @@ function isDeloadWeek(mondayDate) {
   // only when its plan_weeks.phase says so.
   const planPhase = activePlanPhaseForWeek(mondayDate);
   if (planPhase) return planPhase === 'deload';
+  // Once the user has an active AI plan, weeks outside its range are NOT
+  // deloads. Otherwise the legacy every-4th-week cadence paints phantom (D)
+  // markers on pre-/post-plan weeks the user can't even edit.
+  if (_activePlan) return false;
   // No active plan → only the original training group keeps the legacy
   // every-4th-week cadence. New users get no deload until they create a plan.
   if (isLegacyPlanProfile(currentProfile)) return isLegacyDeloadWeek(mondayDate);
