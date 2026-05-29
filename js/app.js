@@ -140,8 +140,6 @@ function themeTextDim() {
 // ── Init ──
 let _initDone = false;
 
-const GATE_PASSED_KEY = 'nvdp_gate_passed';
-
 // ── Lazy Leaflet (PERF-01: ladda karta först när den behövs) ──
 let _leafletPromise = null;
 function ensureLeafletLoaded() {
@@ -400,10 +398,7 @@ let _wmFocusBefore = null;
 let _wmMapInstance = null;
 
 function gateOpen() {
-  return (
-    sessionStorage.getItem('gate_passed') === '1' ||
-    localStorage.getItem(GATE_PASSED_KEY) === '1'
-  );
+  return true;
 }
 
 /** After beta gate succeeds: restore Supabase session if token still in localStorage */
@@ -872,10 +867,6 @@ async function initApp(user, accessToken) {
   _initDone = true;
   try {
     currentUser = user;
-    const gateEl = document.getElementById('gate');
-    if (gateEl) gateEl.style.display = 'none';
-    localStorage.setItem(GATE_PASSED_KEY, '1');
-    sessionStorage.setItem('gate_passed', '1');
     document.getElementById('auth-view').style.display = 'none';
     document.getElementById('app').classList.add('active');
     document.body.style.overflow = '';

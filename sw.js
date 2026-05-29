@@ -36,7 +36,6 @@ const PRECACHE_URLS = [
   "./css/style.css",
   "./js/app.js",
   "./js/config.js",
-  "./js/gate.js",
   "./js/seed.js",
 ];
 
