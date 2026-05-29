@@ -27,3 +27,4 @@
 20260425_strava_daily_cron.sql
 20260424b_milestones_to_assessments.sql
 20260427_workout_invitation_plan_snapshot.sql
+20260529_coach_diffs.sql
