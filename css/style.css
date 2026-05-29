@@ -2850,6 +2850,23 @@ input.code-input {
   background: var(--color-primary-solid); color: var(--on-color);
 }
 
+/* ── Deload-toggle på veckoetiketten ───────────────────────────────── */
+.schema-phase-toggle-row {
+  display: flex; justify-content: flex-end; margin: -4px 0 12px;
+}
+.schema-phase-toggle {
+  border: 1px solid var(--border); background: var(--bg-card);
+  padding: 5px 12px; border-radius: 999px;
+  font-size: 0.75rem; font-weight: 600; color: var(--text-muted);
+  cursor: pointer; transition: all 0.18s; font-family: var(--font);
+}
+.schema-phase-toggle:hover { color: var(--text); border-color: var(--text-muted); }
+.schema-phase-toggle.active {
+  background: var(--color-primary-solid); color: var(--on-color);
+  border-color: var(--color-primary-solid);
+}
+.schema-phase-toggle.hidden { display: none; }
+
 /* ── Månadsschema grid ─────────────────────────────────────────────── */
 .schema-month-grid {
   display: grid;

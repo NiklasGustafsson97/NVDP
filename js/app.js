@@ -1198,13 +1198,6 @@ function formatDate(d) {
   return dt.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
 }
 
-const PLAN_PHASE_OVERRIDES_BY_ISO_WEEK = {
-  '2026-W13': 'deload',
-  '2026-W14': 'build',
-  '2026-W17': 'deload',
-  '2026-W18': 'build',
-};
-
 // ─── Week phase kickoff modal ────────────────────────────────────────────────
 // Hardcoded Swedish copy shown the first time the user opens the app on a week
 // whose plan phase differs from the prior week's. `coachPrompt` is prefilled
@@ -1261,16 +1254,6 @@ const PHASE_KICKOFF_COPY = {
   },
 };
 
-function planPhaseOverrideForDate(date) {
-  const dt = date instanceof Date ? new Date(date.getTime()) : parseISOWeekKeyLocal(date);
-  const isoWeek = _isoWeekKey(isoDate(dt));
-  return isoWeek ? (PLAN_PHASE_OVERRIDES_BY_ISO_WEEK[isoWeek] || null) : null;
-}
-
-function applyPlanPhaseOverride(phase, date) {
-  return planPhaseOverrideForDate(date) || phase;
-}
-
 function activePlanPhaseForWeek(mondayDate) {
   if (!_activePlan || !Array.isArray(_activePlanWeeks) || _activePlanWeeks.length === 0) return null;
   const md = mondayDate instanceof Date ? new Date(mondayDate.getTime()) : parseISOWeekKeyLocal(mondayDate);
@@ -1284,8 +1267,7 @@ function activePlanPhaseForWeek(mondayDate) {
     weekStart.setDate(weekStart.getDate() + (week.week_number - 1) * 7);
     const weekEnd = addDays(weekStart, 6);
     if (dateStr >= isoDate(weekStart) && dateStr <= isoDate(weekEnd)) {
-      const phase = String(week.phase || '').toLowerCase() || null;
-      return phase ? applyPlanPhaseOverride(phase, md) : null;
+      return String(week.phase || '').toLowerCase() || null;
     }
   }
 
@@ -1309,11 +1291,14 @@ function isLegacyDeloadWeek(mondayDate) {
 }
 
 function isDeloadWeek(mondayDate) {
-  const overridePhase = planPhaseOverrideForDate(mondayDate);
-  if (overridePhase) return overridePhase === 'deload';
+  // The active AI plan is the single source of truth: a week is a deload
+  // only when its plan_weeks.phase says so.
   const planPhase = activePlanPhaseForWeek(mondayDate);
   if (planPhase) return planPhase === 'deload';
-  return isLegacyDeloadWeek(mondayDate);
+  // No active plan → only the original training group keeps the legacy
+  // every-4th-week cadence. New users get no deload until they create a plan.
+  if (isLegacyPlanProfile(currentProfile)) return isLegacyDeloadWeek(mondayDate);
+  return false;
 }
 
 /** Måndagsnyckel YYYY-MM-DD → lokalt datum (undviker UTC-förskjutning). */
@@ -3465,6 +3450,7 @@ async function _loadSchema() {
     document.getElementById('schema-week-label').textContent =
       `V${wk} — ${phaseLabel} v${weekNum} — ${formatDate(targetMonday)} till ${formatDate(targetSunday)}`;
 
+    renderPhaseToggle(isOwnSchema ? currentWeek : null);
     renderGenerateButton();
     updateSchemaEditBar();
     renderSchemaPlan(workouts, planWorkouts, targetMonday, invitations, isOwnSchema, profile, phase);
@@ -3477,6 +3463,7 @@ async function _loadSchema() {
     document.getElementById('schema-week-label').textContent =
       `V${wk}${deload ? ' (Deload)' : ''} — ${formatDate(targetMonday)} till ${formatDate(targetSunday)}`;
 
+    renderPhaseToggle(null);
     renderGenerateButton();
     updateSchemaEditBar();
 
@@ -3493,6 +3480,55 @@ async function _loadSchema() {
     }
   }
   try { await updateCoachCheckinBanner(); } catch (_e) { /* non-blocking */ }
+}
+
+// ── Per-week deload toggle ──
+//
+// Lets the user flip the currently displayed plan week between deload and a
+// normal training phase, writing straight to plan_weeks.phase so the change
+// persists and every deload-aware view (effort band, charts, dashboard)
+// follows. Only shown for the user's own active AI plan.
+
+function renderPhaseToggle(currentWeek) {
+  const btn = document.getElementById('schema-phase-toggle');
+  if (!btn) return;
+  if (!currentWeek || !currentWeek.id) {
+    btn.classList.add('hidden');
+    btn.removeAttribute('data-plan-week-id');
+    return;
+  }
+  const phase = String(currentWeek.phase || '').toLowerCase();
+  const isDeload = phase === 'deload';
+  btn.dataset.planWeekId = currentWeek.id;
+  btn.dataset.currentPhase = phase;
+  btn.textContent = isDeload ? 'Ta bort deload' : 'Markera som deload';
+  btn.classList.toggle('active', isDeload);
+  btn.classList.remove('hidden');
+}
+
+async function togglePlanWeekDeload(planWeekId, currentPhase) {
+  if (!planWeekId || !_activePlan) return;
+  const isDeload = String(currentPhase || '').toLowerCase() === 'deload';
+
+  let newPhase = 'deload';
+  if (isDeload) {
+    // Restore the surrounding training phase. Reuse the same inference the
+    // normalizer uses for a stray deload so the week rejoins its block.
+    const week = (_activePlanWeeks || []).find(w => w.id === planWeekId);
+    newPhase = week
+      ? _inferPhaseAfterDuplicateDeload(week, _activePlanWeeks || [])
+      : 'build';
+  }
+
+  const { error } = await sb.from('plan_weeks').update({ phase: newPhase }).eq('id', planWeekId);
+  if (error) {
+    showToast('Kunde inte uppdatera veckan: ' + error.message);
+    return;
+  }
+
+  _activePlanWeeks = await fetchPlanWeeks(_activePlan.id);
+  showToast(newPhase === 'deload' ? 'Veckan är nu en deload.' : 'Deload borttagen.');
+  loadSchema();
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -10593,13 +10629,7 @@ function normalizePlanWeekPhases(weeks) {
 
   return weeks.map(week => {
     const phase = normalizedPhaseByNumber.get(Number(week.week_number)) || week.phase;
-    const weekStart = _activePlan?.start_date
-      ? addDays(parseISOWeekKeyLocal(_activePlan.start_date), (Number(week.week_number) - 1) * 7)
-      : null;
-    return {
-      ...week,
-      phase: weekStart ? applyPlanPhaseOverride(phase, weekStart) : phase,
-    };
+    return { ...week, phase };
   });
 }
 
