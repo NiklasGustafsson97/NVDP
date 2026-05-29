@@ -1178,22 +1178,74 @@ async function toolGetWeekSummary(
   };
 }
 
-// In-memory diff store keyed by id. Simple LRU (≤ 50 entries) — server-side
-// state but acceptable since each diff is also persisted on coach_messages.
+// In-memory diff store keyed by id — a fast path only. The durable copy lives
+// in public.coach_diffs (see _stashDiff). Edge Functions are serverless, so the
+// apply request frequently hits a different/recycled instance than the propose
+// request; without the DB copy the lookup misses and the user sees
+// "Diff expired or unknown" and the schedule never updates.
 const _diffCache = new Map<string, {
   profileId: string;
   changes: ProposedChange[];
   nextWeekPlan: PlanWorkout[];
   createdAt: number;
 }>();
-function _stashDiff(profileId: string, changes: ProposedChange[], nextWeekPlan: PlanWorkout[]): string {
+
+type DiffStash = {
+  profileId: string;
+  changes: ProposedChange[];
+  nextWeekPlan: PlanWorkout[];
+  createdAt: number;
+};
+
+async function _stashDiff(
+  db: SupabaseClient,
+  profileId: string,
+  changes: ProposedChange[],
+  nextWeekPlan: PlanWorkout[],
+): Promise<string> {
   const id = crypto.randomUUID();
   if (_diffCache.size >= 50) {
     const oldest = [...(_diffCache.entries())].sort((a, b) => a[1].createdAt - b[1].createdAt)[0];
     if (oldest) _diffCache.delete(oldest[0]);
   }
   _diffCache.set(id, { profileId, changes, nextWeekPlan, createdAt: Date.now() });
+
+  // Durable copy so any instance can resolve the diff on apply.
+  try {
+    await db.from("coach_diffs").insert({
+      id,
+      profile_id: profileId,
+      changes,
+      next_week_plan: nextWeekPlan,
+    });
+  } catch (e) {
+    console.error("coach-chat: coach_diffs insert failed", e);
+  }
+  // Best-effort prune of stale diffs (>7 days) so the table can't grow forever.
+  try {
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    await db.from("coach_diffs").delete().lt("created_at", cutoff);
+  } catch (_) { /* non-fatal */ }
+
   return id;
+}
+
+// Resolve a stash from the in-memory cache, falling back to the durable
+// coach_diffs row when this instance never saw the propose request.
+async function _loadDiff(db: SupabaseClient, diffId: string): Promise<DiffStash | null> {
+  const cached = _diffCache.get(diffId);
+  if (cached) return cached;
+  const { data: row } = await db.from("coach_diffs")
+    .select("profile_id, changes, next_week_plan, created_at")
+    .eq("id", diffId)
+    .maybeSingle();
+  if (!row) return null;
+  return {
+    profileId: row.profile_id as string,
+    changes: (row.changes || []) as ProposedChange[],
+    nextWeekPlan: (row.next_week_plan || []) as PlanWorkout[],
+    createdAt: new Date(row.created_at as string).getTime(),
+  };
 }
 
 async function toolProposePlanChanges(
@@ -1227,7 +1279,7 @@ async function toolProposePlanChanges(
   // validateChanges already runs inside runDecisionEngine; re-run defensively
   // when the LLM might call this tool with crafted inputs.
   const validated = validateChanges(engine.changes, summary.next_week_plan);
-  const diffId = _stashDiff(profileId, validated, summary.next_week_plan);
+  const diffId = await _stashDiff(db, profileId, validated, summary.next_week_plan);
 
   return {
     ok: true,
@@ -1264,7 +1316,7 @@ async function toolApplyPlanChanges(
 ): Promise<ToolResult> {
   const diffId = typeof args.diff_id === "string" ? args.diff_id : null;
   if (!diffId) return { ok: false, error: "Missing diff_id" };
-  const stash = _diffCache.get(diffId);
+  const stash = await _loadDiff(db, diffId);
   if (!stash) return { ok: false, error: "Diff expired or unknown — be om en ny propose_plan_changes" };
   if (stash.profileId !== profileId) return { ok: false, error: "Forbidden" };
 
@@ -1280,6 +1332,7 @@ async function toolApplyPlanChanges(
 
   await applyChangesEngine(db, fresh as PlanWorkout[], accepted);
   _diffCache.delete(diffId);
+  try { await db.from("coach_diffs").delete().eq("id", diffId); } catch (_) { /* non-fatal */ }
 
   console.log("coach-chat apply_plan_changes", JSON.stringify({
     profileId,
@@ -1429,7 +1482,7 @@ async function toolProposeWorkoutEdit(
     target_plan_workout_id: row.id,
   };
 
-  const diffId = _stashDiff(profileId, [change], [row]);
+  const diffId = await _stashDiff(db, profileId, [change], [row]);
 
   return {
     ok: true,
