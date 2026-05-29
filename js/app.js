@@ -778,18 +778,163 @@ async function selectAvatar(emoji) {
   refreshAvatars();
 }
 
-function refreshAvatars() {
-  const a = currentProfile?.avatar;
-  const initial = (currentProfile?.name || 'U')[0].toUpperCase();
-  document.getElementById('user-avatar').textContent = a || initial;
-  document.getElementById('sm-avatar').textContent = a || initial;
-  if (a) {
-    document.getElementById('user-avatar').style.fontSize = '1.1rem';
-    document.getElementById('sm-avatar').style.fontSize = '1.3rem';
-  } else {
-    document.getElementById('user-avatar').style.fontSize = '';
-    document.getElementById('sm-avatar').style.fontSize = '';
+// Center-crop an image file to a square and downscale to `size`x`size`,
+// exported as a JPEG blob (~0.85 quality). Keeps avatar payloads small.
+function _downscaleImageToBlob(file, size) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      try {
+        const side = Math.min(img.width, img.height);
+        const sx = (img.width - side) / 2;
+        const sy = (img.height - side) / 2;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error('toBlob returned null'))),
+          'image/jpeg',
+          0.85,
+        );
+      } catch (e) { reject(e); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image load failed')); };
+    img.src = url;
+  });
+}
+
+// Upload a user-chosen photo as the profile avatar. Stored at
+// avatars/{auth-uid}/avatar_<ts>.jpg (RLS confines writes to the user's own
+// folder). avatar_url takes precedence over emoji + Strava in resolveAvatar.
+async function uploadAvatarPhoto(file) {
+  if (!file || !currentProfile) return;
+  if (!/^image\//.test(file.type)) {
+    await showAlertModal('Ogiltig fil', 'Välj en bildfil (JPG, PNG, m.fl.).');
+    return;
   }
+  if (file.size > 5 * 1024 * 1024) {
+    await showAlertModal('För stor fil', 'Bilden får vara högst 5 MB. Välj en mindre bild.');
+    return;
+  }
+
+  let blob;
+  try {
+    blob = await _downscaleImageToBlob(file, 256);
+  } catch (e) {
+    console.error('uploadAvatarPhoto downscale error:', e);
+    await showAlertModal('Kunde inte läsa bilden', 'Försök med en annan bild.');
+    return;
+  }
+
+  showToast('Laddar upp …');
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const uid = session?.user?.id;
+    if (!uid) throw new Error('no auth session');
+    const path = `${uid}/avatar_${Date.now()}.jpg`;
+    const { error: upErr } = await sb.storage
+      .from('avatars')
+      .upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+    if (upErr) throw upErr;
+
+    const { data: pub } = sb.storage.from('avatars').getPublicUrl(path);
+    const url = pub?.publicUrl;
+    if (!url) throw new Error('no public url');
+
+    const res = await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + currentProfile.id, {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ avatar_url: url }),
+    });
+    if (!res.ok) throw new Error('profile PATCH failed: ' + res.status);
+
+    currentProfile.avatar_url = url;
+    document.getElementById('avatar-picker')?.classList.add('hidden');
+    refreshAvatars();
+    refreshAllProfiles();
+    showToast('Profilbild uppdaterad');
+  } catch (e) {
+    console.error('uploadAvatarPhoto error:', e);
+    await showAlertModal('Kunde inte ladda upp', 'Något gick fel. Försök igen om en stund.');
+  }
+}
+
+// Clear the uploaded photo; resolveAvatar falls back to emoji/Strava/initial.
+// (Storage object cleanup is optional and skipped here.)
+async function removeAvatarPhoto() {
+  if (!currentProfile) return;
+  try {
+    const token = (await sb.auth.getSession()).data.session.access_token;
+    const res = await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + currentProfile.id, {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ avatar_url: null }),
+    });
+    if (!res.ok) throw new Error('profile PATCH failed: ' + res.status);
+    currentProfile.avatar_url = null;
+    refreshAvatars();
+    refreshAllProfiles();
+    showToast('Profilbild borttagen');
+  } catch (e) {
+    console.error('removeAvatarPhoto error:', e);
+    await showAlertModal('Kunde inte ta bort', 'Försök igen om en stund.');
+  }
+}
+
+// ── Avatar resolution ────────────────────────────────────────────────────────
+// Precedence (user choice wins; Strava only fills in): uploaded photo >
+// emoji > Strava photo > first letter of name. Returns { img } or { text }.
+function resolveAvatar(p) {
+  if (p?.avatar_url) return { img: p.avatar_url };
+  if (p?.avatar) return { text: p.avatar };
+  if (p?.strava_avatar_url) return { img: p.strava_avatar_url };
+  return { text: ((p?.name || 'U')[0] || 'U').toUpperCase() };
+}
+
+// HTML for the inside of a circular avatar container. URLs are escaped to
+// prevent attribute breakout (avatar_url is user-settable on their own row).
+function avatarInner(p) {
+  const a = resolveAvatar(p);
+  return a.img
+    ? `<img class="avatar-img" src="${escapeHTML(a.img)}" alt="" loading="lazy">`
+    : escapeHTML(a.text);
+}
+
+// True when the resolved avatar is an emoji (single non-alphanumeric glyph),
+// used to bump the font size for the text branch.
+function _isEmojiAvatar(p) {
+  const a = resolveAvatar(p);
+  return !!(a.text && a.text.length <= 2 && !/^[a-zA-Z0-9]$/.test(a.text));
+}
+
+function refreshAvatars() {
+  const userEl = document.getElementById('user-avatar');
+  const smEl = document.getElementById('sm-avatar');
+  const inner = avatarInner(currentProfile);
+  const emoji = _isEmojiAvatar(currentProfile);
+  if (userEl) {
+    userEl.innerHTML = inner;
+    userEl.style.fontSize = emoji ? '1.1rem' : '';
+  }
+  if (smEl) {
+    smEl.innerHTML = inner;
+    smEl.style.fontSize = emoji ? '1.3rem' : '';
+  }
+  // Toggle the "remove photo" control based on whether a custom photo is set.
+  const removeBtn = document.getElementById('avatar-remove-btn');
+  if (removeBtn) removeBtn.classList.toggle('hidden', !currentProfile?.avatar_url);
 }
 
 function editProfileName() {
@@ -2710,12 +2855,15 @@ function showMoreRecent() {
   const batch = _recentWorkouts.slice(_recentShown, _recentShown + RECENT_PAGE);
   const ownerName = currentProfile?.name || 'Du';
   const ownerColor = currentProfile?.color || themeActivityColor('Löpning');
-  const ownerAvatar = currentProfile?.avatar || ownerName[0].toUpperCase();
+  const _ownerAv = resolveAvatar(currentProfile);
+  const ownerAvatar = _ownerAv.text || ownerName[0].toUpperCase();
+  const ownerAvatarUrl = _ownerAv.img || '';
   const html = batch.map(w => {
     return _buildFeedCardHtml(w, {
       ownerName,
       ownerColor,
       ownerAvatar,
+      ownerAvatarUrl,
       cardClickAttr: '',
       cardDataAttrs: `data-recent-wid="${escapeHTML(w.id)}" data-workout-id="${escapeHTML(w.id)}"`,
     });
@@ -9652,9 +9800,10 @@ function _buildFeedCardHtml(w, opts) {
   const ownerName = opts.ownerName || '';
   const ownerColor = opts.ownerColor || themeColor('--color-primary', '#2F80ED');
   const ownerAvatar = (opts.ownerAvatar != null && opts.ownerAvatar !== '') ? String(opts.ownerAvatar) : (ownerName[0] || '?').toUpperCase();
+  const ownerAvatarUrl = opts.ownerAvatarUrl || '';
   // Single-character avatars that aren't latin letters/digits are treated
   // as emoji (so we render them transparent w/o the coloured circle).
-  const isEmojiAvatar = ownerAvatar && ownerAvatar.length <= 2 && !/^[a-zA-Z0-9]$/.test(ownerAvatar);
+  const isEmojiAvatar = !ownerAvatarUrl && ownerAvatar && ownerAvatar.length <= 2 && !/^[a-zA-Z0-9]$/.test(ownerAvatar);
 
   const intBadge = w.intensity ? `<span class="intensity-badge">${escapeHTML(w.intensity)}</span>` : '';
   const showNote = w.notes && w.notes !== 'Importerad' && !String(w.notes).startsWith('[Strava]');
@@ -9669,9 +9818,14 @@ function _buildFeedCardHtml(w, opts) {
 
   const headerExtra = opts.headerClickAttr || '';
   const headerCursor = opts.headerClickAttr ? 'cursor:pointer;' : '';
-  const avatarStyle = isEmojiAvatar
-    ? `background:transparent;font-size:1.05rem;${headerCursor}`
-    : `background:${ownerColor};${headerCursor}`;
+  const avatarStyle = ownerAvatarUrl
+    ? `background:transparent;${headerCursor}`
+    : (isEmojiAvatar
+        ? `background:transparent;font-size:1.05rem;${headerCursor}`
+        : `background:${ownerColor};${headerCursor}`);
+  const avatarBody = ownerAvatarUrl
+    ? `<img class="avatar-img" src="${escapeHTML(ownerAvatarUrl)}" alt="" loading="lazy">`
+    : escapeHTML(ownerAvatar);
 
   // Action row: caller passes pre-built HTML (different for group vs
   // social vs no-actions on personal recent). When omitted we render no
@@ -9685,7 +9839,7 @@ function _buildFeedCardHtml(w, opts) {
 
   return `<article class="feed-card"${cardId} ${cardClick} ${cardData}>
     <header class="feed-card-header">
-      <div class="feed-avatar" style="${avatarStyle}" ${headerExtra}>${escapeHTML(ownerAvatar)}</div>
+      <div class="feed-avatar" style="${avatarStyle}" ${headerExtra}>${avatarBody}</div>
       <div class="feed-info">
         <div class="feed-name" style="${headerCursor}" ${headerExtra}>${escapeHTML(ownerName || '?')}</div>
         <div class="feed-date">${dateLine}</div>
@@ -9746,10 +9900,12 @@ function renderFeedItems(items, members, reactions, comments) {
     if (myReaction) window._myReactionMap.set(w.id, myReaction.reaction);
     else if (!window._myReactionMap.has(w.id)) window._myReactionMap.set(w.id, null);
 
+    const _mav = resolveAvatar(member.name ? member : { name: '?' });
     return _buildFeedCardHtml(w, {
       ownerName: member.name || '?',
       ownerColor: color,
-      ownerAvatar: (member.name || '?')[0].toUpperCase(),
+      ownerAvatar: _mav.text || (member.name || '?')[0].toUpperCase(),
+      ownerAvatarUrl: _mav.img || '',
       cardClickAttr: `onclick="openFeedWorkout(${globalIdx})"`,
       cardDataAttrs: `data-workout-id="${escapeHTML(w.id)}"`,
       actionsHtml,
@@ -10181,6 +10337,29 @@ async function disconnectStrava() {
     return;
   }
   _stravaConnection = null;
+
+  // Drop the Strava fallback avatar so it stops showing after disconnect.
+  // A user-uploaded photo or emoji (higher precedence) is untouched.
+  if (currentProfile?.strava_avatar_url) {
+    try {
+      const token = (await sb.auth.getSession()).data.session.access_token;
+      await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + currentProfile.id, {
+        method: 'PATCH',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ strava_avatar_url: null }),
+      });
+      currentProfile.strava_avatar_url = null;
+      refreshAvatars();
+      refreshAllProfiles();
+    } catch (e) {
+      console.error('disconnectStrava: avatar clear error:', e);
+    }
+  }
+
   updateStravaUI();
 }
 
@@ -13319,9 +13498,11 @@ async function topbarSearchUsers() {
   }
 
   resultsEl.innerHTML = matches.slice(0, 10).map(p => {
-    const avatar = p.avatar || p.name[0].toUpperCase();
+    const _av = resolveAvatar(p);
+    const avatar = _av.text || p.name[0].toUpperCase();
+    const avatarUrl = _av.img || '';
     const color = p.color || themeColor('--color-primary', '#2F80ED');
-    const isEmoji = p.avatar && p.avatar.length <= 2;
+    const isEmoji = !avatarUrl && p.avatar && p.avatar.length <= 2;
     const status = friendMap[p.id];
     let actionHtml = '';
     if (status === 'accepted') {
@@ -13332,7 +13513,7 @@ async function topbarSearchUsers() {
       actionHtml = `<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();topbarAddFriend('${escapeHTML(p.id)}',this)">Lägg till</button>`;
     }
     return `<div class="topbar-search-result" onclick="topbarViewProfile('${escapeHTML(p.id)}')">
-      <div class="tsr-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1.2rem' : '0.8rem'};">${escapeHTML(avatar)}</div>
+      <div class="tsr-avatar" style="background:${avatarUrl || isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1.2rem' : '0.8rem'};">${avatarUrl ? `<img class="avatar-img" src="${escapeHTML(avatarUrl)}" alt="" loading="lazy">` : escapeHTML(avatar)}</div>
       <div class="tsr-info">
         <div class="tsr-name">${escapeHTML(p.name)}</div>
         <div class="tsr-status">${status === 'accepted' ? 'Vän' : ''}</div>
@@ -13496,11 +13677,13 @@ async function renderFriendList() {
   modalListEl.innerHTML = friendIds.map(fid => {
     const p = allProfiles.find(pr => pr.id === fid);
     if (!p) return '';
-    const avatar = p.avatar || p.name[0].toUpperCase();
+    const _av = resolveAvatar(p);
+    const avatar = _av.text || p.name[0].toUpperCase();
+    const avatarUrl = _av.img || '';
     const color = p.color || themeColor('--color-primary', '#2F80ED');
-    const isEmoji = p.avatar && p.avatar.length <= 2;
+    const isEmoji = !avatarUrl && p.avatar && p.avatar.length <= 2;
     return `<div class="friend-item">
-      <div class="friend-avatar" style="background:${isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1.2rem' : '0.8rem'};">${escapeHTML(avatar)}</div>
+      <div class="friend-avatar" style="background:${avatarUrl || isEmoji ? 'transparent' : color};font-size:${isEmoji ? '1.2rem' : '0.8rem'};">${avatarUrl ? `<img class="avatar-img" src="${escapeHTML(avatarUrl)}" alt="" loading="lazy">` : escapeHTML(avatar)}</div>
       <span class="friend-name">${escapeHTML(p.name)}</span>
       <button class="friend-remove-btn" onclick="removeFriend('${escapeHTML(fid)}')">Ta bort</button>
     </div>`;
@@ -13600,7 +13783,9 @@ async function renderSocialFeed(append) {
   const html = workouts.map(w => {
     const p = allProfiles.find(pr => pr.id === w.profile_id);
     const name = p?.name || 'Okänd';
-    const avatar = p?.avatar || name[0].toUpperCase();
+    const _av = resolveAvatar(p || { name });
+    const avatar = _av.text || name[0].toUpperCase();
+    const avatarUrl = _av.img || '';
     const color = p?.color || themeColor('--color-primary', '#2F80ED');
     const wReactions = reactionsByWorkout[w.id] || [];
     const wLikes = wReactions.filter(r => r.reaction === 'like');
@@ -13661,6 +13846,7 @@ async function renderSocialFeed(append) {
     return _buildFeedCardHtml(w, {
       ownerName: name,
       ownerAvatar: avatar,
+      ownerAvatarUrl: avatarUrl,
       ownerColor: color,
       cardClickAttr: '',
       cardDataAttrs: `data-workout-open-id="${escapeHTML(w.id)}" data-workout-id="${escapeHTML(w.id)}"`,
@@ -13803,9 +13989,10 @@ async function loadFriendProfile(profileId) {
     }
 
     // Header.
-    const isEmoji = profile.avatar && profile.avatar.length <= 2;
-    avatarEl.textContent = profile.avatar || (profile.name || '?')[0].toUpperCase();
-    avatarEl.style.background = isEmoji ? 'transparent' : (profile.color || themeColor('--color-primary', '#2F80ED'));
+    const _fpAv = resolveAvatar(profile);
+    const isEmoji = !_fpAv.img && profile.avatar && profile.avatar.length <= 2;
+    avatarEl.innerHTML = avatarInner(profile);
+    avatarEl.style.background = (_fpAv.img || isEmoji) ? 'transparent' : (profile.color || themeColor('--color-primary', '#2F80ED'));
     avatarEl.style.fontSize = isEmoji ? '2rem' : '1.2rem';
     nameEl.textContent = profile.name || 'Okänd';
     titleEl.textContent = profile.name || 'Profil';

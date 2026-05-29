@@ -219,6 +219,16 @@ select option { background: var(--surface-modal); color: var(--text); }
 .topbar .avatar { cursor: pointer; transition: box-shadow 0.15s; }
 .topbar .avatar:hover { box-shadow: 0 0 0 2px var(--accent); }
 
+/* Image avatar: fills any circular avatar container (topbar, side menu, feed,
+   friends, friend profile). Overrides the container's text/emoji styling. */
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
+}
+
 /* ── Topbar Search ── */
 .topbar-icon-btn {
   position: relative; background: none; border: none; color: var(--text-muted);
@@ -312,6 +322,11 @@ select option { background: var(--surface-modal); color: var(--text); }
 
 /* ── Avatar Picker ── */
 .avatar-picker { margin-top: 12px; }
+.avatar-photo-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.avatar-picker-label {
+  font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 0.04em; margin-bottom: 6px;
+}
 .avatar-picker-grid {
   display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px;
   max-width: 100%;

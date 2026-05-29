@@ -133,6 +133,17 @@ serve(async (req) => {
       return Response.redirect(`${APP_URL}?strava_error=db_error`, 302);
     }
 
+    // Persist the athlete's Strava photo as a fallback avatar. The frontend
+    // only renders it when the user hasn't set their own (uploaded photo or
+    // emoji), so this never overrides a user choice. Non-fatal on error.
+    if (athlete?.profile) {
+      const { error: avatarErr } = await db
+        .from("profiles")
+        .update({ strava_avatar_url: athlete.profile })
+        .eq("id", profileId);
+      if (avatarErr) console.error("strava-auth: avatar update error", avatarErr);
+    }
+
     const redirectUrl = isFirstConnect
       ? `${APP_URL}?strava_connected=true&first_connect=1`
       : `${APP_URL}?strava_connected=true`;
