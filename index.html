@@ -675,7 +675,7 @@
         <div class="chart-titlebar">
           <div class="chart-titlebar-text">
             <div class="chart-titlebar-title">Aerob effektivitet (EF)</div>
-            <div class="chart-titlebar-desc">GAP-fart per puls i Z2 — högre EF betyder bättre aerob form.</div>
+            <div class="chart-titlebar-desc">GAP-fart per pulsreserv i Z2, 4-veckors rullande snitt — högre EF = bättre aerob form.</div>
           </div>
           <div class="chart-titlebar-actions">
             <button type="button" class="chart-titlebar-info" id="easy-hr-info-btn"
@@ -686,9 +686,9 @@
           </div>
         </div>
         <div class="pmc-info-popover hidden" id="easy-hr-info-popover" role="region" aria-label="EF-förklaring">
-          <p><strong>Aerob effektivitet (EF)</strong> mäter hur fort du springer per puls­slag på lugna pass. Högre EF = du springer fortare till samma puls = bättre aerob form.</p>
-          <p class="pmc-info-meta">Tekniskt: <strong>EF = GAP-fart (km/h) ÷ snittpuls × 100</strong>, beräknat på splits i Z2 (60–80 % av maxHR) efter att de första 10 minuterna av varje pass kapats (där pulsen fortfarande driftar uppåt). GAP är höjd-justerad fart enligt Minettis modell, så uppförs- och nedförsbackar inte snedvrider mätningen.</p>
-          <p class="pmc-info-meta">Trenden är intressantare än enskilda pass — en mild stigande linje över 6–12 veckor är tecknet på att grundträningen ger frukt. Värme, dehydrering och dålig sömn drar ner EF tillfälligt utan att din egentliga form tappat.</p>
+          <p><strong>Aerob effektivitet (EF)</strong> mäter hur fort du springer per pulsslag <em>över vilopuls</em> på lugna pass. Högre EF = du springer fortare vid samma ansträngning = bättre aerob form.</p>
+          <p class="pmc-info-meta">Tekniskt: <strong>EF = GAP-fart (km/h) ÷ pulsreserv × 100</strong>, där pulsreserv = snittpuls − vilopuls. Beräknat på splits i Z2 (60–80 % av maxHR) efter att de första 10 minuterna av varje pass kapats (där pulsen fortfarande driftar uppåt). GAP är höjd-justerad fart enligt Minettis modell, så backar inte snedvrider mätningen. Vi använder pulsreserv istället för absolut puls för att EF annars blir mekaniskt lägre högt i Z2-bandet — då ser jämn form ut som svackor.</p>
+          <p class="pmc-info-meta">Grafen visar ett km-viktat <strong>4-veckors rullande snitt</strong>, inte enskilda veckor — ett varmt eller kuperat pass ska inte se ut som en trend. En mild stigande linje över 6–12 veckor är tecknet på att grundträningen ger frukt. Värme, dehydrering och dålig sömn drar ner EF tillfälligt utan att din egentliga form tappat.</p>
         </div>
         <div class="chart-container chart-container--skeleton" id="chart-easy-hr-wrap">
           <div class="chart-skeleton" id="chart-skeleton-easy-hr"></div>

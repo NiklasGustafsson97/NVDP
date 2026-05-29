@@ -8011,11 +8011,23 @@ function renderPolarizationCard(workouts) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Aerob effektivitet (EF):  EF = GAP_kmh / avg_HR × 100
+//  Aerob effektivitet (EF) — pulsreserv-baserad, 4v rullande.
+//
+//  EF = GAP_kmh / pulsreserv × 100, dvs GAP-fart per 100 slag puls
+//  ÖVER vilopuls. Vi använder reserven (HR − vilopuls) istället för
+//  absolut puls för att ta bort sågtanden: med absolut puls blir EF
+//  mekaniskt lägre högt i Z2-bandet (pulsen stiger mer än farten), så
+//  veckor som råkar ligga högt i bandet ser ut som formtapp fast formen
+//  är oförändrad. Reserven nollar bort den vilopuls-offset som gör
+//  ratiot pulsberoende inom bandet.
+//
 //  Per-km splits filtreras: skippa första 10 min av varje pass,
 //  behåll splits där avg_hr ligger i 60–80 % av maxHR (Z2-band).
 //  GAP justerar farten för stigning via Minetti-polynom.
-//  Stigande EF = fortare till samma puls = bättre aerob form.
+//
+//  Grafen visar ett km-viktat 4-veckors rullande snitt (ingen rå
+//  veckokurva) — enstaka varma/kuperade/trötta pass ska inte se ut som
+//  en trend. Stigande EF = fortare vid samma ansträngning = bättre form.
 // ─────────────────────────────────────────────────────────────
 
 const EF_WARMUP_CUT_SEC = 600;
@@ -8023,6 +8035,8 @@ const EF_Z2_MIN_PCT = 0.60;
 const EF_Z2_MAX_PCT = 0.80;
 const EF_DEFAULT_MAX_HR = 195;
 const EF_MIN_KM_AFTER_FILTER = 2;
+const EF_HRR_SCALE = 100;   // EF uttrycks som GAP-fart per 100 slag pulsreserv
+const EF_ROLL_WEEKS = 4;    // km-viktat rullande fönster
 
 function gapAdjustSpeedKmh(speedKmh, gradeDecimal) {
   if (!speedKmh || speedKmh <= 0) return null;
@@ -8138,32 +8152,55 @@ function renderEasyHrChart(workouts) {
   const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-easy-hr'], easyHrSize);
   const visibleWeeks = win.weeks;
 
+  const resting = _vo2maxRestingHr();
+  const efFromSums = (gapSum, hrSum, wSum) => {
+    if (!wSum) return null;
+    const gap = gapSum / wSum;
+    const reserve = (hrSum / wSum) - resting;
+    if (reserve <= 0) return null;
+    return gap / reserve * EF_HRR_SCALE;
+  };
+
+  // Km-weighted rolling 4-week EF over a contiguous Monday timeline so a
+  // missed week widens the window instead of breaking it. Computed across the
+  // full data range, then read back per week — so even the leftmost visible
+  // point still carries the prior weeks' load.
+  const rollingEf = (weekKeys) => {
+    const out = new Map();
+    for (let i = 0; i < weekKeys.length; i++) {
+      let gapSum = 0, hrSum = 0, wSum = 0, kmSum = 0, passes = 0, weeks = 0;
+      for (let j = Math.max(0, i - (EF_ROLL_WEEKS - 1)); j <= i; j++) {
+        const e = byWeek.get(weekKeys[j]);
+        if (!e) continue;
+        gapSum += e.gapSum; hrSum += e.hrSum; wSum += e.weightSum;
+        kmSum += e.kmSum; passes += e.passes; weeks++;
+      }
+      const ef = efFromSums(gapSum, hrSum, wSum);
+      if (ef === null) { out.set(weekKeys[i], null); continue; }
+      out.set(weekKeys[i], {
+        ef: +ef.toFixed(2),
+        gap: +(gapSum / wSum).toFixed(2),
+        hr: Math.round(hrSum / wSum),
+        km: +kmSum.toFixed(1),
+        passes,
+        weeks,
+      });
+    }
+    return out;
+  };
+
+  const fullWeeks = _buildContiguousWeeks(dataKeys[0], lastDataKey);
+  const rollFull = rollingEf(fullWeeks);
+
   const labels = visibleWeeks.map((k, i) => _weekAxisLabel(visibleWeeks, i, false));
-  const efData = visibleWeeks.map((k) => {
-    const e = byWeek.get(k);
-    if (!e) return null;
-    const gap = e.gapSum / e.weightSum;
-    const hr = e.hrSum / e.weightSum;
-    return +(gap / hr * 100).toFixed(2);
-  });
-  const ctxData = visibleWeeks.map((k) => {
-    const e = byWeek.get(k);
-    if (!e) return null;
-    return {
-      gap: +(e.gapSum / e.weightSum).toFixed(2),
-      hr: Math.round(e.hrSum / e.weightSum),
-      km: +e.kmSum.toFixed(1),
-      passes: e.passes,
-    };
-  });
-  // Recent EF stats for the subtitle — always over the FULL series so they
-  // describe "now", not the browsed window.
-  const efDataAll = dataKeys.map((k) => {
-    const e = byWeek.get(k);
-    const gap = e.gapSum / e.weightSum;
-    const hr = e.hrSum / e.weightSum;
-    return +(gap / hr * 100).toFixed(2);
-  });
+  const efData = visibleWeeks.map((k) => rollFull.get(k)?.ef ?? null);
+  const ctxData = visibleWeeks.map((k) => rollFull.get(k) ?? null);
+
+  // Full-range rolling series drives the "now" insight regardless of which
+  // window is being browsed.
+  const efSeriesFull = fullWeeks.map((k) => rollFull.get(k)?.ef ?? null);
+  let lastIdx = -1;
+  for (let i = efSeriesFull.length - 1; i >= 0; i--) { if (efSeriesFull[i] !== null) { lastIdx = i; break; } }
 
   const textColor = themeTextDim();
   // Auto-zoom the y-axis to the visible data (with ~15 % padding) so the
@@ -8172,23 +8209,26 @@ function renderEasyHrChart(workouts) {
   const efNums = efData.filter((v) => v !== null);
   const efMin = efNums.length ? Math.min(...efNums) : 0;
   const efMax = efNums.length ? Math.max(...efNums) : 10;
-  const efSpan = Math.max(efMax - efMin, 0.5);
-  const efYMin = Math.max(0, +(efMin - efSpan * 0.15).toFixed(2));
-  const efYMax = +(efMax + efSpan * 0.15).toFixed(2);
+  // Min span + generous padding so a small, real EF change doesn't fill the
+  // whole frame and read as a rollercoaster.
+  const efSpan = Math.max(efMax - efMin, 1.5);
+  const efYMin = Math.max(0, +(efMin - efSpan * 0.35).toFixed(2));
+  const efYMax = +(efMax + efSpan * 0.35).toFixed(2);
   window._chartEasyHr = new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: {
       labels,
       datasets: [{
-        label: 'EF (GAP km/h ÷ HR × 100)',
+        label: 'EF · 4v rullande (GAP km/h per 100 slag pulsreserv)',
         data: efData,
         borderColor: themeChartRgba('aerobic', 0.95, 'rgba(37,99,235,0.95)'),
         backgroundColor: themeChartRgba('aerobic', 0.12, 'rgba(37,99,235,0.12)'),
         borderWidth: 2.5,
-        pointRadius: 3,
+        pointRadius: 0,
         pointHoverRadius: 5,
+        pointHitRadius: 12,
         fill: true,
-        tension: 0.25,
+        tension: 0.4,
         spanGaps: true,
       }],
     },
@@ -8205,9 +8245,8 @@ function renderEasyHrChart(workouts) {
               const d = ctxData[c.dataIndex];
               if (!d) return '';
               return [
-                `GAP: ${d.gap.toFixed(2)} km/h`,
-                `Puls: ${d.hr} bpm`,
-                `${d.passes} pass · ${d.km.toFixed(1)} km kvalificerad`,
+                `GAP: ${d.gap.toFixed(2)} km/h · puls ${d.hr} bpm`,
+                `Rullande ${d.weeks} v · ${d.passes} pass · ${d.km.toFixed(1)} km`,
               ];
             },
           },
@@ -8230,45 +8269,53 @@ function renderEasyHrChart(workouts) {
     },
   });
 
-  // Insight works off the FULL series so it always describes the most
-  // recent trend regardless of which window is being browsed.
-  const recentEf = efDataAll.slice(-4);
-  const earlierEf = efDataAll.slice(-8, -4);
-  const avgRecent = recentEf.reduce((a, b) => a + b, 0) / recentEf.length;
-
   _enableTapTooltip(canvas);
   _renderChartWeekNav('chart-easy-hr', allWeekKeys.length, win, () => renderEasyHrChart(workouts));
 
-  if (earlierEf.length === 0) {
+  // Insight compares the latest rolling EF against the rolling value ~one
+  // month (4 weeks) earlier on the full series, so it describes "now"
+  // regardless of which window is being browsed.
+  if (lastIdx < 0) {
     _renderChartInsight('easy-hr-insight', {
       band: 'neutral',
       title: 'Aeroba trenden kalibreras',
-      sub: `Senaste 4 veckor: EF ${avgRecent.toFixed(2)}. Fortsätt med jämna Z2-pass innan vi drar slutsats om utvecklingen.`,
-      headline: avgRecent.toFixed(2),
-      headlineLabel: 'EF · 4 V',
+      sub: 'Fortsätt med jämna Z2-pass så ritar vi den rullande aeroba trenden.',
     });
     return;
   }
-  const avgEarlier = earlierEf.reduce((a, b) => a + b, 0) / earlierEf.length;
+  const avgRecent = efSeriesFull[lastIdx];
+  let prevIdx = -1;
+  for (let i = lastIdx - EF_ROLL_WEEKS; i >= 0; i--) { if (efSeriesFull[i] !== null) { prevIdx = i; break; } }
+  if (prevIdx < 0) {
+    _renderChartInsight('easy-hr-insight', {
+      band: 'neutral',
+      title: 'Aeroba trenden kalibreras',
+      sub: `Rullande EF ${avgRecent.toFixed(2)}. Några veckor till med jämna Z2-pass innan vi drar slutsats om riktningen.`,
+      headline: avgRecent.toFixed(2),
+      headlineLabel: 'EF · 4v',
+    });
+    return;
+  }
+  const avgEarlier = efSeriesFull[prevIdx];
   const deltaPct = (avgRecent - avgEarlier) / avgEarlier * 100;
   let band, title, sub;
   if (deltaPct >= 3) {
     band = 'ok';
     title = `Aeroba motorn svarar (+${deltaPct.toFixed(1)} %)`;
-    sub = `${deltaPct.toFixed(1)} % snabbare vid samma puls. Håll Z2-andelen, lägg ett tröskelpass nästa vecka.`;
+    sub = `${deltaPct.toFixed(1)} % snabbare vid samma ansträngning mot för en månad sedan. Håll Z2-andelen, lägg ett tröskelpass nästa vecka.`;
   } else if (deltaPct <= -3) {
     band = 'bad';
     title = `Aerob effektivitet faller (${Math.abs(deltaPct).toFixed(1)} %)`;
-    sub = `${Math.abs(deltaPct).toFixed(1)} % mindre fart vid samma puls. Kolla sömn, värme och Z2-pass över ${hrMax} bpm.`;
+    sub = `${Math.abs(deltaPct).toFixed(1)} % mindre fart vid samma ansträngning mot för en månad sedan. Kolla sömn, värme och om Z2-passen kröp över ${hrMax} bpm.`;
   } else {
     band = 'neutral';
     title = `Grundfarten är stabil (${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)} %)`;
-    sub = `EF ${avgRecent.toFixed(2)}, ${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)} % mot förra månaden. Kör ett pass till för tydlig riktning.`;
+    sub = `Rullande EF ${avgRecent.toFixed(2)}, ${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)} % mot för en månad sedan. Jämn aerob form.`;
   }
   _renderChartInsight('easy-hr-insight', {
     band, title, sub,
     headline: avgRecent.toFixed(2),
-    headlineLabel: 'EF · 4 V',
+    headlineLabel: 'EF · 4v',
   });
 }
 
