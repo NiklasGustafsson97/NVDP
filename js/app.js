@@ -2205,9 +2205,24 @@ async function _renderDashDayCard(dateStr) {
       </div>`;
 
   if (isAssessmentWeek) {
+    // Detect a broken assessment week across the whole Mon-Sun span (the day
+    // card itself only shows one day, so we check the week's cached plan).
+    const weekMon = mondayOfWeek(date);
+    const weekSun = addDays(weekMon, 6);
+    const weekPlans = (_dashPlanWorkouts || []).filter(pw =>
+      pw.workout_date >= isoDate(weekMon) && pw.workout_date <= isoDate(weekSun)
+    );
+    const needsRepair = useAiPlan && _assessmentWeekNeedsRepair('assessment', weekPlans);
+    const bannerText = needsRepair
+      ? `<strong>Bedömningsvecka.</strong> Testpassen saknas i schemat — hämta dem så kan vi kalibrera puls och tempo.`
+      : `<strong>Bedömningsvecka.</strong> Vi kalibrerar puls och tempo — kör testpassen så friska som möjligt och logga puls/tempo.`;
+    const repairCta = needsRepair
+      ? `<button type="button" class="btn btn-primary btn-sm ab-repair-btn" onclick="repairAssessmentWeek()">Hämta testpassen</button>`
+      : '';
     html += `<div class="assessment-banner ddc-assessment-banner">
       <span class="ab-icon coach-takeaway-icon" aria-hidden="true">${_coachAvatarSvg}</span>
-      <span class="ab-text"><strong>Bedömningsvecka.</strong> Vi kalibrerar puls och tempo — kör testpassen så friska som möjligt och logga puls/tempo.</span>
+      <span class="ab-text">${bannerText}</span>
+      ${repairCta}
     </div>`;
   }
 
@@ -2308,6 +2323,72 @@ async function _renderDashDayCard(dateStr) {
 
 function _getPhaseForDate(dateStr) {
   return activePlanPhaseForWeek(dateStr);
+}
+
+// An assessment week is "broken" when its phase is assessment but the
+// plan_workouts no longer carry the deterministic test protocol (labels
+// starting with "Bedömning:"). Older plans and post-LLM overwrites can
+// leave normal Z2 sessions in place — repairAssessmentWeek() rebuilds them.
+function _assessmentWeekNeedsRepair(phase, planWorkouts) {
+  if (phase !== 'assessment') return false;
+  const nonRest = (planWorkouts || []).filter(w => !w.is_rest);
+  if (nonRest.length === 0) return false;
+  return !nonRest.some(w => typeof w.label === 'string' && /^Bedömning:/i.test(w.label));
+}
+
+let _assessmentRepairInFlight = false;
+
+// Calls generate-plan?mode=repair_assessment, which rebuilds every
+// assessment-phase week in the active plan with the canonical test workouts
+// (idempotent server-side). On success we drop the plan caches and re-render
+// dashboard + schema so the test passes appear immediately.
+async function repairAssessmentWeek(opts = {}) {
+  if (_assessmentRepairInFlight) return;
+  _assessmentRepairInFlight = true;
+  try {
+    const session = await sb.auth.getSession();
+    const token = session.data.session?.access_token;
+    if (!token) throw new Error('not_authenticated');
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/generate-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ mode: 'repair_assessment' }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'repair_failed');
+    const repairedCount = Array.isArray(data.repaired) ? data.repaired.length : 0;
+
+    _activePlan = null;
+    _activePlanWeeks = [];
+    _activePlanWorkouts = [];
+    _dashPlanWorkouts = [];
+
+    if (repairedCount > 0 && !opts.silent) {
+      showToast('Testpassen är inlagda i bedömningsveckan.');
+    }
+    try { if (typeof loadDashboard === 'function') await loadDashboard(); } catch (_) {}
+    try { if (typeof loadSchema === 'function') await loadSchema(); } catch (_) {}
+    return repairedCount;
+  } catch (e) {
+    console.error('assessment repair failed', e);
+    if (!opts.silent) showToast('Kunde inte hämta testpassen. Försök igen om en stund.');
+    return 0;
+  } finally {
+    _assessmentRepairInFlight = false;
+  }
+}
+if (typeof window !== 'undefined') window.repairAssessmentWeek = repairAssessmentWeek;
+
+// Fire a silent repair at most once per plan (localStorage-guarded) so a
+// broken assessment week self-heals the first time the user lands on it,
+// without re-mutating on every render.
+function _maybeAutoRepairAssessment(phase, planWorkouts) {
+  if (!_assessmentWeekNeedsRepair(phase, planWorkouts)) return;
+  if (!_activePlan?.id) return;
+  const key = 'nvdp_assess_repaired_' + _activePlan.id;
+  try { if (localStorage.getItem(key)) return; } catch (_) { /* ignore */ }
+  try { localStorage.setItem(key, isoDate(new Date())); } catch (_) { /* ignore */ }
+  repairAssessmentWeek({ silent: true });
 }
 
 function dashCalGoToday() {
@@ -4082,10 +4163,19 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
 
   let html = '';
   if (isAssessmentWeek) {
+    const needsRepair = isOwnSchema && _assessmentWeekNeedsRepair(phase, planWorkouts);
+    const bannerText = needsRepair
+      ? `<strong>Bedömningsvecka.</strong> Testpassen saknas i schemat — hämta dem så kalibrerar vi puls, tröskel och 5&nbsp;km.`
+      : `<strong>Bedömningsvecka.</strong> Tre testpass kalibrerar puls, tröskel och 5&nbsp;km — resterande veckor anpassas efter resultaten.`;
+    const repairCta = needsRepair
+      ? `<button type="button" class="btn btn-primary btn-sm ab-repair-btn" onclick="repairAssessmentWeek()">Hämta testpassen</button>`
+      : '';
     html += `<div class="assessment-banner schema-assessment-banner">
       <span class="ab-icon coach-takeaway-icon" aria-hidden="true">${_coachAvatarSvg}</span>
-      <span class="ab-text"><strong>Bedömningsvecka.</strong> Tre testpass kalibrerar puls, tröskel och 5&nbsp;km — resterande veckor anpassas efter resultaten.</span>
+      <span class="ab-text">${bannerText}</span>
+      ${repairCta}
     </div>`;
+    if (needsRepair) _maybeAutoRepairAssessment(phase, planWorkouts);
   }
   for (let i = 0; i < 7; i++) {
     const dayDate = addDays(monday, i);
