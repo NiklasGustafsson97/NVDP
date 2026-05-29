@@ -941,6 +941,27 @@ function weekdayFromText(raw: string | null): number | null {
   return hit ? hit[1] : null;
 }
 
+// Resolve relative Swedish day expressions ("idag", "imorgon", "i övermorgon")
+// to a concrete ISO date. Returns null when no relative term is present.
+// `today` defaults to the server's current date — callers pass ctx.today when
+// they have it so resolution matches the rest of the context pack.
+function resolveRelativeDate(raw: string | null, today?: string): string | null {
+  if (!raw) return null;
+  const s = raw.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").trim();
+  const base = today && /^\d{4}-\d{2}-\d{2}$/.test(today) ? today : isoDate(new Date());
+  let offset: number | null = null;
+  if (/\b(i\s?overmorgon|overmorgon|overmorgondag(?:en|ens)?)\b/.test(s)) offset = 2;
+  else if (/\b(imorgon|i\s?morgon|imorrn|imorn|morgondag(?:en|ens)?|morrondag(?:en|ens)?)\b/.test(s)) offset = 1;
+  else if (/\b(idag|i\s?dag|dagens)\b/.test(s)) offset = 0;
+  else if (/\b(igar|i\s?gar)\b/.test(s)) offset = -1;
+  if (offset === null) return null;
+  return isoDate(addDays(new Date(base + "T00:00:00Z"), offset));
+}
+
+function userRelativeDateIntent(raw: string | null, today?: string): string | null {
+  return resolveRelativeDate(raw, today);
+}
+
 function userWeekdayIntent(raw: string | null): string | null {
   if (!raw) return null;
   const s = raw.toLowerCase();
@@ -983,6 +1004,25 @@ function guardWorkoutEditWithUserWeekday(call: ToolCall, userMessage: string): T
     arguments: {
       ...call.arguments,
       workout_date: weekday,
+    },
+  };
+}
+
+// When the user says "imorgon"/"morgondagens pass" (no weekday word), the model
+// often forwards the literal Swedish term as workout_date, which the date
+// resolver can't parse — the coach then claims it "can't find the pass". Pin
+// workout_date to the concrete date derived from the user's own words. Only
+// fires when there's no explicit weekday in the message (that guard wins).
+function guardWorkoutEditWithRelativeDate(call: ToolCall, userMessage: string, today?: string): ToolCall {
+  if (call.name !== "propose_workout_edit") return call;
+  if (userWeekdayIntent(userMessage)) return call;
+  const iso = userRelativeDateIntent(userMessage, today);
+  if (!iso) return call;
+  return {
+    ...call,
+    arguments: {
+      ...call.arguments,
+      workout_date: iso,
     },
   };
 }
@@ -1030,7 +1070,10 @@ async function findActivePlanWorkoutsForDateLike(
   if (!scope.planId) return { rows: [], resolvedDate: null, error: "active_plan_not_found" };
   if (scope.weekIds.length === 0) return { rows: [], resolvedDate: null, error: "active_plan_has_no_weeks" };
 
-  const iso = parseISODateArg(workoutDateArg);
+  // Accept relative terms ("imorgon", "idag", "i övermorgon") in addition to
+  // strict ISO and weekday words, so a fuzzy workout_date from the model still
+  // resolves instead of failing as "not found".
+  const iso = parseISODateArg(workoutDateArg) || resolveRelativeDate(workoutDateArg);
   if (iso) {
     const { data } = await db.from("plan_workouts")
       .select("*")
@@ -2194,7 +2237,8 @@ serve(async (req) => {
       let lastDiffId: string | null = null;
 
       for (let i = 0; i < 3 && llm.tool_call; i++) {
-        const call = guardWorkoutEditWithUserWeekday(llm.tool_call, trimmed);
+        let call = guardWorkoutEditWithUserWeekday(llm.tool_call, trimmed);
+        call = guardWorkoutEditWithRelativeDate(call, trimmed, ctx.today);
 
         // apply_plan_changes is user-gated: never run from an LLM turn, only
         // from an explicit `tool` mode POST from the frontend after the user
