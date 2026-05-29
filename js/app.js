@@ -127,6 +127,31 @@ function themeMemberPalette() {
     themeColor('--color-neutral', '#94A3B8'),
   ];
 }
+// Distinct hues for the multi-member group line charts. Avoids the two-blue
+// collision in themeMemberPalette (primary vs info) that made adjacent lines
+// hard to tell apart on small screens.
+function groupLinePalette() {
+  return [
+    themeColor('--color-primary', '#2F80ED'),
+    themeColor('--color-secondary', '#14B8A6'),
+    themeColor('--color-recovery', '#8B5CF6'),
+    '#EC4899',
+    themeColor('--color-warning', '#F59E0B'),
+    '#64748B',
+  ];
+}
+// Shared clean line style for the group weekly charts: no resting dots (shown
+// on hover only), thinner lines, gentler curve. Keeps both group charts in sync.
+function groupLineStyle() {
+  return {
+    fill: false,
+    tension: 0.25,
+    borderWidth: 1.75,
+    pointRadius: 0,
+    pointHoverRadius: 5,
+    pointHitRadius: 14,
+  };
+}
 function themeChartColor(name, fallback) {
   return themeColor(`--chart-${name}`, fallback);
 }
@@ -8694,7 +8719,7 @@ function setGrpEffortMode(mode) {
 }
 
 function renderGroupChart(allWorkouts, members) {
-  const colors = themeMemberPalette();
+  const colors = groupLinePalette();
   const textColor = themeTextDim();
   const isGrpNorm = grpEffortMode === 'normalized';
   const gUnit = isGrpNorm ? ' belastning' : 'h';
@@ -8728,12 +8753,14 @@ function renderGroupChart(allWorkouts, members) {
   const titleEl = document.getElementById('grp-chart-title');
   if (titleEl) titleEl.textContent = isGrpNorm ? 'Belastning per vecka' : 'Timmar per vecka';
 
+  const selfId = (typeof currentProfile !== 'undefined' && currentProfile) ? currentProfile.id : null;
   const datasets = members.map((m, i) => ({
     label: m.name.split(' ')[0],
     data: visibleWeeks.map(w => isGrpNorm ? +effortRawToDisplay(weekData[w]?.[m.id] || 0).toFixed(2) : (weekData[w]?.[m.id] || 0) / 60),
     borderColor: colors[i % colors.length],
     backgroundColor: colors[i % colors.length],
-    tension: 0.35, fill: false, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2.5
+    ...groupLineStyle(),
+    borderWidth: m.id === selfId ? 2.75 : 1.75,
   }));
 
   chartGroupWeekly = new Chart(canvas.getContext('2d'), {
@@ -8743,12 +8770,12 @@ function renderGroupChart(allWorkouts, members) {
       responsive: true, maintainAspectRatio: false,
       interaction: { intersect: false, mode: 'index' },
       plugins: {
-        legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, padding: 16 } },
+        legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, boxHeight: 8, padding: 12 } },
         tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)}${gUnit}` } }
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') }, ticks: { color: textColor, callback: v => v.toFixed(1) + gUnit } },
-        x: { grid: { display: false }, ticks: { color: textColor } }
+        y: { beginAtZero: true, grid: { color: themeRgba('--color-neutral-rgb', 0.08, 'rgba(148,163,184,0.08)') }, ticks: { color: textColor, maxTicksLimit: 5, callback: v => v.toFixed(1) + gUnit } },
+        x: { grid: { display: false }, ticks: { color: textColor, autoSkip: true, maxTicksLimit: 8, maxRotation: 0 } }
       }
     }
   });
@@ -8796,7 +8823,7 @@ function renderGroupEffortChart(allWorkouts, members) {
   if (!canvas) return;
   if (window._chartGroupEffort) window._chartGroupEffort.destroy();
 
-  const colors = themeMemberPalette();
+  const colors = groupLinePalette();
   const weekMap = {};
   allWorkouts.forEach(w => {
     const mon = mondayOfWeek(new Date(w.workout_date));
@@ -8820,12 +8847,14 @@ function renderGroupEffortChart(allWorkouts, members) {
   });
   const textColor = themeTextDim();
 
+  const selfId = (typeof currentProfile !== 'undefined' && currentProfile) ? currentProfile.id : null;
   const datasets = members.map((m, i) => ({
     label: m.name.split(' ')[0],
     data: visibleWeeks.map(w => +effortRawToDisplay(weekMap[w]?.[m.id]?.effort || 0).toFixed(2)),
     borderColor: colors[i % colors.length],
     backgroundColor: colors[i % colors.length],
-    tension: 0.35, fill: false, pointRadius: 5, pointHoverRadius: 7, borderWidth: 2.5,
+    ...groupLineStyle(),
+    borderWidth: m.id === selfId ? 2.75 : 1.75,
   }));
 
   window._chartGroupEffort = new Chart(canvas.getContext('2d'), {
@@ -8835,12 +8864,12 @@ function renderGroupEffortChart(allWorkouts, members) {
       responsive: true, maintainAspectRatio: false,
       interaction: { intersect: false, mode: 'index' },
       plugins: {
-        legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, padding: 16 } },
+        legend: { position: 'bottom', labels: { color: textColor, usePointStyle: true, boxHeight: 8, padding: 12 } },
         tooltip: { callbacks: { label: c => `${c.dataset.label}: Belastning ${c.parsed.y.toFixed(1)}` } }
       },
       scales: {
-        y: { beginAtZero: true, grid: { color: themeRgba('--color-neutral-rgb', 0.12, 'rgba(148,163,184,0.12)') }, ticks: { color: textColor, callback: v => v.toFixed(1) }, title: { display: true, text: 'Belastning', color: textColor } },
-        x: { grid: { display: false }, ticks: { color: textColor } }
+        y: { beginAtZero: true, grid: { color: themeRgba('--color-neutral-rgb', 0.08, 'rgba(148,163,184,0.08)') }, ticks: { color: textColor, maxTicksLimit: 5, callback: v => v.toFixed(1) }, title: { display: true, text: 'Belastning', color: textColor } },
+        x: { grid: { display: false }, ticks: { color: textColor, autoSkip: true, maxTicksLimit: 8, maxRotation: 0 } }
       }
     }
   });
