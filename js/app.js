@@ -7108,10 +7108,11 @@ function _ewma(values, tau) {
 }
 
 // Minimum CTL we'll accept as a denominator for the in-window ratio.
-// Below this, the first visible week is too close to zero and dividing by
-// it would explode the rest of the curve. We fall back to raw CTL in that
-// case so the chart still renders something honest.
-const FITNESS_BASELINE_MIN_CTL = 1.0;
+// This only guards against dividing by an effectively-zero baseline (which
+// would explode the rest of the curve into the hundreds). Any real first
+// week — even a low-volume one like 0.4 — should still anchor to 1.00, so
+// the floor is a tiny epsilon, not a "meaningful fitness" threshold.
+const FITNESS_BASELINE_MIN_CTL = 0.05;
 
 function renderPmcChart(workouts) {
   const ctlCanvas = document.getElementById('chart-pmc-ctl');
@@ -8122,18 +8123,20 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
   const textColor = themeTextDim();
 
   // Aggregate qualifying passes into ISO-week buckets so the chart shows
-  // one anchor dot per week (weekly mean of qualifying VO2max estimates)
-  // instead of every individual run. Per-pass scatter was noisy and made
-  // small day-to-day variation feel meaningful when it wasn't.
-  const weeklyMap = new Map(); // mondayMs -> { sum, count, weekStartIso }
+  // one anchor dot per week instead of every individual run. The dot's
+  // y-value is the 28-day SMOOTHED estimate (not the raw weekly mean) so
+  // every dot lands exactly on the trend line — raw weekly means scattered
+  // above/below the line and looked disconnected from it. We still keep a
+  // count of qualifying passes that week for the tooltip.
+  const weeklyMap = new Map(); // mondayMs -> { smoothSum, count, weekStartIso }
   for (const p of points) {
     const monDate = mondayOfWeek(new Date(p.x));
     const monMs = monDate.valueOf();
     if (!weeklyMap.has(monMs)) {
-      weeklyMap.set(monMs, { sum: 0, count: 0, weekStartIso: isoDate(monDate) });
+      weeklyMap.set(monMs, { smoothSum: 0, count: 0, weekStartIso: isoDate(monDate) });
     }
     const e = weeklyMap.get(monMs);
-    e.sum += p.y;
+    e.smoothSum += (p.smoothed ?? p.y);
     e.count += 1;
   }
   // Anchor each weekly dot at mid-week (Thursday) so a week with one
@@ -8142,7 +8145,7 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
     .sort((a, b) => a[0] - b[0])
     .map(([monMs, b]) => ({
       x: monMs + 3 * _MS_PER_DAY,
-      y: +(b.sum / b.count).toFixed(1),
+      y: +(b.smoothSum / b.count).toFixed(1),
       count: b.count,
       weekStartIso: b.weekStartIso,
     }));
@@ -8164,7 +8167,7 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
   //      add weekly granularity without per-pass noise.
   const datasets = [
     {
-      label: 'Veckosnitt',
+      label: 'Vecka (28d-snitt)',
       data: weeklyPoints.map((p) => ({ x: p.x, y: p.y, count: p.count, weekStartIso: p.weekStartIso })),
       parsing: false,
       borderColor: themeChartRgba('vo2', 0.95, 'rgba(37,99,235,0.95)'),
@@ -8225,7 +8228,7 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
                 return `Snittad VO2max: ${c.raw.y.toFixed(1)} (${cnt} pass i fönstret)`;
               }
               const cnt = c.raw.count;
-              return `Veckosnitt: ${c.raw.y.toFixed(1)} (${cnt} pass)`;
+              return `VO2max (28d-snitt): ${c.raw.y.toFixed(1)} (${cnt} pass denna vecka)`;
             },
           },
         },
