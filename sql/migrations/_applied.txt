@@ -29,3 +29,6 @@
 20260427_workout_invitation_plan_snapshot.sql
 20260529_coach_diffs.sql
 20260529_plan_weeks_update_policy.sql
+20260529_avatars_storage_bucket.sql
+20260529_profile_avatar_images.sql
+20260529_search_profiles_avatar_urls.sql
