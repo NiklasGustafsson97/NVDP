@@ -5299,6 +5299,8 @@ body.chat-mode #view-coach { height: 100%; }
 }
 .assessment-banner .ab-text { line-height: 1.35; font-weight: 500; color: var(--text); }
 .assessment-banner .ab-text strong { color: var(--color-warning); font-weight: 700; }
+.assessment-banner { flex-wrap: wrap; }
+.assessment-banner .ab-repair-btn { margin-left: auto; flex-shrink: 0; align-self: center; }
 
 /* Variants for the banner placements. */
 .ddc-assessment-banner { margin: 0 0 10px; }

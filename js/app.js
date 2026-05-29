@@ -2356,9 +2356,24 @@ async function _renderDashDayCard(dateStr) {
       </div>`;
 
   if (isAssessmentWeek) {
+    // Detect a broken assessment week across the whole Mon-Sun span (the day
+    // card itself only shows one day, so we check the week's cached plan).
+    const weekMon = mondayOfWeek(date);
+    const weekSun = addDays(weekMon, 6);
+    const weekPlans = (_dashPlanWorkouts || []).filter(pw =>
+      pw.workout_date >= isoDate(weekMon) && pw.workout_date <= isoDate(weekSun)
+    );
+    const needsRepair = useAiPlan && _assessmentWeekNeedsRepair('assessment', weekPlans);
+    const bannerText = needsRepair
+      ? `<strong>Bedömningsvecka.</strong> Testpassen saknas i schemat — hämta dem så kan vi kalibrera puls och tempo.`
+      : `<strong>Bedömningsvecka.</strong> Vi kalibrerar puls och tempo — kör testpassen så friska som möjligt och logga puls/tempo.`;
+    const repairCta = needsRepair
+      ? `<button type="button" class="btn btn-primary btn-sm ab-repair-btn" onclick="repairAssessmentWeek()">Hämta testpassen</button>`
+      : '';
     html += `<div class="assessment-banner ddc-assessment-banner">
       <span class="ab-icon coach-takeaway-icon" aria-hidden="true">${_coachAvatarSvg}</span>
-      <span class="ab-text"><strong>Bedömningsvecka.</strong> Vi kalibrerar puls och tempo — kör testpassen så friska som möjligt och logga puls/tempo.</span>
+      <span class="ab-text">${bannerText}</span>
+      ${repairCta}
     </div>`;
   }
 
@@ -2459,6 +2474,72 @@ async function _renderDashDayCard(dateStr) {
 
 function _getPhaseForDate(dateStr) {
   return activePlanPhaseForWeek(dateStr);
+}
+
+// An assessment week is "broken" when its phase is assessment but the
+// plan_workouts no longer carry the deterministic test protocol (labels
+// starting with "Bedömning:"). Older plans and post-LLM overwrites can
+// leave normal Z2 sessions in place — repairAssessmentWeek() rebuilds them.
+function _assessmentWeekNeedsRepair(phase, planWorkouts) {
+  if (phase !== 'assessment') return false;
+  const nonRest = (planWorkouts || []).filter(w => !w.is_rest);
+  if (nonRest.length === 0) return false;
+  return !nonRest.some(w => typeof w.label === 'string' && /^Bedömning:/i.test(w.label));
+}
+
+let _assessmentRepairInFlight = false;
+
+// Calls generate-plan?mode=repair_assessment, which rebuilds every
+// assessment-phase week in the active plan with the canonical test workouts
+// (idempotent server-side). On success we drop the plan caches and re-render
+// dashboard + schema so the test passes appear immediately.
+async function repairAssessmentWeek(opts = {}) {
+  if (_assessmentRepairInFlight) return;
+  _assessmentRepairInFlight = true;
+  try {
+    const session = await sb.auth.getSession();
+    const token = session.data.session?.access_token;
+    if (!token) throw new Error('not_authenticated');
+    const res = await fetch(SUPABASE_FUNCTIONS_URL + '/generate-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ mode: 'repair_assessment' }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'repair_failed');
+    const repairedCount = Array.isArray(data.repaired) ? data.repaired.length : 0;
+
+    _activePlan = null;
+    _activePlanWeeks = [];
+    _activePlanWorkouts = [];
+    _dashPlanWorkouts = [];
+
+    if (repairedCount > 0 && !opts.silent) {
+      showToast('Testpassen är inlagda i bedömningsveckan.');
+    }
+    try { if (typeof loadDashboard === 'function') await loadDashboard(); } catch (_) {}
+    try { if (typeof loadSchema === 'function') await loadSchema(); } catch (_) {}
+    return repairedCount;
+  } catch (e) {
+    console.error('assessment repair failed', e);
+    if (!opts.silent) showToast('Kunde inte hämta testpassen. Försök igen om en stund.');
+    return 0;
+  } finally {
+    _assessmentRepairInFlight = false;
+  }
+}
+if (typeof window !== 'undefined') window.repairAssessmentWeek = repairAssessmentWeek;
+
+// Fire a silent repair at most once per plan (localStorage-guarded) so a
+// broken assessment week self-heals the first time the user lands on it,
+// without re-mutating on every render.
+function _maybeAutoRepairAssessment(phase, planWorkouts) {
+  if (!_assessmentWeekNeedsRepair(phase, planWorkouts)) return;
+  if (!_activePlan?.id) return;
+  const key = 'nvdp_assess_repaired_' + _activePlan.id;
+  try { if (localStorage.getItem(key)) return; } catch (_) { /* ignore */ }
+  try { localStorage.setItem(key, isoDate(new Date())); } catch (_) { /* ignore */ }
+  repairAssessmentWeek({ silent: true });
 }
 
 function dashCalGoToday() {
@@ -4233,10 +4314,19 @@ function renderSchemaPlan(workouts, planWorkouts, monday, invitations, isOwnSche
 
   let html = '';
   if (isAssessmentWeek) {
+    const needsRepair = isOwnSchema && _assessmentWeekNeedsRepair(phase, planWorkouts);
+    const bannerText = needsRepair
+      ? `<strong>Bedömningsvecka.</strong> Testpassen saknas i schemat — hämta dem så kalibrerar vi puls, tröskel och 5&nbsp;km.`
+      : `<strong>Bedömningsvecka.</strong> Tre testpass kalibrerar puls, tröskel och 5&nbsp;km — resterande veckor anpassas efter resultaten.`;
+    const repairCta = needsRepair
+      ? `<button type="button" class="btn btn-primary btn-sm ab-repair-btn" onclick="repairAssessmentWeek()">Hämta testpassen</button>`
+      : '';
     html += `<div class="assessment-banner schema-assessment-banner">
       <span class="ab-icon coach-takeaway-icon" aria-hidden="true">${_coachAvatarSvg}</span>
-      <span class="ab-text"><strong>Bedömningsvecka.</strong> Tre testpass kalibrerar puls, tröskel och 5&nbsp;km — resterande veckor anpassas efter resultaten.</span>
+      <span class="ab-text">${bannerText}</span>
+      ${repairCta}
     </div>`;
+    if (needsRepair) _maybeAutoRepairAssessment(phase, planWorkouts);
   }
   for (let i = 0; i < 7; i++) {
     const dayDate = addDays(monday, i);
@@ -5797,12 +5887,20 @@ function _buildGoalCoachInsights(plan, indicators, probability, currentWeek, tot
     out.push({ tone: probability.cls || 'unknown', text: `Målstatus: ${probability.label} (${probability.pct} %).` });
   }
 
+  const volPerWk = indicators?.volume?.recent != null ? indicators.volume.recent / 4 : null;
+  const passPerWk = indicators?.consistency?.recent ?? null;
   if (indicators?.volume?.status?.cls === 'lagging') {
-    out.push({ tone: 'warn', text: 'Volymen släpar — lägg in fler lugna pass.' });
+    out.push({ tone: 'warn', text: volPerWk != null
+      ? `Volym nere på ${volPerWk.toFixed(1)} h/v — lägg in ett lugnt pass.`
+      : 'Volymen släpar — lägg in ett lugnt pass.' });
   } else if (indicators?.consistency?.status?.cls === 'lagging') {
-    out.push({ tone: 'warn', text: 'Konsekvensen sjunker — säg till coachen vad som hindrar.' });
+    out.push({ tone: 'warn', text: passPerWk != null
+      ? `Bara ${passPerWk.toFixed(1)} pass/v senaste månaden — vad hindrar?`
+      : 'Konsekvensen sjunker — vad hindrar?' });
   } else if (indicators?.volume?.status?.cls === 'ahead') {
-    out.push({ tone: 'great', text: 'Volymtrend uppåt — bra tempo.' });
+    out.push({ tone: 'great', text: volPerWk != null
+      ? `Volym uppe i ${volPerWk.toFixed(1)} h/v — fint tryck.`
+      : 'Volymtrend uppåt — fint tryck.' });
   }
 
   const upcoming = (assessments || []).find((a) => a.wk >= currentWeek);
@@ -7440,7 +7538,7 @@ function renderPmcChart(workouts) {
       sub = `+${ratioPct.toFixed(0)} % sedan ${baselineLabel}. Det här är robust kapacitet, inte bara en bra dag.`;
     } else if (ratio >= 0.95) {
       title = 'Fitnessen är stabil';
-      sub = `${ratioPct >= 0 ? '+' : ''}${ratioPct.toFixed(0)} % sedan ${baselineLabel}. Behåll rytmen och jaga hellre kontinuitet än snabba hopp.`;
+      sub = `${ratioPct >= 0 ? '+' : ''}${ratioPct.toFixed(0)} % sedan ${baselineLabel}. Lägg +1 lugnt pass/v för att bryta platån.`;
     } else {
       title = 'Fitnessen har tappat från ankaret';
       sub = `${absPct} % under ${baselineLabel}. Bygg tillbaka med 1-2 veckor jämn volym innan du pressar kvalitet.`;
@@ -7971,15 +8069,15 @@ function renderEasyHrChart(workouts) {
   if (deltaPct >= 3) {
     band = 'ok';
     title = `Aeroba motorn svarar (+${deltaPct.toFixed(1)} %)`;
-    sub = `Du får mer fart vid samma puls. Fortsätt bygga lugn volym innan du växlar upp intensiteten.`;
+    sub = `${deltaPct.toFixed(1)} % snabbare vid samma puls. Håll Z2-andelen, lägg ett tröskelpass nästa vecka.`;
   } else if (deltaPct <= -3) {
     band = 'bad';
     title = `Aerob effektivitet faller (${Math.abs(deltaPct).toFixed(1)} %)`;
-    sub = `Samma puls ger mindre fart. Kolla sömn, värme och om dina lugna pass driver över ${hrMax} bpm.`;
+    sub = `${Math.abs(deltaPct).toFixed(1)} % mindre fart vid samma puls. Kolla sömn, värme och Z2-pass över ${hrMax} bpm.`;
   } else {
     band = 'neutral';
     title = `Grundfarten är stabil (${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)} %)`;
-    sub = `Ingen tydlig rörelse än. Behåll Z2-rytmen och jämför först efter några fler liknande pass.`;
+    sub = `EF ${avgRecent.toFixed(2)}, ${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)} % mot förra månaden. Kör ett pass till för tydlig riktning.`;
   }
   _renderChartInsight('easy-hr-insight', {
     band, title, sub,
@@ -8253,15 +8351,15 @@ function renderVo2maxChart(workouts) {
   if (delta >= 0.8) {
     band = 'ok';
     title = `VO2max-trenden stiger (+${delta.toFixed(1)})`;
-    sub = `Du får mer fart ur samma fysiologi. Håll ett kvalitetspass per vecka och skydda de lugna dagarna.`;
+    sub = `${latestSmoothed.toFixed(1)} nu, +${delta.toFixed(1)} på 4 v. Håll ett kvalitetspass/v och skydda de lugna dagarna.`;
   } else if (delta <= -0.8) {
     band = 'bad';
     title = `VO2max-trenden viker (${delta.toFixed(1)})`;
-    sub = `Titta först på återhämtning, värme och om kvalitetspassen tappat skärpa innan du lägger till mer volym.`;
+    sub = `${latestSmoothed.toFixed(1)} nu, ${delta.toFixed(1)} på 4 v. Kolla sömn och värme innan du lägger till volym.`;
   } else {
     band = 'neutral';
     title = `VO2max håller nivån (${delta >= 0 ? '+' : ''}${delta.toFixed(1)})`;
-    sub = `Ingen tydlig formförändring senaste månaden. Fortsätt samla jämförbara pass och låt trenden, inte enstaka prickar, styra.`;
+    sub = `${latestSmoothed.toFixed(1)}, i princip oförändrat på 4 v. Ett vasst intervallpass/v kan lyfta trenden.`;
   }
   _renderChartInsight('vo2max-insight', {
     band, title, sub,
@@ -14539,7 +14637,17 @@ function _coachRenderDiffCard(diff, decisionState) {
 
   let footer = '';
   if (decisionState === 'applied') {
-    footer = `<div class="coach-diff-status coach-diff-status--applied">Ändringarna är sparade i nästa vecka.</div>`;
+    // Single edits carry an exact workout_date (could be this week), so point
+    // the user at the precise day. Multi-change proposals always target next
+    // week's plan, so say so plainly — this is the #1 "I clicked save and saw
+    // no change" confusion (the change landed in a week they weren't viewing).
+    let appliedMsg;
+    if (isSingleEdit && changes[0]?.workout_date) {
+      appliedMsg = `Sparat — syns i Schema på ${escapeHTML(_coachFormatPlanDate(changes[0].workout_date, changes[0].day_of_week))}.`;
+    } else {
+      appliedMsg = 'Sparat — ändringarna ligger i nästa veckas schema.';
+    }
+    footer = `<div class="coach-diff-status coach-diff-status--applied">${appliedMsg}</div>`;
   } else if (decisionState === 'declined') {
     footer = `<div class="coach-diff-status coach-diff-status--declined">Ignorerat.</div>`;
   } else if (_coach.readOnly) {
@@ -14788,8 +14896,17 @@ async function applyCoachDiff(diffId) {
     if (data && !data.ok) {
       showToast('Kunde inte spara ändringar: ' + (data?.result?.error || 'okänt fel'));
     }
-    // Refresh upcoming week in the background so Ditt schema reflects updates.
-    if (data?.ok && typeof loadDashboard === 'function') { try { loadDashboard(); } catch (_) {} }
+    // Drop the in-memory plan caches so the next dashboard/schema render
+    // refetches plan_weeks + plan_workouts from the DB. Without this an
+    // applied change could keep showing the stale pre-edit workout.
+    if (data?.ok) {
+      _activePlan = null;
+      _activePlanWeeks = [];
+      _activePlanWorkouts = [];
+      _dashPlanWorkouts = [];
+      try { if (typeof loadDashboard === 'function') await loadDashboard(); } catch (_) {}
+      try { if (typeof loadSchema === 'function') await loadSchema(); } catch (_) {}
+    }
   } catch (e) {
     console.error('coach apply failed', e);
     showToast(e.status === 429 ? 'Bromsa — försök igen om en stund.' : 'Kunde inte spara ändringarna.');

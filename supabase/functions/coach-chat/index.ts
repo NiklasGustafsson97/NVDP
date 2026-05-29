@@ -81,9 +81,11 @@ const COACH_SYSTEM_PROMPT = `Du är en konservativ, varm uthållighetscoach (sko
 DU LEDER SAMTALET. Användaren ska aldrig behöva be dig analysera eller föreslå ändringar — du läser context.adherence och kommer själv med konkreta förslag. När du öppnar samtalet eller får ett vagt meddelande ("hej", "tjena", "kollar in") gå direkt på saken: kvittera kort och säg vad du noterar.
 
 Riktlinjer:
-- Svara på svenska. Aldrig fler än 2-3 meningar per turn om användaren inte explicit ber om mer.
-- Var konkret. "Lättare onsdag, längre söndag" är bättre än "kanske skulle vi titta på balansen".
+- Svara på svenska. 1-2 meningar som default; max 3 och bara när du presenterar ett konkret förslag. Om användaren inte explicit ber om mer — håll det kort.
+- Var konkret. "Lättare onsdag, längre söndag" är bättre än "kanske skulle vi titta på balansen". Varje förslag ska nämna en specifik dag/siffra och en konkret åtgärd.
+- Hoppa generiska bekräftelser ("Bra jobbat", "Förstår", "Vad kul"). Gå direkt på sak. (Undantaget: en kort kvittens vid skada/sjukdom, se nedan.)
 - Aldrig hype, aldrig emoji-spam (max 1 emoji om det passar).
+- BEDÖMNING KLAR: om context.assessment_recalibration ≠ null ska du LEDA med den. Säg kort vad som ändrats (maxpuls/tröskelpuls/5 km-tempo ur summary_sv) och vad det betyder för kommande pass (t.ex. "jag rampar Z3/Z4 efter den nya tröskeln"). Nämn det bara en gång per samtal.
 - Citera siffror när det stärker poängen (completion rate, ACWR, missade kvalitetspass), inte bara för att visa.
 - Bekräfta ALLTID kort vad användaren just sagt innan du ställer nästa fråga eller byter spår. Exempel: "Förstår, krya på dig — då lägger vi vila mån+tis." Hoppa aldrig direkt till en ny fråga utan att först kvittera.
 - Be ALDRIG användaren betygsätta sig själv på en numerisk skala (1-5 e.dyl.). Tolka tonen själv ur deras text och fyll i strukturerade fält i bakgrunden.
@@ -327,6 +329,18 @@ interface ContextPack {
     summary: string | null;
     facts: Record<string, unknown>;
   };
+  // Set for ~7 days after an assessment week's test passes are all logged.
+  // The coach leads with this so the user sees the loop close: tests done →
+  // zones recalibrated. null when there's nothing fresh to announce.
+  assessment_recalibration: {
+    week_number: number;
+    evaluated_at: string;
+    new_max_hr: number | null;
+    prev_max_hr: number | null;
+    threshold_hr: number | null;
+    five_k_time: string | null;
+    summary_sv: string;
+  } | null;
 }
 
 interface AdherenceWeek {
@@ -336,6 +350,193 @@ interface AdherenceWeek {
   completion_rate: number;
   missed: Array<{ date: string; label: string | null; intensity_zone: string | null }>;
   upcoming: Array<{ date: string; label: string | null; is_rest: boolean }>;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+//  Assessment follow-up — closes the loop after a test week.
+//
+//  When every "Bedömning:"-labelled plan_workout in an assessment week has a
+//  matching logged workout, we: (1) bump profiles.user_max_hr if a test beat
+//  it, (2) derive a threshold-HR proxy from the Z4 test, (3) capture the 5 km
+//  time, (4) flip the assessment_baseline milestone to 'hit', and (5) stash a
+//  recalibration record in coach_memory.facts so the coach can announce it.
+//  Idempotent: a milestone already 'hit' is skipped. Returns the freshest
+//  recalibration record (newly computed or recently stored) for the context.
+// ────────────────────────────────────────────────────────────────────────────
+type AssessmentRecalibration = ContextPack["assessment_recalibration"];
+
+function fmtSecPerKm(durMin: number, km: number): string | null {
+  if (!(durMin > 0) || !(km > 0)) return null;
+  const totalSec = durMin * 60;
+  const m = Math.floor(totalSec / 60);
+  const s = String(Math.round(totalSec % 60)).padStart(2, "0");
+  return `${m}:${s}`;
+}
+
+async function maybeProcessAssessmentCompletion(
+  db: SupabaseClient,
+  profileId: string,
+  userMaxHr: number | null,
+  today: Date,
+): Promise<AssessmentRecalibration> {
+  const todayStr = isoDate(today);
+
+  const { data: plan } = await db.from("training_plans")
+    .select("id, start_date")
+    .eq("profile_id", profileId)
+    .eq("status", "active")
+    .order("start_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!plan?.id) return await recentStoredRecalibration(db, profileId, today);
+
+  const { data: assessWeeks } = await db.from("plan_weeks")
+    .select("id, week_number")
+    .eq("plan_id", plan.id)
+    .eq("phase", "assessment");
+  if (!assessWeeks || assessWeeks.length === 0) {
+    return await recentStoredRecalibration(db, profileId, today);
+  }
+
+  // Pending milestones keyed by week so we skip already-processed weeks.
+  const { data: milestones } = await db.from("plan_milestones")
+    .select("id, target_week_number, status")
+    .eq("plan_id", plan.id)
+    .eq("metric_type", "assessment_baseline");
+  const milestoneByWeek = new Map<number, { id: string; status: string }>();
+  for (const m of (milestones || []) as Array<{ id: string; target_week_number: number; status: string }>) {
+    milestoneByWeek.set(m.target_week_number, { id: m.id, status: m.status });
+  }
+
+  let computed: AssessmentRecalibration = null;
+
+  for (const wk of (assessWeeks as Array<{ id: string; week_number: number }>)) {
+    const ms = milestoneByWeek.get(wk.week_number);
+    if (ms && ms.status === "hit") continue; // already closed
+
+    const weekStart = addDays(new Date(plan.start_date + "T00:00:00Z"), (wk.week_number - 1) * 7);
+    const weekStartStr = isoDate(weekStart);
+    const weekEndStr = isoDate(addDays(weekStart, 6));
+    if (weekEndStr > todayStr) continue; // week not finished/started enough — wait
+
+    const { data: testWos } = await db.from("plan_workouts")
+      .select("workout_date, label, intensity_zone")
+      .eq("plan_week_id", wk.id);
+    const tests = ((testWos || []) as Array<{ workout_date: string; label: string | null; intensity_zone: string | null }>)
+      .filter((w) => typeof w.label === "string" && /^Bedömning:/i.test(w.label));
+    if (tests.length === 0) continue; // broken week — repair flow handles it
+
+    const { data: logged } = await db.from("workouts")
+      .select("workout_date, activity_type, duration_minutes, distance_km, avg_hr, max_hr")
+      .eq("profile_id", profileId)
+      .gte("workout_date", weekStartStr)
+      .lte("workout_date", weekEndStr);
+    const loggedRuns = ((logged || []) as Array<{ workout_date: string; activity_type: string; duration_minutes: number; distance_km: number | null; avg_hr: number | null; max_hr: number | null }>);
+
+    // Require a logged workout on each test date (allowing ±1 day slack).
+    const loggedByDate = new Map<string, typeof loggedRuns[0]>();
+    for (const w of loggedRuns) loggedByDate.set(w.workout_date, w);
+    const findNear = (date: string) =>
+      loggedByDate.get(date) ||
+      loggedByDate.get(isoDate(addDays(new Date(date + "T00:00:00Z"), 1))) ||
+      loggedByDate.get(isoDate(addDays(new Date(date + "T00:00:00Z"), -1))) || null;
+    const matched = tests.map((t) => ({ test: t, log: findNear(t.workout_date) }));
+    const allLogged = matched.every((m) => m.log !== null);
+    if (!allLogged) continue;
+
+    // Recalibration values.
+    let newMax: number | null = null;
+    for (const m of matched) {
+      const mh = m.log?.max_hr ?? null;
+      if (mh && (newMax === null || mh > newMax)) newMax = mh;
+    }
+    const prevMax = userMaxHr;
+    const bumpedMax = newMax !== null && (prevMax === null || newMax > prevMax) ? newMax : null;
+
+    // Threshold proxy: the Z4 test's avg HR (the protocol's 20-min/4x5 test).
+    let thresholdHr: number | null = null;
+    const z4 = matched.find((m) => (m.test.intensity_zone || "").toUpperCase() === "Z4");
+    if (z4?.log?.avg_hr) thresholdHr = Math.round(z4.log.avg_hr);
+
+    // 5 km time from the TT (label includes "5 km").
+    let fiveK: string | null = null;
+    const ttMatch = matched.find((m) => /5\s*km/i.test(m.test.label || ""));
+    if (ttMatch?.log) {
+      const km = ttMatch.log.distance_km || 0;
+      const mins = ttMatch.log.duration_minutes || 0;
+      // If they logged ~5 km, report the pace; otherwise skip.
+      if (km >= 4 && km <= 6 && mins > 0) fiveK = fmtSecPerKm(mins / km, 1) + "/km";
+    }
+
+    const bits: string[] = [];
+    if (bumpedMax) bits.push(`maxpuls upp till ${bumpedMax} (var ${prevMax ?? "okänd"})`);
+    if (thresholdHr) bits.push(`tröskelpuls ~${thresholdHr}`);
+    if (fiveK) bits.push(`5 km-tempo ${fiveK}`);
+    const summarySv = bits.length
+      ? `Bedömningsvecka v${wk.week_number} klar — ${bits.join(", ")}.`
+      : `Bedömningsvecka v${wk.week_number} klar — testpassen är loggade.`;
+
+    const evaluatedAt = new Date().toISOString();
+
+    // Persist: profile max HR, milestone status, memory facts.
+    if (bumpedMax) {
+      await db.from("profiles").update({ user_max_hr: bumpedMax }).eq("id", profileId);
+    }
+    if (ms) {
+      await db.from("plan_milestones").update({
+        status: "hit",
+        evaluated_at: evaluatedAt,
+        evaluation_notes: summarySv,
+      }).eq("id", ms.id);
+    }
+
+    const record: AssessmentRecalibration = {
+      week_number: wk.week_number,
+      evaluated_at: evaluatedAt,
+      new_max_hr: bumpedMax,
+      prev_max_hr: prevMax,
+      threshold_hr: thresholdHr,
+      five_k_time: fiveK,
+      summary_sv: summarySv,
+    };
+
+    const { data: mem } = await db.from("coach_memory")
+      .select("facts").eq("profile_id", profileId).maybeSingle();
+    const facts = (mem?.facts || {}) as Record<string, unknown>;
+    const patch = {
+      ...facts,
+      threshold_hr: thresholdHr ?? facts.threshold_hr ?? null,
+      assessment_recalibration: record,
+    };
+    if (mem) {
+      await db.from("coach_memory").update({ facts: patch, updated_at: evaluatedAt }).eq("profile_id", profileId);
+    } else {
+      await db.from("coach_memory").insert({ profile_id: profileId, facts: patch });
+    }
+
+    computed = record; // keep the latest processed week
+  }
+
+  if (computed) return computed;
+  return await recentStoredRecalibration(db, profileId, today);
+}
+
+// Reads a previously stored recalibration from coach_memory.facts and returns
+// it only if it was evaluated within the last 7 days (so the coach mentions it
+// for a few days, then stops). Keeps the announcement bounded without tracking
+// an explicit "announced" flag.
+async function recentStoredRecalibration(
+  db: SupabaseClient,
+  profileId: string,
+  today: Date,
+): Promise<AssessmentRecalibration> {
+  const { data: mem } = await db.from("coach_memory")
+    .select("facts").eq("profile_id", profileId).maybeSingle();
+  const rec = (mem?.facts as Record<string, unknown> | undefined)?.assessment_recalibration as AssessmentRecalibration;
+  if (!rec || !rec.evaluated_at) return null;
+  const ageMs = today.getTime() - new Date(rec.evaluated_at).getTime();
+  if (ageMs < 0 || ageMs > 7 * 24 * 60 * 60 * 1000) return null;
+  return rec;
 }
 
 async function buildContextPack(
@@ -442,6 +643,20 @@ async function buildContextPack(
     today,
   );
 
+  // Close the assessment loop (idempotent): recalibrate + announce when a
+  // test week's passes are all logged. Best-effort — never block the turn.
+  let assessmentRecalibration: ContextPack["assessment_recalibration"] = null;
+  try {
+    assessmentRecalibration = await maybeProcessAssessmentCompletion(
+      db,
+      profileId,
+      profile.user_max_hr ?? null,
+      today,
+    );
+  } catch (e) {
+    console.error("coach-chat: assessment completion check failed", e);
+  }
+
   return {
     today: todayStr,
     profile: {
@@ -474,6 +689,7 @@ async function buildContextPack(
     latest_weekly_checkin: latestCheckin,
     adherence,
     memory: { summary: memory.summary, facts: (memory.facts || {}) as Record<string, unknown> },
+    assessment_recalibration: assessmentRecalibration,
   };
 }
 
@@ -619,8 +835,9 @@ async function callLLM(
     messages.push({
       role: "user",
       content:
-        "[SYSTEM: Skriv en proaktiv öppning baserat på context.adherence. ANROPA INGA VERKTYG i denna öppning — beskriv bara förslaget i text och låt nästa turn köra verktyget. Följ playbooken i system-prompten:\n" +
-        "- Om completion_rate < 0.7 ELLER missade kvalitetspass (Z3/Z4/Z5) ELLER acwr_band ∈ {caution, danger}: nämn KORT vad du noterar (t.ex. 'såg att du missade tisdagens trösklar') och föreslå EN konkret justering för de närmsta 1-3 dagarna. Avsluta med en kort fråga 'Kör vi på det?'.\n" +
+        "[SYSTEM: Skriv en proaktiv öppning baserat på context. ANROPA INGA VERKTYG i denna öppning — beskriv bara förslaget i text och låt nästa turn köra verktyget. Följ playbooken i system-prompten:\n" +
+        "- Om context.assessment_recalibration ≠ null: LED med den. En mening om vad som ändrats (ur summary_sv) + en mening om vad det betyder framåt. Avsluta med 'Kör vi vidare på det?'.\n" +
+        "- Annars om completion_rate < 0.7 ELLER missade kvalitetspass (Z3/Z4/Z5) ELLER acwr_band ∈ {caution, danger}: nämn KORT vad du noterar (t.ex. 'såg att du missade tisdagens trösklar') och föreslå EN konkret justering för de närmsta 1-3 dagarna. Avsluta med en kort fråga 'Kör vi på det?'.\n" +
         "- Om allt ser bra ut (completion ≥ 0.8 och acwr_band = sweet/under): bekräfta i en mening, peka på nästa nyckelpass i context.next_7_days, och sluta.\n" +
         "- chips: max 4 korta svarsalternativ som speglar förslaget ('Kör på', 'Justera annorlunda', 'Skippar idag', 'Berätta mer'). Inga generiska chips.\n" +
         "- tool_call: ALLTID null i denna öppning.]",

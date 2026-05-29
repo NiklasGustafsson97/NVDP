@@ -1798,6 +1798,127 @@ Return ONLY a JSON object with these fields: activity_type, label, description, 
       );
     }
 
+    // ── REPAIR_ASSESSMENT MODE: rebuild missing test workouts ──
+    // Older plans (and any plan where the LLM overwrite slipped) carry
+    // phase="assessment" weeks whose plan_workouts are normal Z2 sessions
+    // instead of the deterministic test protocol. This re-runs the same
+    // overwrite that plan generation does, but against an already-saved
+    // plan. Idempotent: a week that already has "Bedömning:" workouts is
+    // skipped. Targets the caller's active plan unless plan_id is supplied.
+    if (body.mode === "repair_assessment") {
+      let planId = body.plan_id || null;
+      if (planId) {
+        if (!(await assertPlanOwnership(planId))) {
+          return new Response(JSON.stringify({ error: "forbidden" }), {
+            status: 403,
+            headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+          });
+        }
+      } else {
+        const { data: activePlan } = await db.from("training_plans")
+          .select("id")
+          .eq("profile_id", profile_id)
+          .eq("status", "active")
+          .order("start_date", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        planId = activePlan?.id ?? null;
+      }
+      if (!planId) {
+        return new Response(JSON.stringify({ error: "no_active_plan" }), {
+          status: 404,
+          headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: planRow } = await db.from("training_plans")
+        .select("start_date")
+        .eq("id", planId)
+        .single();
+      const planStart: string = planRow?.start_date || new Date().toISOString().split("T")[0];
+
+      const { data: assessmentWeeks } = await db.from("plan_weeks")
+        .select("id, week_number")
+        .eq("plan_id", planId)
+        .eq("phase", "assessment")
+        .order("week_number", { ascending: true });
+
+      const repaired: number[] = [];
+      const skipped: number[] = [];
+      for (const wk of (assessmentWeeks || []) as Array<{ id: string; week_number: number }>) {
+        const { data: existing } = await db.from("plan_workouts")
+          .select("id, label")
+          .eq("plan_week_id", wk.id);
+        const alreadyOk = (existing || []).some((r: { label: string | null }) =>
+          typeof r.label === "string" && /^Bedömning:/i.test(r.label)
+        );
+        if (alreadyOk) { skipped.push(wk.week_number); continue; }
+
+        const kind: AssessmentKind = wk.week_number === 1 ? "preplan" : "midplan";
+        const newWorkouts = buildAssessmentWeek(body.baseline, undefined, kind);
+
+        await db.from("plan_workouts").delete().eq("plan_week_id", wk.id);
+
+        const weekStart = new Date(planStart);
+        weekStart.setDate(weekStart.getDate() + (wk.week_number - 1) * 7);
+        const rows = newWorkouts.map((w) => {
+          const wDate = new Date(weekStart);
+          wDate.setDate(wDate.getDate() + w.day_of_week);
+          return {
+            plan_week_id: wk.id,
+            workout_date: wDate.toISOString().split("T")[0],
+            day_of_week: w.day_of_week,
+            activity_type: w.activity_type,
+            label: w.label,
+            description: w.description,
+            target_duration_minutes: w.target_duration_minutes || 0,
+            target_distance_km: w.target_distance_km || null,
+            intensity_zone: w.intensity_zone || null,
+            is_rest: w.is_rest,
+            sort_order: 0,
+          };
+        });
+        await db.from("plan_workouts").insert(rows);
+
+        const recomputed = _recomputeWeekTargets(newWorkouts);
+        await db.from("plan_weeks").update({
+          target_hours: recomputed.target_hours,
+          target_sessions: recomputed.target_sessions,
+        }).eq("id", wk.id);
+
+        repaired.push(wk.week_number);
+      }
+
+      // Backfill any missing assessment_baseline milestones for repaired weeks.
+      if (repaired.length > 0) {
+        const { data: existingMs } = await db.from("plan_milestones")
+          .select("target_week_number")
+          .eq("plan_id", planId)
+          .eq("metric_type", "assessment_baseline");
+        const haveWeeks = new Set(
+          (existingMs || []).map((m: { target_week_number: number }) => m.target_week_number)
+        );
+        const missingWeeks = repaired.filter((w) => !haveWeeks.has(w));
+        if (missingWeeks.length > 0) {
+          const msRows = buildAssessmentMilestoneRows(missingWeeks, 1, planStart).map((r) => ({
+            ...r,
+            plan_id: planId,
+            profile_id,
+          }));
+          try {
+            await db.from("plan_milestones").insert(msRows);
+          } catch (e) {
+            console.warn("repair_assessment: milestone backfill failed (non-fatal):", e);
+          }
+        }
+      }
+
+      return new Response(
+        JSON.stringify({ plan_id: planId, repaired, skipped }),
+        { status: 200, headers: { ...corsHeaders(req), "Content-Type": "application/json" } }
+      );
+    }
+
     // ── EDIT_APPLY MODE: apply a previously previewed plan ──
     if (body.mode === "edit_apply" && body.plan_id && body.proposed_plan) {
       if (!(await assertPlanOwnership(body.plan_id))) {
