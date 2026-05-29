@@ -8585,10 +8585,11 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
       weekStartIso: b.weekStartIso,
     }));
 
+  // Axis range is driven purely by the weekly anchor points — the same
+  // points the trend line now runs through. We no longer fold in the dense
+  // per-pass smoothed values, which used to pad the axis toward invisible
+  // extremes that weren't actually drawn.
   const yValues = weeklyPoints.map((p) => p.y);
-  if (withTrend) {
-    for (const p of points) yValues.push(p.smoothed);
-  }
   // Auto-zoom the y-axis to the data range (with ~15 % padding) so the
   // week-to-week movement is visible. A 0-anchored axis flattened the trend
   // into a near-flat line near the top of the canvas.
@@ -8598,12 +8599,15 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
   const maxVal = Math.ceil(maxRaw + vo2Span * 0.15);
   const minVal = Math.max(0, Math.floor(minRaw - vo2Span * 0.15));
 
-  // Two layers:
-  //   1. Weekly-average dots = one dot per ISO week, anchored mid-week.
-  //      Each dot is the mean of qualifying VO2max estimates that week.
-  //   2. Thick smoothed line = 28-day rolling mean over the full daily
-  //      history. This is the number the user should anchor on; the dots
-  //      add weekly granularity without per-pass noise.
+  // Two layers, both anchored on the SAME weekly points so the dots always
+  // sit exactly on the line:
+  //   1. Weekly dots = one dot per ISO week, anchored mid-week (Thursday),
+  //      y = mean of that week's 28-day-smoothed VO2max estimates.
+  //   2. Thick trend line = the same weekly points joined with monotone
+  //      cubic interpolation. Monotone is used instead of a tension spline
+  //      so the curve never overshoots between weeks (the old tension:0.3
+  //      over irregular per-pass points produced phantom humps/dips that
+  //      looked broken). The line passes through every dot.
   const datasets = [
     {
       label: 'Vecka (28d-snitt)',
@@ -8621,15 +8625,15 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
   if (withTrend) {
     datasets.push({
       label: `Snittad VO2max (${VO2MAX_SMOOTH_DAYS}d)`,
-      data: points.map((p) => ({ x: p.x, y: p.smoothed, meta: p.meta, windowCount: p.windowCount })),
+      data: weeklyPoints.map((p) => ({ x: p.x, y: p.y, count: p.count, weekStartIso: p.weekStartIso })),
       parsing: false,
       borderColor: themeChartRgba('vo2', 0.95, 'rgba(37,99,235,0.95)'),
       backgroundColor: themeChartRgba('vo2', 0.12, 'rgba(37,99,235,0.12)'),
       borderWidth: 3,
       pointRadius: 0,
-      pointHoverRadius: 4,
+      pointHoverRadius: 0,
       fill: true,
-      tension: 0.3,
+      cubicInterpolationMode: 'monotone',
       spanGaps: true,
       order: 1,
     });
@@ -8663,8 +8667,7 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
             label: (c) => {
               const isTrend = c.dataset.label && c.dataset.label.startsWith('Snittad');
               if (isTrend) {
-                const cnt = c.raw.windowCount;
-                return `Snittad VO2max: ${c.raw.y.toFixed(1)} (${cnt} pass i fönstret)`;
+                return `Snittad VO2max: ${c.raw.y.toFixed(1)}`;
               }
               const cnt = c.raw.count;
               return `VO2max (28d-snitt): ${c.raw.y.toFixed(1)} (${cnt} pass denna vecka)`;
