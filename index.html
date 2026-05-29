@@ -1097,6 +1097,24 @@
   </div>
 </div>
 
+<!-- ═══ WEEK PHASE KICKOFF MODAL ═══ -->
+<div id="week-kickoff-modal" class="modal-overlay week-kickoff-overlay hidden" onclick="if(event.target===this)closeWeekKickoff(false)">
+  <div class="week-kickoff-box" data-phase="" role="dialog" aria-modal="true" aria-labelledby="wk-title">
+    <div class="wk-glow" aria-hidden="true"></div>
+    <div class="wk-hero">
+      <div class="wk-hero-icon" id="wk-icon" aria-hidden="true"></div>
+      <div class="wk-phase-chip" id="wk-phase-chip"></div>
+      <h2 class="wk-title" id="wk-title"></h2>
+      <p class="wk-body" id="wk-body"></p>
+      <div class="wk-meta" id="wk-meta"></div>
+    </div>
+    <div class="wk-actions">
+      <button type="button" class="btn btn-ghost wk-btn-change" data-action="kickoff-change">Anpassa</button>
+      <button type="button" class="btn btn-primary wk-btn-accept" data-action="kickoff-accept">Nu kör vi</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ PLAN EDIT CHAT MODAL ═══ -->
 <div id="plan-edit-modal" class="modal-overlay hidden" onclick="if(event.target===this)closePlanEditModal()">
   <div class="modal-box plan-edit-box">
