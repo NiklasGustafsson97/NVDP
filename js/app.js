@@ -1691,6 +1691,9 @@ function _maybeShowWeekKickoff() {
 
     const seenKey = 'nvdp_kickoff_seen_' + isoDate(currentMonday) + '_' + currentPhase;
     if (localStorage.getItem(seenKey)) return;
+    // Record "seen" the moment we decide to show, so the modal fires at most
+    // once per week regardless of how it's dismissed (button, backdrop, Escape).
+    try { localStorage.setItem(seenKey, '1'); } catch (_) { /* localStorage may be unavailable */ }
 
     const weekNumber = _activePlanWeekNumberForMonday(currentMonday);
     showWeekKickoffModal(currentPhase, currentMonday, weekNumber);
@@ -1718,7 +1721,11 @@ function showWeekKickoffModal(phase, mondayDate, weekNumber) {
   set('wk-meta', weekNumber ? `Vecka ${weekNumber} · ${range}` : range);
 
   modal.classList.remove('hidden');
-  openDialog('week-kickoff-modal');
+  // onClose ensures Escape (handled inside openDialog) also hides the modal,
+  // not just the a11y wrapper.
+  openDialog('week-kickoff-modal', {
+    onClose: () => document.getElementById('week-kickoff-modal')?.classList.add('hidden'),
+  });
 }
 
 function closeWeekKickoff(persist) {
