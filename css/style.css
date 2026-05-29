@@ -86,11 +86,17 @@
 [data-theme="light"] .side-menu { background: var(--surface-menu); }
 [data-theme="light"] select option { background: var(--surface-modal); color: var(--text); }
 
-html { font-size: 15px; background: var(--bg); }
+html {
+  font-size: 15px;
+  background: var(--bg);
+  width: 100%;
+  overflow-x: hidden;
+}
 body {
   font-family: var(--font);
   background: var(--bg);
   color: var(--text);
+  width: 100%;
   height: 100dvh;
   overflow: hidden;
   /* Block iOS rubber-band from propagating to body — that's what was
@@ -188,12 +194,13 @@ select option { background: var(--surface-modal); color: var(--text); }
 
 /* ── App Shell ── */
 .app { display: none; }
-.app.active { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+.app.active { display: flex; flex-direction: column; width: 100%; height: 100dvh; overflow: hidden; }
 
 /* ── Top Bar ── */
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 20px; height: 56px; border-bottom: 1px solid var(--border);
+  padding: 0 max(20px, env(safe-area-inset-right, 0px)) 0 max(20px, env(safe-area-inset-left, 0px));
+  height: 56px; border-bottom: 1px solid var(--border);
   background: var(--surface-topbar); backdrop-filter: blur(12px);
   /* `fixed` rather than `sticky` because sticky inside a flex+overflow:hidden
      parent intermittently drifts on iOS rubber-band scrolls. */
@@ -443,7 +450,11 @@ select option { background: var(--surface-modal); color: var(--text); }
   left: 0;
   right: 0;
   bottom: var(--nav-h);
-  padding: 20px 16px;
+  padding:
+    20px
+    max(16px, env(safe-area-inset-right, 0px))
+    20px
+    max(16px, env(safe-area-inset-left, 0px));
   max-width: 1200px;
   margin: 0 auto;
   width: 100%;
