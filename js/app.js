@@ -5736,12 +5736,20 @@ function _buildGoalCoachInsights(plan, indicators, probability, currentWeek, tot
     out.push({ tone: probability.cls || 'unknown', text: `Målstatus: ${probability.label} (${probability.pct} %).` });
   }
 
+  const volPerWk = indicators?.volume?.recent != null ? indicators.volume.recent / 4 : null;
+  const passPerWk = indicators?.consistency?.recent ?? null;
   if (indicators?.volume?.status?.cls === 'lagging') {
-    out.push({ tone: 'warn', text: 'Volymen släpar — lägg in fler lugna pass.' });
+    out.push({ tone: 'warn', text: volPerWk != null
+      ? `Volym nere på ${volPerWk.toFixed(1)} h/v — lägg in ett lugnt pass.`
+      : 'Volymen släpar — lägg in ett lugnt pass.' });
   } else if (indicators?.consistency?.status?.cls === 'lagging') {
-    out.push({ tone: 'warn', text: 'Konsekvensen sjunker — säg till coachen vad som hindrar.' });
+    out.push({ tone: 'warn', text: passPerWk != null
+      ? `Bara ${passPerWk.toFixed(1)} pass/v senaste månaden — vad hindrar?`
+      : 'Konsekvensen sjunker — vad hindrar?' });
   } else if (indicators?.volume?.status?.cls === 'ahead') {
-    out.push({ tone: 'great', text: 'Volymtrend uppåt — bra tempo.' });
+    out.push({ tone: 'great', text: volPerWk != null
+      ? `Volym uppe i ${volPerWk.toFixed(1)} h/v — fint tryck.`
+      : 'Volymtrend uppåt — fint tryck.' });
   }
 
   const upcoming = (assessments || []).find((a) => a.wk >= currentWeek);
@@ -7378,7 +7386,7 @@ function renderPmcChart(workouts) {
       sub = `+${ratioPct.toFixed(0)} % sedan ${baselineLabel}. Det här är robust kapacitet, inte bara en bra dag.`;
     } else if (ratio >= 0.95) {
       title = 'Fitnessen är stabil';
-      sub = `${ratioPct >= 0 ? '+' : ''}${ratioPct.toFixed(0)} % sedan ${baselineLabel}. Behåll rytmen och jaga hellre kontinuitet än snabba hopp.`;
+      sub = `${ratioPct >= 0 ? '+' : ''}${ratioPct.toFixed(0)} % sedan ${baselineLabel}. Lägg +1 lugnt pass/v för att bryta platån.`;
     } else {
       title = 'Fitnessen har tappat från ankaret';
       sub = `${absPct} % under ${baselineLabel}. Bygg tillbaka med 1-2 veckor jämn volym innan du pressar kvalitet.`;
@@ -7909,15 +7917,15 @@ function renderEasyHrChart(workouts) {
   if (deltaPct >= 3) {
     band = 'ok';
     title = `Aeroba motorn svarar (+${deltaPct.toFixed(1)} %)`;
-    sub = `Du får mer fart vid samma puls. Fortsätt bygga lugn volym innan du växlar upp intensiteten.`;
+    sub = `${deltaPct.toFixed(1)} % snabbare vid samma puls. Håll Z2-andelen, lägg ett tröskelpass nästa vecka.`;
   } else if (deltaPct <= -3) {
     band = 'bad';
     title = `Aerob effektivitet faller (${Math.abs(deltaPct).toFixed(1)} %)`;
-    sub = `Samma puls ger mindre fart. Kolla sömn, värme och om dina lugna pass driver över ${hrMax} bpm.`;
+    sub = `${Math.abs(deltaPct).toFixed(1)} % mindre fart vid samma puls. Kolla sömn, värme och Z2-pass över ${hrMax} bpm.`;
   } else {
     band = 'neutral';
     title = `Grundfarten är stabil (${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)} %)`;
-    sub = `Ingen tydlig rörelse än. Behåll Z2-rytmen och jämför först efter några fler liknande pass.`;
+    sub = `EF ${avgRecent.toFixed(2)}, ${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)} % mot förra månaden. Kör ett pass till för tydlig riktning.`;
   }
   _renderChartInsight('easy-hr-insight', {
     band, title, sub,
@@ -8191,15 +8199,15 @@ function renderVo2maxChart(workouts) {
   if (delta >= 0.8) {
     band = 'ok';
     title = `VO2max-trenden stiger (+${delta.toFixed(1)})`;
-    sub = `Du får mer fart ur samma fysiologi. Håll ett kvalitetspass per vecka och skydda de lugna dagarna.`;
+    sub = `${latestSmoothed.toFixed(1)} nu, +${delta.toFixed(1)} på 4 v. Håll ett kvalitetspass/v och skydda de lugna dagarna.`;
   } else if (delta <= -0.8) {
     band = 'bad';
     title = `VO2max-trenden viker (${delta.toFixed(1)})`;
-    sub = `Titta först på återhämtning, värme och om kvalitetspassen tappat skärpa innan du lägger till mer volym.`;
+    sub = `${latestSmoothed.toFixed(1)} nu, ${delta.toFixed(1)} på 4 v. Kolla sömn och värme innan du lägger till volym.`;
   } else {
     band = 'neutral';
     title = `VO2max håller nivån (${delta >= 0 ? '+' : ''}${delta.toFixed(1)})`;
-    sub = `Ingen tydlig formförändring senaste månaden. Fortsätt samla jämförbara pass och låt trenden, inte enstaka prickar, styra.`;
+    sub = `${latestSmoothed.toFixed(1)}, i princip oförändrat på 4 v. Ett vasst intervallpass/v kan lyfta trenden.`;
   }
   _renderChartInsight('vo2max-insight', {
     band, title, sub,
