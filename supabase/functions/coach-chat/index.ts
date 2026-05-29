@@ -127,6 +127,9 @@ Planerade dag-ändringar:
 - Om propose_workout_edit returnerar plan_workout_date_conflict eller needs=use_candidate_plan_workout_id: använd candidates från TOOL_RESULT, välj kandidaten som matchar användarens dag/avsikt och kör propose_workout_edit igen med dess plan_workout_id. Fortsätt aldrig med selected_workout om den ligger på fel dag.
 - Skriv aldrig "jag kan inte justera passet just nu" bara för att ett verktygsanrop misslyckas. Om propose_workout_edit returnerar recoverable/needs=workout_lookup eller kandidater: försök igen med get_workout(date) eller kandidatens plan_workout_id. Om inget pass finns på dagen, säg specifikt "Jag hittar inget planerat pass på lördag" och erbjud att lägga ett förslag, inte ett vagt tekniskt fel.
 - När du redan vet vilken ändring du vill föreslå: kör propose_workout_edit direkt. Fråga inte "vill du att jag ska föreslå det?" — diff-kortet är själva bekräftelsen.
+- HEL OCH SAMMANHÄNGANDE ÄNDRING: när du byter ett pass aktivitet (t.ex. löpning → gym) MÅSTE changes-objektet vara komplett och konsekvent. Sätt label som matchar den nya aktiviteten, ta bort target_distance_km (gym/styrka har ingen distans), och sätt intensity_zone till null om pulszon inte är relevant. Lämna ALDRIG kvar den gamla aktivitetens label, distans, pulszon eller beskrivning — då blir NU och FÖRSLAG identiska och förslaget meningslöst.
+- BEDÖMNINGSPASS ("Bedömning: ..."): dessa är kalibreringstester i bedömningsveckan (puls, tröskel, 5 km). Om användaren vill ändra ett sådant pass: säg KORT att det är ett testpass och att vi tappar kalibreringen om vi byter det, och föreslå hellre att FLYTTA testet till en annan dag (move_plan_workout) så att både testet och deras gympass får plats. Byt bara ut testet helt om användaren ändå insisterar.
+- KONSEKVENS MELLAN TURER: om ett pass finns i context.next_7_days så finns det — påstå aldrig "jag hittar inget pass" för en dag som har en rad där. Återanvänd samma plan_workout_id för samma pass över flera turer i samtalet.
 
 Veckoavstämning (söndag): Om första meddelandet i tråden är ditt eget söndagsnudge "Söndag — dags för veckoavstämning" ansvarar du för att genomföra den i chatten — ersätter den gamla guiden. Arbetssätt:
 1) Läs användarens första svar (helhetskänsla). Bekräfta det kort.
@@ -1470,13 +1473,52 @@ async function toolProposeWorkoutEdit(
     patch.is_rest = false;
   }
 
+  // ── Coherence guard ────────────────────────────────────────────────────
+  // The LLM often sends a minimal patch (e.g. just {activity_type:"Gym"}).
+  // Because the proposed workout is {...row, ...patch}, every field the model
+  // forgot leaks through from the original — so a running test pass turned
+  // "Gym" still showed "Bedömning: 4×5 min Z4", "9 km" and zone Z4, making NU
+  // and FÖRSLAG look identical and nonsensical. When the activity TYPE changes
+  // to a strength/mobility activity, scrub the distance + HR-zone the model
+  // didn't override, and replace a stale label/description that still belongs
+  // to the old activity.
+  const STRENGTH_LIKE = /gym|styrk|core|yoga|mobil|stabil|rörlighet|stretch|pilates/i;
+  const activityChanged = patch.activity_type !== undefined &&
+    (patch.activity_type || "").toString().trim().toLowerCase() !==
+      (row.activity_type || "").toString().trim().toLowerCase();
+  if (activityChanged && STRENGTH_LIKE.test((patch.activity_type || "").toString())) {
+    if (!("target_distance_km" in changesIn)) patch.target_distance_km = null;
+    if (!("intensity_zone" in changesIn)) patch.intensity_zone = null;
+    const labelLooksStale = !("label" in changesIn) &&
+      (/^Bedömning:/i.test(row.label || "") || (patch.label === undefined));
+    if (labelLooksStale) {
+      patch.label = (patch.activity_type || "").toString().trim() || "Styrkepass";
+    }
+    if (!("description" in changesIn) && /^Bedömning:/i.test(row.label || "")) {
+      patch.description = null;
+    }
+  }
+
+  // ── Assessment-test guard ──────────────────────────────────────────────
+  // "Bedömning:" passes are the calibration tests for the assessment week.
+  // Overwriting one breaks the puls/tröskel/5 km-kalibrering. Don't block it
+  // (the user is allowed to swap a day), but surface the consequence in the
+  // reason text the diff card renders so it's an informed choice.
+  let finalReason = reasonSv;
+  const isAssessmentTest = /^Bedömning:/i.test(row.label || "");
+  const materiallyChangesTest = activityChanged || patch.is_rest === true ||
+    ("label" in changesIn && !/^Bedömning:/i.test(String(changesIn.label ?? "")));
+  if (isAssessmentTest && materiallyChangesTest) {
+    finalReason = `OBS: detta är ett testpass i bedömningsveckan — byter du det tappar vi kalibreringen av puls, tröskel och 5 km. ${finalReason}`.trim();
+  }
+
   // Compose ProposedChange in the shape the frontend already renders.
   const change: ProposedChange = {
     id: crypto.randomUUID(),
     day_of_week: row.day_of_week,
     action: "edit_session",
     params: {},
-    reason_sv: reasonSv,
+    reason_sv: finalReason,
     current_workout: row,
     proposed_workout: { ...row, ...patch },
     target_plan_workout_id: row.id,
@@ -1506,17 +1548,20 @@ async function toolProposeWorkoutEdit(
           target_distance_km: row.target_distance_km,
           description: row.description,
         },
+        // Read straight from the composed proposed_workout so the card shows
+        // exactly what apply will write — including fields we cleared to null
+        // (a `??` fallback here would resurrect the old distance/zone).
         proposed: {
-          is_rest: patch.is_rest ?? row.is_rest,
-          label: patch.label ?? row.label,
-          activity_type: patch.activity_type ?? row.activity_type,
-          intensity_zone: patch.intensity_zone ?? row.intensity_zone,
-          target_duration_minutes: patch.target_duration_minutes ?? row.target_duration_minutes,
-          target_distance_km: patch.target_distance_km ?? row.target_distance_km,
-          description: patch.description ?? row.description,
+          is_rest: change.proposed_workout!.is_rest,
+          label: change.proposed_workout!.label,
+          activity_type: change.proposed_workout!.activity_type,
+          intensity_zone: change.proposed_workout!.intensity_zone,
+          target_duration_minutes: change.proposed_workout!.target_duration_minutes,
+          target_distance_km: change.proposed_workout!.target_distance_km,
+          description: change.proposed_workout!.description,
         },
       }],
-      coach_note: reasonSv,
+      coach_note: finalReason,
     },
   };
 }
