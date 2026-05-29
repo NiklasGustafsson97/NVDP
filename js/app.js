@@ -1205,6 +1205,62 @@ const PLAN_PHASE_OVERRIDES_BY_ISO_WEEK = {
   '2026-W18': 'build',
 };
 
+// ─── Week phase kickoff modal ────────────────────────────────────────────────
+// Hardcoded Swedish copy shown the first time the user opens the app on a week
+// whose plan phase differs from the prior week's. `coachPrompt` is prefilled
+// into the coach composer when the user taps "Anpassa".
+const PHASE_KICKOFF_COPY = {
+  deload: {
+    icon: '🌙',
+    chip: 'Avlastning',
+    title: 'Avlastningsvecka',
+    body: 'Sänk total volym 30–40 % och dra ner intensiteten. Låt kroppen absorbera träningen så du kommer tillbaka starkare.',
+    coachPrompt: 'Jag har avlastningsvecka. Jag vill justera den — vad föreslår du?',
+  },
+  recovery: {
+    icon: '🛌',
+    chip: 'Återhämtning',
+    title: 'Återhämtningsvecka',
+    body: 'Låg volym och ingen hård intensitet. Prioritera sömn, mat och rörlighet den här veckan.',
+    coachPrompt: 'Jag har återhämtningsvecka. Jag vill justera den — vad föreslår du?',
+  },
+  assessment: {
+    icon: '⏱️',
+    chip: 'Bedömning',
+    title: 'Bedömningsvecka',
+    body: 'Tre testpass kalibrerar puls, tröskel och 5 km. Kör så fräsch som möjligt och logga puls och tempo.',
+    coachPrompt: 'Jag har bedömningsvecka. Jag vill ändra testpassen — vad föreslår du?',
+  },
+  peak: {
+    icon: '⛰️',
+    chip: 'Topp',
+    title: 'Toppvecka',
+    body: 'Blockets högsta belastning. Sikta på 100 % av planerad volym och prioritera sömn och återhämtning mellan passen.',
+    coachPrompt: 'Jag har toppvecka. Jag vill justera belastningen — vad föreslår du?',
+  },
+  taper: {
+    icon: '🪁',
+    chip: 'Taper',
+    title: 'Taper',
+    body: 'Sänk volymen 30–50 % inför racet, men behåll 1–2 korta högintensiva pass för att hålla skärpan.',
+    coachPrompt: 'Jag är i taper inför mitt race. Jag vill justera upplägget — vad föreslår du?',
+  },
+  build: {
+    icon: '📈',
+    chip: 'Bygg',
+    title: 'Byggvecka',
+    body: 'Vi ökar volymen 5–10 % och lägger till en tröskelnyckel. Lyssna på kroppen och håll de lugna passen lugna.',
+    coachPrompt: 'Jag har byggvecka. Jag vill justera den — vad föreslår du?',
+  },
+  base: {
+    icon: '🧱',
+    chip: 'Bas',
+    title: 'Basvecka',
+    body: 'Bygg vana och pulskontroll. Volym i nivå med plan och mestadels lugn Z2-träning.',
+    coachPrompt: 'Jag har basvecka. Jag vill justera den — vad föreslår du?',
+  },
+};
+
 function planPhaseOverrideForDate(date) {
   const dt = date instanceof Date ? new Date(date.getTime()) : parseISOWeekKeyLocal(date);
   const isoWeek = _isoWeekKey(isoDate(dt));
@@ -1542,6 +1598,106 @@ function closeConfirmModal(result) {
 }
 
 // ═══════════════════════
+//  WEEK PHASE KICKOFF MODAL
+// ═══════════════════════
+// Shown once per week, the first time the user opens the app on a week whose
+// active-plan phase differs from the previous week's. Two CTAs: accept (just
+// dismiss) or "Anpassa" which routes to the coach with a phase-aware prompt.
+let _kickoffPhase = null;
+
+// Plan week_number for the week containing `mondayDate`, or null.
+function _activePlanWeekNumberForMonday(mondayDate) {
+  if (!_activePlan || !Array.isArray(_activePlanWeeks) || _activePlanWeeks.length === 0) return null;
+  const md = mondayDate instanceof Date ? new Date(mondayDate.getTime()) : parseISOWeekKeyLocal(mondayDate);
+  md.setHours(12, 0, 0, 0);
+  const dateStr = isoDate(md);
+  for (const week of _activePlanWeeks) {
+    const weekStart = new Date(_activePlan.start_date);
+    weekStart.setHours(12, 0, 0, 0);
+    weekStart.setDate(weekStart.getDate() + (week.week_number - 1) * 7);
+    const weekEnd = addDays(weekStart, 6);
+    if (dateStr >= isoDate(weekStart) && dateStr <= isoDate(weekEnd)) return week.week_number;
+  }
+  return null;
+}
+
+function _maybeShowWeekKickoff() {
+  try {
+    if (!_activePlan) return;
+    const currentMonday = mondayOfWeek(new Date());
+    const currentPhase = activePlanPhaseForWeek(currentMonday);
+    if (!currentPhase || !PHASE_KICKOFF_COPY[currentPhase]) return;
+
+    const priorPhase = activePlanPhaseForWeek(addDays(currentMonday, -7));
+    // Only fire on a phase transition (incl. the first week, where prior is null).
+    if (currentPhase === priorPhase) return;
+
+    const seenKey = 'nvdp_kickoff_seen_' + isoDate(currentMonday) + '_' + currentPhase;
+    if (localStorage.getItem(seenKey)) return;
+
+    const weekNumber = _activePlanWeekNumberForMonday(currentMonday);
+    showWeekKickoffModal(currentPhase, currentMonday, weekNumber);
+  } catch (e) {
+    console.error('[NVDP] week kickoff check failed', e);
+  }
+}
+
+function showWeekKickoffModal(phase, mondayDate, weekNumber) {
+  const copy = PHASE_KICKOFF_COPY[phase];
+  const modal = document.getElementById('week-kickoff-modal');
+  if (!copy || !modal) return;
+  _kickoffPhase = phase;
+
+  const box = modal.querySelector('.week-kickoff-box');
+  if (box) box.setAttribute('data-phase', phase);
+  const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  set('wk-icon', copy.icon);
+  set('wk-phase-chip', copy.chip);
+  set('wk-title', copy.title);
+  set('wk-body', copy.body);
+
+  const sunday = addDays(mondayDate, 6);
+  const range = `${formatDate(mondayDate)} – ${formatDate(sunday)}`;
+  set('wk-meta', weekNumber ? `Vecka ${weekNumber} · ${range}` : range);
+
+  modal.classList.remove('hidden');
+  openDialog('week-kickoff-modal');
+}
+
+function closeWeekKickoff(persist) {
+  if (persist && _kickoffPhase) {
+    try {
+      const currentMonday = mondayOfWeek(new Date());
+      localStorage.setItem('nvdp_kickoff_seen_' + isoDate(currentMonday) + '_' + _kickoffPhase, '1');
+    } catch (_) { /* localStorage may be unavailable */ }
+  }
+  const modal = document.getElementById('week-kickoff-modal');
+  if (modal) modal.classList.add('hidden');
+  closeDialog('week-kickoff-modal');
+}
+
+function _acceptWeekKickoff() {
+  closeWeekKickoff(true);
+}
+
+function _changeWeekFromKickoff() {
+  const phase = _kickoffPhase;
+  const prompt = (phase && PHASE_KICKOFF_COPY[phase]) ? PHASE_KICKOFF_COPY[phase].coachPrompt : '';
+  closeWeekKickoff(true);
+  navigate('coach');
+  // Wait for the coach view to mount before seeding the message.
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      if (prompt) startCoachConversation(prompt);
+    }, 350);
+  });
+}
+
+registerAction('kickoff-accept', () => _acceptWeekKickoff());
+registerAction('kickoff-change', () => _changeWeekFromKickoff());
+window.closeWeekKickoff = closeWeekKickoff;
+
+// ═══════════════════════
 //  VIEW LOADING
 // ═══════════════════════
 function showViewLoading(viewId) {
@@ -1827,6 +1983,10 @@ async function _loadDashboard() {
   await _renderDashDayCard(_dashSelectedDate);
 
   await _loadSchema();
+
+  // After the dashboard is fully rendered, surface the week-phase kickoff
+  // modal if this is the first app open on a week whose phase just changed.
+  _maybeShowWeekKickoff();
 }
 
 const _DASH_DAY_LETTER = ['S', 'M', 'T', 'O', 'T', 'F', 'L'];

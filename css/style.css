@@ -6187,3 +6187,196 @@ body.chat-mode #view-coach { height: 100%; }
   .goal-roadmap-now { min-width: 68px; }
   .goal-roadmap-marker-label { font-size: 0.62rem; padding-inline: 5px; }
 }
+
+/* ════════════════════════════════════════════════════════════════
+   WEEK PHASE KICKOFF MODAL
+   Fires once per week when the plan phase changes. Per-phase theming
+   is driven by the [data-phase] attribute on .week-kickoff-box.
+   ════════════════════════════════════════════════════════════════ */
+.week-kickoff-overlay {
+  z-index: 1300;
+  background: rgba(2, 6, 23, 0.74);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: wkOverlayIn 0.28s ease both;
+}
+@keyframes wkOverlayIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.week-kickoff-box {
+  /* Defaults; overridden per phase below. */
+  --wk-accent: var(--accent);
+  --wk-accent-rgb: var(--color-primary-rgb);
+  --wk-grad-a: #1e3a8a;
+  --wk-grad-b: #0b1220;
+  position: relative;
+  width: 100%;
+  max-width: 460px;
+  border-radius: 24px;
+  padding: 40px 30px 26px;
+  overflow: hidden;
+  text-align: center;
+  color: #fff;
+  background:
+    radial-gradient(130% 120% at 50% -10%, var(--wk-grad-a) 0%, var(--wk-grad-b) 62%),
+    var(--surface-modal);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  animation: wkBoxIn 0.42s cubic-bezier(0.18, 0.9, 0.28, 1.2) both;
+}
+@keyframes wkBoxIn {
+  from { opacity: 0; transform: translateY(24px) scale(0.94); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Soft animated glow behind the icon. */
+.wk-glow {
+  position: absolute;
+  top: -120px;
+  left: 50%;
+  width: 320px;
+  height: 320px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(var(--wk-accent-rgb), 0.55) 0%, rgba(var(--wk-accent-rgb), 0) 70%);
+  filter: blur(8px);
+  animation: wkGlowPulse 4.5s ease-in-out infinite;
+}
+@keyframes wkGlowPulse {
+  0%, 100% { opacity: 0.55; transform: translateX(-50%) scale(1); }
+  50%      { opacity: 0.9;  transform: translateX(-50%) scale(1.12); }
+}
+
+.wk-hero { position: relative; z-index: 1; }
+
+.wk-hero-icon {
+  width: 76px;
+  height: 76px;
+  margin: 0 auto 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 22px;
+  font-size: 2.2rem;
+  line-height: 1;
+  background: rgba(var(--wk-accent-rgb), 0.18);
+  border: 1px solid rgba(var(--wk-accent-rgb), 0.5);
+  box-shadow: 0 8px 28px rgba(var(--wk-accent-rgb), 0.35);
+  animation: wkIconPop 0.6s cubic-bezier(0.18, 0.9, 0.28, 1.4) 0.12s both;
+}
+@keyframes wkIconPop {
+  from { transform: scale(0.3); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+.wk-phase-chip {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  padding: 5px 13px;
+  border-radius: 999px;
+  margin-bottom: 14px;
+  color: #fff;
+  background: rgba(var(--wk-accent-rgb), 0.32);
+  border: 1px solid rgba(var(--wk-accent-rgb), 0.55);
+}
+
+.wk-title {
+  font-size: 1.7rem;
+  font-weight: 800;
+  line-height: 1.15;
+  margin-bottom: 12px;
+  letter-spacing: -0.02em;
+}
+
+.wk-body {
+  font-size: 0.98rem;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.82);
+  margin: 0 auto 16px;
+  max-width: 340px;
+}
+
+.wk-meta {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 26px;
+}
+
+.wk-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 12px;
+}
+.wk-actions .btn { flex: 1; padding: 14px 18px; font-size: 1rem; border-radius: 14px; }
+.wk-btn-change {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+}
+.wk-btn-change:hover { background: rgba(255, 255, 255, 0.15); }
+.wk-btn-accept {
+  background: var(--wk-accent);
+  color: #fff;
+  border: none;
+  box-shadow: 0 8px 24px rgba(var(--wk-accent-rgb), 0.45);
+}
+.wk-btn-accept:hover { filter: brightness(1.08); }
+
+/* ── Per-phase theming ── */
+.week-kickoff-box[data-phase="deload"] {
+  --wk-accent: #22d3ee; --wk-accent-rgb: 34, 211, 238;
+  --wk-grad-a: #0e7490; --wk-grad-b: #08131b;
+}
+.week-kickoff-box[data-phase="recovery"] {
+  --wk-accent: #a78bfa; --wk-accent-rgb: 167, 139, 250;
+  --wk-grad-a: #5b21b6; --wk-grad-b: #0e0a1b;
+}
+.week-kickoff-box[data-phase="assessment"] {
+  --wk-accent: #fb923c; --wk-accent-rgb: 251, 146, 60;
+  --wk-grad-a: #c2410c; --wk-grad-b: #1a0d05;
+}
+.week-kickoff-box[data-phase="peak"] {
+  --wk-accent: #f43f5e; --wk-accent-rgb: 244, 63, 94;
+  --wk-grad-a: #9f1239; --wk-grad-b: #1a060c;
+}
+.week-kickoff-box[data-phase="taper"] {
+  --wk-accent: #818cf8; --wk-accent-rgb: 129, 140, 248;
+  --wk-grad-a: #3730a3; --wk-grad-b: #0b0d1f;
+}
+.week-kickoff-box[data-phase="build"] {
+  --wk-accent: #34d399; --wk-accent-rgb: 52, 211, 153;
+  --wk-grad-a: #047857; --wk-grad-b: #04150f;
+}
+.week-kickoff-box[data-phase="base"] {
+  --wk-accent: #38bdf8; --wk-accent-rgb: 56, 189, 248;
+  --wk-grad-a: #0369a1; --wk-grad-b: #04121d;
+}
+
+@media (max-width: 600px) {
+  .week-kickoff-overlay { align-items: flex-end; padding: 0; overflow: hidden; }
+  .week-kickoff-box {
+    max-width: none;
+    border-radius: 26px 26px 0 0;
+    padding: 34px 22px max(22px, env(safe-area-inset-bottom, 0px));
+    animation: wkSheetIn 0.4s cubic-bezier(0.18, 0.9, 0.28, 1.1) both;
+  }
+  .wk-title { font-size: 1.45rem; }
+}
+@keyframes wkSheetIn {
+  from { opacity: 0; transform: translateY(100%); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .week-kickoff-overlay,
+  .week-kickoff-box,
+  .wk-hero-icon,
+  .wk-glow { animation: none; }
+}
