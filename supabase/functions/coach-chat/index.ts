@@ -996,14 +996,15 @@ function userWeekdayIntent(raw: string | null): string | null {
 }
 
 function guardWorkoutEditWithUserWeekday(call: ToolCall, userMessage: string): ToolCall {
-  if (call.name !== "propose_workout_edit") return call;
+  if (call.name !== "propose_workout_edit" && call.name !== "get_workout") return call;
   const weekday = userWeekdayIntent(userMessage);
   if (!weekday) return call;
+  const dateKey = call.name === "get_workout" ? "date" : "workout_date";
   return {
     ...call,
     arguments: {
       ...call.arguments,
-      workout_date: weekday,
+      [dateKey]: weekday,
     },
   };
 }
@@ -1014,15 +1015,16 @@ function guardWorkoutEditWithUserWeekday(call: ToolCall, userMessage: string): T
 // workout_date to the concrete date derived from the user's own words. Only
 // fires when there's no explicit weekday in the message (that guard wins).
 function guardWorkoutEditWithRelativeDate(call: ToolCall, userMessage: string, today?: string): ToolCall {
-  if (call.name !== "propose_workout_edit") return call;
+  if (call.name !== "propose_workout_edit" && call.name !== "get_workout") return call;
   if (userWeekdayIntent(userMessage)) return call;
   const iso = userRelativeDateIntent(userMessage, today);
   if (!iso) return call;
+  const dateKey = call.name === "get_workout" ? "date" : "workout_date";
   return {
     ...call,
     arguments: {
       ...call.arguments,
-      workout_date: iso,
+      [dateKey]: iso,
     },
   };
 }
@@ -1156,7 +1158,14 @@ async function toolGetWorkout(
   profileId: string,
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
-  const date = typeof args.date === "string" ? args.date : null;
+  const dateArg = typeof args.date === "string"
+    ? args.date
+    : typeof args.workout_date === "string"
+    ? args.workout_date
+    : null;
+  const date = dateArg
+    ? parseISODateArg(dateArg) || resolveRelativeDate(dateArg) || dateArg
+    : null;
   const workoutId = typeof args.workout_id === "string" ? args.workout_id : null;
   if (!date && !workoutId) return { ok: false, error: "Need date or workout_id" };
 
