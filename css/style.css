@@ -264,15 +264,21 @@ select option { background: var(--surface-modal); color: var(--text); }
   background: var(--surface-overlay); backdrop-filter: blur(2px);
 }
 .side-menu {
-  position: fixed; top: 0; right: -300px; width: 280px; height: 100dvh;
+  position: fixed; top: 0; right: 0; width: 280px; height: 100dvh;
+  /* Hidden with a width-independent transform so the closed panel is always
+     fully off-screen. (Previously `right: -300px` left a ~20px sliver peeking
+     on the right whenever the menu was wider than 300px, e.g. the mobile
+     `min(86vw, 320px)` width — that sliver was the dark vertical bar on the
+     right edge of the page.) */
+  transform: translateX(100%);
   background: var(--surface-menu); backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
   border-left: 1px solid var(--border);
-  z-index: 1050; transition: right 0.25s ease;
+  z-index: 1050; transition: transform 0.25s ease;
   display: flex; flex-direction: column; overflow-y: auto;
   padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 12px);
   overscroll-behavior: contain;
 }
-.side-menu.open { right: 0; }
+.side-menu.open { transform: translateX(0); }
 .sm-header { padding: 24px 20px 16px; border-bottom: 1px solid var(--border); }
 .sm-user { display: flex; align-items: center; gap: 12px; }
 .sm-user > div:last-child { min-width: 0; }
@@ -5255,68 +5261,6 @@ body.chat-mode #view-coach { height: 100%; }
   .coach-drawer-backdrop { animation: none; }
   .coach-messages { scroll-behavior: auto; }
 }
-
-/* ── Beta gate ──────────────────────────────────────────────────────
-   Moved here from index.html <style> so the page no longer needs a
-   <style> block for static styling. (One small step toward dropping
-   `style-src 'unsafe-inline'` from CSP.)
-*/
-#gate {
-  position: fixed; inset: 0; z-index: 99999;
-  background: linear-gradient(135deg, #0b0e17 0%, #111628 50%, #0b0e17 100%);
-  display: flex; align-items: center; justify-content: center;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
-#gate .gate-box {
-  background: rgba(20, 24, 42, 0.85);
-  border: 1px solid rgba(var(--color-primary-rgb), 0.15);
-  border-radius: 16px; padding: 3rem 2.5rem;
-  backdrop-filter: blur(24px);
-  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
-  text-align: center; max-width: 420px; width: 90%;
-}
-#gate .badge {
-  display: inline-block; padding: 4px 14px; border-radius: 20px;
-  font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
-  background: rgba(var(--color-primary-rgb), 0.15); color: var(--color-primary);
-  margin-bottom: 1.2rem;
-}
-#gate h1 {
-  color: var(--text); font-size: 1.6rem; font-weight: 700; letter-spacing: -0.5px;
-  margin-bottom: 0.3rem;
-}
-#gate h1 span { color: var(--color-primary); }
-#gate .subtitle {
-  color: var(--text-dim); font-size: 0.9rem; margin-bottom: 0.5rem; line-height: 1.5;
-}
-#gate .divider {
-  width: 40px; height: 2px; background: rgba(var(--color-primary-rgb), 0.3);
-  margin: 1.2rem auto; border-radius: 1px;
-}
-#gate .access-label {
-  color: var(--text-muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.5px; margin-bottom: 0.6rem;
-}
-#gate input {
-  width: 100%; padding: 0.85rem 1rem;
-  background: rgba(11, 14, 23, 0.7);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 10px; color: var(--text); font-size: 1rem;
-  outline: none; transition: border-color 0.25s;
-  text-align: center; letter-spacing: 2px;
-}
-#gate input:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 16px rgba(var(--color-primary-rgb), 0.12);
-}
-#gate button {
-  margin-top: 1rem; width: 100%; padding: 0.85rem;
-  background: var(--color-primary-solid); border: none; border-radius: 10px;
-  color: var(--on-color); font-size: 1rem; font-weight: 600; cursor: pointer;
-  transition: transform 0.15s, background 0.2s;
-}
-#gate button:hover { background: var(--color-primary-solid-hover); transform: translateY(-1px); }
-#gate .error { color: var(--color-danger); font-size: 0.85rem; margin-top: 0.75rem; min-height: 1.2em; }
 
 /* ═══════════════════════════════════════════════════════════════════
    Adaptive plans + assessment weeks (2026-04-24)

@@ -2,7 +2,7 @@
 <html lang="sv">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <!--
     CACHE: Tvinga browsern att alltid revalidera index.html. CSS/JS cache-bustas
     via ?v=<git-sha> (se .github/workflows/cache-bust.yml), men det fungerar
@@ -60,7 +60,7 @@
     download in parallel with HTML parsing and execute, in document order,
     after parsing finishes (before DOMContentLoaded). Previously these were
     render-blocking. Document order is preserved by `defer`, so the
-    Supabase / Chart.js / adapter / Sortable / app.js / gate.js dependency
+    Supabase / Chart.js / adapter / Sortable / app.js dependency
     chain is still respected.
 
     `preconnect` to jsDelivr so the TCP+TLS handshake happens in parallel
@@ -93,24 +93,8 @@
     src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"
     crossorigin="anonymous"
     referrerpolicy="no-referrer"></script>
-  <!-- Gate styles moved to css/style.css to reduce inline-style usage. -->
 </head>
 <body>
-
-<!-- ═══ BETA GATE ═══ -->
-<div id="gate">
-  <div class="gate-box">
-    <div class="badge">Closed Beta</div>
-    <h1>NVDP</h1>
-    <p class="subtitle">Sidan är under uppbyggnad och tillgänglig<br>enbart för beta-testare.</p>
-    <div class="divider"></div>
-    <p class="access-label">Ange åtkomstkod</p>
-    <!-- Enter-to-submit + click handler are wired in js/gate.js (no inline JS). -->
-    <input type="password" id="gate-pw" placeholder="&#8226;&#8226;&#8226;&#8226;" autofocus>
-    <button data-action="gate-submit">Öppna</button>
-    <div class="error" id="gate-error"></div>
-  </div>
-</div>
 
 <!-- ═══ AUTH VIEW ═══ -->
 <div id="auth-view" class="auth-container" style="display:none;">
@@ -1907,13 +1891,5 @@
 
 <script defer src="js/config.js?v=8237f48"></script>
 <script defer src="js/app.js?v=8237f48"></script>
-<!--
-  Beta-gate logic. Loaded after app.js because it depends on `gateOpen`,
-  `NVDP_resumeAfterGate` and `registerAction` defined there. Previously this
-  was an inline <script> block; moving it out shrinks the surface that
-  requires `script-src 'unsafe-inline'`. `defer` preserves document order,
-  so gate.js still runs strictly after app.js.
--->
-<script defer src="js/gate.js?v=aac18e0"></script>
 </body>
 </html>
