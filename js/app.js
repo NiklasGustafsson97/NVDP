@@ -1405,6 +1405,25 @@ function _buildContiguousWeeks(firstMonIso, lastMonIso) {
   return out;
 }
 
+/** Chart.js x-axis tick label for a weekly chart. Returns "V12" normally, or
+ *  the two-line tick ["V12", "2026"] on the first visible week and whenever
+ *  the year changes from the previous visible week. Without this the V52 → V1
+ *  rollover gives no clue which year V1 belongs to. Year is taken from the
+ *  Thursday of the week so it matches the ISO week number. `isDeload` appends
+ *  " (D)". */
+function _weekAxisLabel(visibleWeeks, i, isDeload) {
+  const mon = parseISOWeekKeyLocal(visibleWeeks[i]);
+  const wn = weekNumber(mon);
+  const base = isDeload ? `V${wn} (D)` : `V${wn}`;
+  const year = addDays(mon, 3).getFullYear();
+  let showYear = i === 0;
+  if (!showYear) {
+    const prevYear = addDays(parseISOWeekKeyLocal(visibleWeeks[i - 1]), 3).getFullYear();
+    showYear = year !== prevYear;
+  }
+  return showYear ? [base, String(year)] : base;
+}
+
 /** Return the N-week window ending at anchorIdx (clamped). If anchorIdx is
  *  null/undefined, defaults to the latest window. `size` defaults to the
  *  app-wide default (12) but per-chart callers should pass the user-selected
@@ -7162,11 +7181,8 @@ function renderMixChart(workouts) {
   const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-mix-personal'], _getChartWindowSize('chart-mix-personal'));
   const visibleWeeks = win.weeks;
 
-  const labels = visibleWeeks.map(w => {
-    const mon = parseISOWeekKeyLocal(w);
-    const wn = weekNumber(mon);
-    return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
-  });
+  const labels = visibleWeeks.map((w, i) =>
+    _weekAxisLabel(visibleWeeks, i, isDeloadWeek(parseISOWeekKeyLocal(w))));
 
   const types = ['Löpning', 'Cykel', 'Gym', 'Annat', 'Hyrox', 'Stakmaskin', 'Längdskidor'];
 
@@ -7261,11 +7277,7 @@ function renderEffortChart(workouts) {
   const baseline = baselineAll.slice(win.startIdx, win.endIdx + 1);
   const classes = classesAll.slice(win.startIdx, win.endIdx + 1);
 
-  const labels = visibleWeeks.map((w, i) => {
-    const mon = parseISOWeekKeyLocal(w);
-    const wn = weekNumber(mon);
-    return isDeload[i] ? `V${wn} (D)` : `V${wn}`;
-  });
+  const labels = visibleWeeks.map((w, i) => _weekAxisLabel(visibleWeeks, i, isDeload[i]));
 
   // Bars: color per classification. Deload weeks that classify as 'under'
   // are kept as 'under' (amber) — that's actually informative ("yes you
@@ -7563,7 +7575,7 @@ function renderPmcChart(workouts) {
   const allWeekKeys = _buildContiguousWeeks(dataWeeks[0], dataWeeks[dataWeeks.length - 1]);
   const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-pmc-ctl'], _getChartWindowSize('chart-pmc-ctl'));
   const visibleWeeks = win.weeks;
-  const labels = visibleWeeks.map((k) => `V${weekNumber(parseISOWeekKeyLocal(k))}`);
+  const labels = visibleWeeks.map((k, i) => _weekAxisLabel(visibleWeeks, i, false));
   const ctl = visibleWeeks.map((k) => {
     const e = weekAgg.get(k);
     return e ? e.sum / e.count : null;
@@ -8103,7 +8115,7 @@ function renderEasyHrChart(workouts) {
   const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-easy-hr'], easyHrSize);
   const visibleWeeks = win.weeks;
 
-  const labels = visibleWeeks.map((k) => `V${weekNumber(parseISOWeekKeyLocal(k))}`);
+  const labels = visibleWeeks.map((k, i) => _weekAxisLabel(visibleWeeks, i, false));
   const efData = visibleWeeks.map((k) => {
     const e = byWeek.get(k);
     if (!e) return null;
@@ -8644,7 +8656,17 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
             maxRotation: 0,
             autoSkip: true,
             maxTicksLimit: 12,
-            callback: (value) => 'V' + weekNumber(new Date(value)),
+            callback: (value, index, ticks) => {
+              const d = new Date(value);
+              const base = 'V' + weekNumber(d);
+              const year = new Date(d.getTime() + 3 * 86400000).getFullYear();
+              let showYear = index === 0;
+              if (!showYear && ticks[index - 1]) {
+                const prev = new Date(ticks[index - 1].value);
+                showYear = new Date(prev.getTime() + 3 * 86400000).getFullYear() !== year;
+              }
+              return showYear ? [base, String(year)] : base;
+            },
           },
         },
       },
@@ -8822,11 +8844,8 @@ function renderGroupChart(allWorkouts, members) {
   const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-group-weekly'], _getChartWindowSize('chart-group-weekly'));
   const visibleWeeks = win.weeks;
 
-  const labels = visibleWeeks.map(w => {
-    const mon = parseISOWeekKeyLocal(w);
-    const wn = weekNumber(mon);
-    return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
-  });
+  const labels = visibleWeeks.map((w, i) =>
+    _weekAxisLabel(visibleWeeks, i, isDeloadWeek(parseISOWeekKeyLocal(w))));
 
   const titleEl = document.getElementById('grp-chart-title');
   if (titleEl) titleEl.textContent = isGrpNorm ? 'Belastning per vecka' : 'Timmar per vecka';
@@ -8918,11 +8937,8 @@ function renderGroupEffortChart(allWorkouts, members) {
   const win = _sliceWeekWindow(allWeekKeys, window._weeklyChartAnchor['chart-group-effort'], _getChartWindowSize('chart-group-effort'));
   const visibleWeeks = win.weeks;
 
-  const labels = visibleWeeks.map(w => {
-    const mon = parseISOWeekKeyLocal(w);
-    const wn = weekNumber(mon);
-    return isDeloadWeek(mon) ? `V${wn} (D)` : `V${wn}`;
-  });
+  const labels = visibleWeeks.map((w, i) =>
+    _weekAxisLabel(visibleWeeks, i, isDeloadWeek(parseISOWeekKeyLocal(w))));
   const textColor = themeTextDim();
 
   const selfId = (typeof currentProfile !== 'undefined' && currentProfile) ? currentProfile.id : null;
