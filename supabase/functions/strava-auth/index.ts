@@ -96,10 +96,12 @@ serve(async (req) => {
     // chunked backfill immediately (loop /strava-sync with `since`) without
     // a separate "click here to import history" affordance.
     //
-    // Window: 90 days back covers the PMC fitness/fatigue model's useful
-    // memory (CTL has a 42-day τ; 90 days fully primes it). Going further
-    // back is purely cosmetic for the long-history charts and would burn
-    // ~3-5x more Strava budget per new user.
+    // Floor: a fixed 2025-01-01 calendar date so every new user imports
+    // their full current-season history. This matches the manual "Synka
+    // allt" floor (_deepSyncFloorDate in app.js) so first-connect and a
+    // later manual deep sync agree. The chunked cursor + 8-way detail
+    // concurrency keep us inside Strava's 100/15-min budget. Revisit
+    // annually when the season rolls over.
     const { data: prior } = await db
       .from("strava_connections")
       .select("id, last_sync_at, deep_sync_floor")
@@ -107,8 +109,7 @@ serve(async (req) => {
       .maybeSingle();
 
     const isFirstConnect = !prior || (!prior.last_sync_at && !prior.deep_sync_floor);
-    const nowSec = Math.floor(Date.now() / 1000);
-    const ninetyDaysAgo = nowSec - 90 * 24 * 3600;
+    const firstConnectFloorTs = Math.floor(Date.UTC(2025, 0, 1) / 1000); // 2025-01-01
 
     const upsertRow: Record<string, unknown> = {
       profile_id: profileId,
@@ -118,7 +119,7 @@ serve(async (req) => {
       expires_at,
     };
     if (isFirstConnect) {
-      upsertRow.deep_sync_floor = ninetyDaysAgo;
+      upsertRow.deep_sync_floor = firstConnectFloorTs;
       upsertRow.deep_sync_anchor = null;
     }
 

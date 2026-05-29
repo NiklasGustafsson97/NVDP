@@ -10196,21 +10196,20 @@ function handleStravaRedirect() {
       // because subsequent imports go through the webhook, so this is the
       // user's only chance to seed historical data without admin help.
       //
-      // Window: 90 days. This matches the deep_sync_floor pre-seed in
-      // strava-auth and is enough to prime the PMC fitness/fatigue model
-      // (CTL τ = 42 days) without spending 3-5x the Strava budget on
-      // mostly-cosmetic older history.
-      const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 3600 * 1000)
-        .toISOString().slice(0, 10);
+      // Floor: fixed 2025-01-01 via _deepSyncFloorDate(), the same floor
+      // the manual "Synka allt" uses and the same one strava-auth pre-
+      // seeds into deep_sync_floor. Imports the user's full current-season
+      // history, not just the last 90 days.
+      const sinceDate = _deepSyncFloorDate();
       setTimeout(async () => {
         await showAlertModal(
           'Strava kopplad!',
-          'Importerar din träningshistorik från Strava (de senaste ~3 månaderna). Det tar någon minut, du kan fortsätta använda appen under tiden.'
+          'Importerar din träningshistorik från Strava sedan 1 jan 2025. Det tar några minuter, du kan fortsätta använda appen under tiden.'
         );
         try {
           await syncStravaAll({
             skipConfirm: true,
-            sinceDate: ninetyDaysAgo,
+            sinceDate,
             doneTitle: 'Historik importerad',
           });
         } catch (e) {
