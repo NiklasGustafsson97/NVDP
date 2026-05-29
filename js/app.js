@@ -1424,24 +1424,32 @@ function _weekAxisLabel(visibleWeeks, i, isDeload) {
   return showYear ? [base, String(year)] : base;
 }
 
-/** Touch ergonomics: by default Chart.js keeps a tooltip pinned after a tap
- *  on mobile, which clutters small screens. This makes the tooltip behave
- *  like a press-and-hold readout — it shows while the finger is down and
- *  clears on release. Desktop (mouse) is unaffected. Bound once per canvas;
- *  the handler resolves the current chart via Chart.getChart so it survives
- *  the destroy/recreate cycle these charts go through on every re-render. */
-function _enableHoldTooltip(canvas) {
-  if (!canvas || canvas._holdTooltipBound) return;
-  canvas._holdTooltipBound = true;
-  const hide = () => {
-    const chart = (typeof Chart !== 'undefined' && Chart.getChart) ? Chart.getChart(canvas) : null;
-    if (!chart || !chart.tooltip) return;
-    chart.setActiveElements([]);
-    chart.tooltip.setActiveElements([], { x: 0, y: 0 });
-    chart.update('none');
+/** Touch ergonomics: by default Chart.js keeps a tooltip pinned forever after
+ *  a tap on mobile, and a long-press tries to text-select the canvas. Instead
+ *  we let a tap show the tooltip, then auto-dismiss it after 2 s — tap again
+ *  to see it for another 2 s. Long-press selection is suppressed via CSS.
+ *  Desktop (mouse) is unaffected. Bound once per canvas; the handler resolves
+ *  the current chart via Chart.getChart so it survives the destroy/recreate
+ *  cycle these charts go through on every re-render. */
+function _enableTapTooltip(canvas) {
+  if (!canvas || canvas._tapTooltipBound) return;
+  canvas._tapTooltipBound = true;
+  canvas.style.userSelect = 'none';
+  canvas.style.webkitUserSelect = 'none';
+  canvas.style.webkitTouchCallout = 'none';
+  let timer = null;
+  const scheduleHide = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      const chart = (typeof Chart !== 'undefined' && Chart.getChart) ? Chart.getChart(canvas) : null;
+      if (!chart || !chart.tooltip) return;
+      chart.setActiveElements([]);
+      chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+      chart.update('none');
+    }, 2000);
   };
-  canvas.addEventListener('touchend', hide, { passive: true });
-  canvas.addEventListener('touchcancel', hide, { passive: true });
+  canvas.addEventListener('touchstart', scheduleHide, { passive: true });
+  canvas.addEventListener('touchmove', scheduleHide, { passive: true });
 }
 
 /** Return the N-week window ending at anchorIdx (clamped). If anchorIdx is
@@ -7650,7 +7658,7 @@ function renderPmcChart(workouts) {
     },
   });
 
-  _enableHoldTooltip(ctlCanvas);
+  _enableTapTooltip(ctlCanvas);
   _renderChartWeekNav('chart-pmc-ctl', allWeekKeys.length, win, () => renderPmcChart(workouts));
 
   // Insight compares the LAST visible week against the FIRST visible week
@@ -8203,7 +8211,7 @@ function renderEasyHrChart(workouts) {
   const earlierEf = efDataAll.slice(-8, -4);
   const avgRecent = recentEf.reduce((a, b) => a + b, 0) / recentEf.length;
 
-  _enableHoldTooltip(canvas);
+  _enableTapTooltip(canvas);
   _renderChartWeekNav('chart-easy-hr', allWeekKeys.length, win, () => renderEasyHrChart(workouts));
 
   if (earlierEf.length === 0) {
@@ -8678,7 +8686,7 @@ function _drawVo2maxChart(canvas, points, withTrend, xMinMs, xMaxMs) {
       },
     },
   });
-  _enableHoldTooltip(canvas);
+  _enableTapTooltip(canvas);
 }
 
 // ═══════════════════════
