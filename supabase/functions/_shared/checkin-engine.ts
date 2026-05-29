@@ -62,7 +62,8 @@ export interface ProposedChange {
     | "replace_with_crosstrain"
     | "add_rest"
     | "move_session"
-    | "edit_session";
+    | "edit_session"
+    | "add_session";
   params: Record<string, unknown>;
   reason_sv: string;
   current_workout: PlanWorkout | null;
@@ -747,6 +748,23 @@ export async function applyChanges(
   const primary = (dow: number): PlanWorkout | undefined => byDay.get(dow)?.[0];
 
   for (const c of accepted) {
+    if (c.action === "add_session" && c.proposed_workout?.plan_week_id && c.proposed_workout.workout_date) {
+      const w = c.proposed_workout;
+      await db.from("plan_workouts").insert({
+        plan_week_id: w.plan_week_id,
+        workout_date: w.workout_date,
+        day_of_week: w.day_of_week,
+        activity_type: w.activity_type || "Annat",
+        label: w.label ?? null,
+        description: w.description ?? null,
+        target_duration_minutes: w.target_duration_minutes ?? null,
+        target_distance_km: w.target_distance_km ?? null,
+        intensity_zone: w.intensity_zone ?? null,
+        is_rest: w.is_rest ?? false,
+        sort_order: w.sort_order ?? 0,
+      });
+      continue;
+    }
     if (c.action === "move_session") {
       const from = primary(c.from_day as number);
       const to = primary(c.to_day as number);

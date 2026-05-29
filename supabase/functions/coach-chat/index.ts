@@ -917,7 +917,7 @@ const ALLOWED_TOOLS = new Set([
   "move_plan_workout",
 ]);
 
-type ActivePlanScope = { planId: string | null; weekIds: string[] };
+type ActivePlanScope = { planId: string | null; planStartDate: string | null; planEndDate: string | null; weekIds: string[] };
 
 function parseISODateArg(raw: string | null): string | null {
   if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
@@ -1031,19 +1031,23 @@ function guardWorkoutEditWithRelativeDate(call: ToolCall, userMessage: string, t
 
 async function getActivePlanScope(db: SupabaseClient, profileId: string): Promise<ActivePlanScope> {
   const { data: plan } = await db.from("training_plans")
-    .select("id")
+    .select("id, start_date, end_date")
     .eq("profile_id", profileId)
     .eq("status", "active")
     .order("start_date", { ascending: false })
     .limit(1)
     .maybeSingle();
-  const planId = plan?.id ?? null;
-  if (!planId) return { planId: null, weekIds: [] };
+  if (!plan?.id) return { planId: null, planStartDate: null, planEndDate: null, weekIds: [] };
+  const planId = plan.id as string;
+  const planStartDate = plan.start_date as string;
+  const planEndDate = plan.end_date as string;
   const { data: weeks } = await db.from("plan_weeks")
     .select("id")
     .eq("plan_id", planId);
   return {
     planId,
+    planStartDate,
+    planEndDate,
     weekIds: (weeks || []).map((w: { id: string }) => w.id),
   };
 }
@@ -1061,6 +1065,38 @@ function planWorkoutCandidate(row: PlanWorkout): Record<string, unknown> {
     target_distance_km: row.target_distance_km,
     is_rest: row.is_rest,
   };
+}
+
+async function resolveActivePlanWeekForDate(
+  db: SupabaseClient,
+  profileId: string,
+  workoutDate: string,
+): Promise<{ planWeekId: string; dayOfWeek: number; sortOrder: number } | null> {
+  const scope = await getActivePlanScope(db, profileId);
+  if (!scope.planId || !scope.planStartDate || !scope.planEndDate) return null;
+  if (workoutDate < scope.planStartDate || workoutDate > scope.planEndDate) return null;
+
+  const date = new Date(workoutDate + "T00:00:00Z");
+  const start = new Date(scope.planStartDate + "T00:00:00Z");
+  const weekNumber = Math.floor((date.getTime() - start.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+  if (!Number.isFinite(weekNumber) || weekNumber < 1) return null;
+
+  const { data: week } = await db.from("plan_weeks")
+    .select("id")
+    .eq("plan_id", scope.planId)
+    .eq("week_number", weekNumber)
+    .maybeSingle();
+  if (!week?.id) return null;
+
+  const { data: sameDay } = await db.from("plan_workouts")
+    .select("sort_order")
+    .eq("plan_week_id", week.id)
+    .eq("workout_date", workoutDate)
+    .order("sort_order", { ascending: false })
+    .limit(1);
+  const nextSortOrder = ((sameDay?.[0]?.sort_order ?? -1) as number) + 1;
+  const dayOfWeek = (date.getUTCDay() + 6) % 7;
+  return { planWeekId: week.id, dayOfWeek, sortOrder: Math.max(0, nextSortOrder) };
 }
 
 async function findActivePlanWorkoutsForDateLike(
@@ -1435,6 +1471,76 @@ async function toolProposeWorkoutEdit(
     return logProposeWorkoutEditFailure(profileId, args, "Need plan_workout_id or workout_date");
   }
 
+  const proposeNewSession = async (resolvedWorkoutDate: string): Promise<ToolResult | null> => {
+    const activityType = typeof changesIn.activity_type === "string" && changesIn.activity_type.trim()
+      ? changesIn.activity_type.trim()
+      : null;
+    if (!activityType) return null;
+    const slot = await resolveActivePlanWeekForDate(db, profileId, resolvedWorkoutDate);
+    if (!slot) return null;
+
+    const strengthLike = /gym|styrk|core|yoga|mobil|stabil|rörlighet|stretch|pilates/i.test(activityType);
+    const durationRaw = Number(changesIn.target_duration_minutes);
+    const duration = Number.isFinite(durationRaw) && durationRaw > 0
+      ? Math.min(300, Math.round(durationRaw))
+      : strengthLike
+      ? 45
+      : null;
+    const proposed: Partial<PlanWorkout> = {
+      plan_week_id: slot.planWeekId,
+      workout_date: resolvedWorkoutDate,
+      day_of_week: slot.dayOfWeek,
+      sort_order: slot.sortOrder,
+      activity_type: activityType,
+      label: typeof changesIn.label === "string" && changesIn.label.trim()
+        ? changesIn.label.trim()
+        : strengthLike
+        ? "Gympass"
+        : activityType,
+      description: typeof changesIn.description === "string" ? changesIn.description : null,
+      target_duration_minutes: duration,
+      target_distance_km: strengthLike ? null : (changesIn.target_distance_km as number | null | undefined) ?? null,
+      intensity_zone: strengthLike ? null : (changesIn.intensity_zone as string | null | undefined) ?? null,
+      is_rest: false,
+    };
+    const change: ProposedChange = {
+      id: crypto.randomUUID(),
+      day_of_week: slot.dayOfWeek,
+      action: "add_session",
+      params: {},
+      reason_sv: reasonSv,
+      current_workout: null,
+      proposed_workout: proposed,
+    };
+    const diffId = await _stashDiff(db, profileId, [change], []);
+    return {
+      ok: true,
+      diff_id: diffId,
+      data: {
+        diff_id: diffId,
+        changes: [{
+          id: change.id,
+          workout_date: resolvedWorkoutDate,
+          sort_order: slot.sortOrder,
+          day_of_week: slot.dayOfWeek,
+          action: change.action,
+          reason_sv: change.reason_sv,
+          current: null,
+          proposed: {
+            is_rest: proposed.is_rest,
+            label: proposed.label,
+            activity_type: proposed.activity_type,
+            intensity_zone: proposed.intensity_zone,
+            target_duration_minutes: proposed.target_duration_minutes,
+            target_distance_km: proposed.target_distance_km,
+            description: proposed.description,
+          },
+        }],
+        coach_note: reasonSv,
+      },
+    };
+  };
+
   // Resolve target row. If both id and date are supplied, the date is treated
   // as the user's intent and the id must belong to that same planned day.
   let row: PlanWorkout | null = null;
@@ -1490,6 +1596,10 @@ async function toolProposeWorkoutEdit(
         row = resolvedRows.find((r) => (r.sort_order ?? 0) === 0) || resolvedRows[0] || null;
       }
     }
+  }
+  if (!row && workoutDate && resolvedDate && resolvedRows.length === 0) {
+    const addResult = await proposeNewSession(resolvedDate);
+    if (addResult) return addResult;
   }
   if (!row) {
     return logProposeWorkoutEditFailure(profileId, args, "plan_workout not found");

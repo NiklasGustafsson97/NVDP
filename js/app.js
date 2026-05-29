@@ -15075,7 +15075,7 @@ function _coachRenderDiffCard(diff, decisionState) {
   const changes = Array.isArray(diff.changes) ? diff.changes : [];
   if (!changes.length) return '';
   const locked = decisionState === 'applied' || decisionState === 'declined';
-  const isSingleEdit = changes.length === 1 && changes[0].action === 'edit_session';
+  const isSingleEdit = changes.length === 1 && (changes[0].action === 'edit_session' || changes[0].action === 'add_session');
   const items = changes.map(c => {
     const cur = c.current || {};
     const prop = c.proposed || {};
@@ -15083,7 +15083,9 @@ function _coachRenderDiffCard(diff, decisionState) {
     const dayLabel = _coachDayLabel(c.day_of_week, isMove, c.from_day, c.to_day);
     if (isSingleEdit) {
       const dateLabel = _coachFormatPlanDate(c.workout_date, c.day_of_week);
-      const slotLabel = Number.isInteger(c.sort_order) && c.sort_order > 0 ? `Pass ${c.sort_order + 1}` : 'Planerat pass';
+      const slotLabel = c.action === 'add_session'
+        ? 'Nytt pass'
+        : Number.isInteger(c.sort_order) && c.sort_order > 0 ? `Pass ${c.sort_order + 1}` : 'Planerat pass';
       const curMeta = _coachWorkoutMeta(cur);
       const propMeta = _coachWorkoutMeta(prop);
       const curDesc = cur.description ? `<div class="cc-edit-desc">${escapeHTML(cur.description)}</div>` : '';
