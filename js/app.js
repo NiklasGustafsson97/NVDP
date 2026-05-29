@@ -14385,7 +14385,17 @@ function _coachRenderDiffCard(diff, decisionState) {
 
   let footer = '';
   if (decisionState === 'applied') {
-    footer = `<div class="coach-diff-status coach-diff-status--applied">Ändringarna är sparade i nästa vecka.</div>`;
+    // Single edits carry an exact workout_date (could be this week), so point
+    // the user at the precise day. Multi-change proposals always target next
+    // week's plan, so say so plainly — this is the #1 "I clicked save and saw
+    // no change" confusion (the change landed in a week they weren't viewing).
+    let appliedMsg;
+    if (isSingleEdit && changes[0]?.workout_date) {
+      appliedMsg = `Sparat — syns i Schema på ${escapeHTML(_coachFormatPlanDate(changes[0].workout_date, changes[0].day_of_week))}.`;
+    } else {
+      appliedMsg = 'Sparat — ändringarna ligger i nästa veckas schema.';
+    }
+    footer = `<div class="coach-diff-status coach-diff-status--applied">${appliedMsg}</div>`;
   } else if (decisionState === 'declined') {
     footer = `<div class="coach-diff-status coach-diff-status--declined">Ignorerat.</div>`;
   } else if (_coach.readOnly) {
@@ -14634,8 +14644,17 @@ async function applyCoachDiff(diffId) {
     if (data && !data.ok) {
       showToast('Kunde inte spara ändringar: ' + (data?.result?.error || 'okänt fel'));
     }
-    // Refresh upcoming week in the background so Ditt schema reflects updates.
-    if (data?.ok && typeof loadDashboard === 'function') { try { loadDashboard(); } catch (_) {} }
+    // Drop the in-memory plan caches so the next dashboard/schema render
+    // refetches plan_weeks + plan_workouts from the DB. Without this an
+    // applied change could keep showing the stale pre-edit workout.
+    if (data?.ok) {
+      _activePlan = null;
+      _activePlanWeeks = [];
+      _activePlanWorkouts = [];
+      _dashPlanWorkouts = [];
+      try { if (typeof loadDashboard === 'function') await loadDashboard(); } catch (_) {}
+      try { if (typeof loadSchema === 'function') await loadSchema(); } catch (_) {}
+    }
   } catch (e) {
     console.error('coach apply failed', e);
     showToast(e.status === 429 ? 'Bromsa — försök igen om en stund.' : 'Kunde inte spara ändringarna.');
