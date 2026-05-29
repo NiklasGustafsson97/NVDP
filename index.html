@@ -181,6 +181,12 @@
         </div>
       </div>
       <div id="avatar-picker" class="avatar-picker hidden">
+        <div class="avatar-photo-actions">
+          <input type="file" id="avatar-file" accept="image/*" hidden onchange="uploadAvatarPhoto(this.files && this.files[0]); this.value='';">
+          <button type="button" class="btn btn-sm btn-ghost" onclick="document.getElementById('avatar-file').click()">Ladda upp foto</button>
+          <button type="button" id="avatar-remove-btn" class="btn btn-sm btn-ghost hidden" onclick="removeAvatarPhoto()">Ta bort foto</button>
+        </div>
+        <div class="avatar-picker-label">Eller välj en emoji</div>
         <div class="avatar-picker-grid" id="avatar-picker-grid"></div>
       </div>
       <div id="name-edit-row" class="name-edit-row hidden">
